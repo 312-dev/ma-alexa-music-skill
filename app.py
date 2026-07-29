@@ -13,6 +13,7 @@ budget for Initiate.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -20,13 +21,16 @@ import logging
 import os
 import pathlib
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from html import escape
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
+import oauth
 import subsonic
 
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
@@ -472,6 +476,97 @@ def diag():
         )
     except Exception as exc:
         return jsonify({"subsonic": "error", "detail": str(exc)}), 502
+
+
+# --------------------------------------------------------------------------
+# OAuth 2.0 account linking (required before Alexa will use a music skill)
+# --------------------------------------------------------------------------
+
+_AUTHORIZE_FORM = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Link Music Assistant</title>
+<style>body{{font-family:system-ui;max-width:22rem;margin:3rem auto;padding:0 1rem}}
+input,button{{width:100%;padding:.7rem;font-size:1rem;margin-top:.6rem;box-sizing:border-box}}
+</style>
+<h2>Link Music Assistant</h2>
+<p>Enter the linking passphrase to connect Alexa to your library.</p>
+<form method=post>
+  <input type=hidden name=redirect_uri value="{redirect_uri}">
+  <input type=hidden name=state value="{state}">
+  <input type=hidden name=client_id value="{client_id}">
+  <input type=password name=passphrase placeholder="Linking passphrase" autofocus required>
+  <button type=submit>Link account</button>
+</form>"""
+
+
+@app.get("/oauth/authorize")
+def oauth_authorize_form():
+    client_id = request.args.get("client_id", "")
+    redirect_uri = request.args.get("redirect_uri", "")
+    state = request.args.get("state", "")
+
+    if client_id != oauth.CLIENT_ID:
+        return jsonify({"error": "unauthorized_client"}), 400
+    if not oauth.redirect_allowed(redirect_uri):
+        return jsonify({"error": "invalid_redirect_uri", "got": redirect_uri}), 400
+
+    html = _AUTHORIZE_FORM.format(
+        redirect_uri=escape(redirect_uri),
+        state=escape(state),
+        client_id=escape(client_id),
+    )
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.post("/oauth/authorize")
+def oauth_authorize_submit():
+    redirect_uri = request.form.get("redirect_uri", "")
+    state = request.form.get("state", "")
+    passphrase = request.form.get("passphrase", "")
+
+    if not oauth.redirect_allowed(redirect_uri):
+        return jsonify({"error": "invalid_redirect_uri"}), 400
+    if not oauth.LINK_SECRET or not hmac.compare_digest(passphrase, oauth.LINK_SECRET):
+        logger.warning("account link rejected: bad passphrase")
+        return "Incorrect passphrase.", 403, {"Content-Type": "text/plain"}
+
+    code = oauth.mint("code", oauth.CODE_TTL, sub="grayson")
+    sep = "&" if "?" in redirect_uri else "?"
+    target = f"{redirect_uri}{sep}code={code}&state={urllib.parse.quote(state)}"
+    logger.info("account linked, redirecting to %s", redirect_uri)
+    return Response(status=302, headers={"Location": target})
+
+
+@app.post("/oauth/token")
+def oauth_token():
+    form = request.form
+    client_id = form.get("client_id") or ""
+    client_secret = form.get("client_secret") or ""
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode()
+            client_id, _, client_secret = decoded.partition(":")
+        except Exception:
+            pass
+
+    if client_id != oauth.CLIENT_ID or not hmac.compare_digest(
+        client_secret, oauth.CLIENT_SECRET
+    ):
+        return jsonify({"error": "invalid_client"}), 401
+
+    grant = form.get("grant_type")
+    if grant == "authorization_code":
+        if not oauth.read(form.get("code", ""), "code"):
+            return jsonify({"error": "invalid_grant"}), 400
+    elif grant == "refresh_token":
+        if not oauth.read(form.get("refresh_token", ""), "refresh"):
+            return jsonify({"error": "invalid_grant"}), 400
+    else:
+        return jsonify({"error": "unsupported_grant_type"}), 400
+
+    logger.info("issued tokens via %s", grant)
+    return jsonify(oauth.issue_tokens())
 
 
 @app.get("/icons/<path:name>")

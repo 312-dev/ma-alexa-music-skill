@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py subsonic.py .
+COPY app.py subsonic.py oauth.py .
 
 ENV PORT=5056 \
     CAPTURE_DIR=/data/captures
