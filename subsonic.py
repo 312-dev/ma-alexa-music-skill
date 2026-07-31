@@ -20,7 +20,7 @@ import urllib.request
 import json
 from typing import Any
 
-BASE = os.environ.get("SUBSONIC_URL", "http://100.93.15.8:4533").rstrip("/")
+BASE = os.environ.get("SUBSONIC_URL", "").rstrip("/")
 USER = os.environ.get("SUBSONIC_USER", "")
 PASSWORD = os.environ.get("SUBSONIC_PASSWORD", "")
 CLIENT = "ma-alexa-skill"
@@ -79,8 +79,52 @@ def artist_albums(artist_id: str) -> list[dict]:
     return call("getArtist.view", id=artist_id).get("artist", {}).get("album", [])
 
 
-def song(song_id: str) -> dict:
-    return call("getSong.view", id=song_id).get("song", {})
+def _first_song(inner: dict) -> dict | None:
+    """Pull one song record out of whatever shape the server used.
+
+    getSong is specified as returning a single `<song>` child, and Navidrome
+    does exactly that. Other Subsonic implementations do not agree on how that
+    maps to JSON: some wrap it in a list, some nest it under a container the
+    way the list endpoints do. Treating only `{"song": {...}}` as valid meant a
+    server answering in any of the other shapes produced an empty dict, and the
+    caller then read a title off it and got nothing, so the track showed up in
+    the Alexa app as its own raw id.
+    """
+    candidate: Any = inner.get("song")
+    if candidate is None:
+        for container in ("songs", "searchResult3", "randomSongs"):
+            nested = inner.get(container)
+            if isinstance(nested, dict):
+                candidate = nested.get("song")
+                break
+    if isinstance(candidate, list):
+        candidate = candidate[0] if candidate else None
+    if isinstance(candidate, dict) and candidate.get("id"):
+        return candidate
+    return None
+
+
+def song(song_id: str) -> dict | None:
+    """One song by id, or None.
+
+    Never raises. This sits behind both the queue builder and the display-name
+    lookup, and neither of them has anything useful to do with an exception:
+    the queue drops the track and the label falls back to the id. A lookup
+    failure must not be able to take a directive down with it.
+    """
+    try:
+        return _first_song(call("getSong.view", id=song_id))
+    except Exception:
+        # Both spellings are in the wild: getSong.view is the Subsonic form and
+        # the bare name is the OpenSubsonic one. A server that 404s the first
+        # raises out of call() rather than answering, so the other is worth one
+        # retry. Only ever reached after a failure, so it costs nothing when
+        # things work.
+        pass
+    try:
+        return _first_song(call("getSong", id=song_id))
+    except Exception:
+        return None
 
 
 def random_songs(size: int = 50, genre: str | None = None) -> list[dict]:

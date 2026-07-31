@@ -12,6 +12,11 @@ offering songs that no longer exist. This tracks a content hash per entity and
 only bumps the timestamp for genuine changes, emitting explicit
 `deleted: true` tombstones for anything that disappeared.
 
+A run that uploaded anything then cycles skill enablement, because uploading a
+catalog silently unbinds the skill. See `cycle_enablement` for what that looks
+like from the outside; the short version is that nothing reports it and voice
+playback quietly becomes someone else's.
+
 Run it on a schedule. Amazon suggests staying under fifty uploads per catalog
 per day, so anything daily or slower is comfortable.
 """
@@ -43,6 +48,8 @@ CATALOGS = {
     "playlists": os.environ.get("CATALOG_PLAYLISTS", ""),
     "genres": os.environ.get("CATALOG_GENRES", ""),
 }
+
+ASK_TIMEOUT = 120
 
 TYPES = {
     "artists": "AMAZON.MusicGroup",
@@ -214,12 +221,100 @@ def upload(kind: str, catalog_id: str, entities: list[dict]) -> bool:
         ["ask", "smapi", "upload-catalog", "-c", catalog_id, "-f", str(path)],
         capture_output=True, text=True, timeout=600,
     )
-    ok = result.returncode == 0 and "successfully" in (result.stdout + result.stderr).lower()
-    log(f"{kind}: {'uploaded' if ok else 'FAILED ' + result.stderr.strip()[:200]}")
-    return ok
+
+    # The exit code is the verdict on its own. An earlier version ANDed it with
+    # a search for "successfully" in the output, which meant any reword of the
+    # CLI's success message would have reported every upload as a failure,
+    # stalled the state file and re-uploaded the whole catalog on every run.
+    if result.returncode != 0:
+        log(f"{kind}: FAILED rc={result.returncode} {result.stderr.strip()[:200]}")
+        return False
+
+    # The string check survives as a second opinion rather than a verdict: it
+    # is the only success wording anyone here has actually observed, so its
+    # absence is worth saying out loud without being worth failing on.
+    if "successfully" not in (result.stdout + result.stderr).lower():
+        log(f"{kind}: uploaded (rc=0) but the output did not say 'successfully'; "
+            "check the catalog status in the developer console")
+    else:
+        log(f"{kind}: uploaded")
+    return True
 
 
-def main() -> int:
+# --- skill enablement -------------------------------------------------------
+
+
+def _ask(verb: str, skill_id: str, stage: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["ask", "smapi", verb, "--skill-id", skill_id, "--stage", stage],
+        capture_output=True, text=True, timeout=ASK_TIMEOUT,
+    )
+
+
+def cycle_enablement(*, no_cycle: bool = False) -> bool:
+    """Turn the skill off and back on again after a catalog upload.
+
+    This is not superstition and it is not a leftover. Uploading a catalog
+    unbinds the skill from the provider slot. Nothing anywhere reports it:
+    ER_INGESTION says SUCCEEDED, the service keeps answering every directive
+    correctly, and the only symptom is Alexa quietly playing the same request
+    from the default provider and announcing "Here's ... from Spotify". It cost
+    several hours to find once. Delete-then-set on the enablement rebinds it.
+
+    Called only when something was actually uploaded, because the cycle is
+    itself a short window with no skill enabled, and paying for that after a
+    run that changed nothing is a pure loss.
+
+    Returns False only when re-enabling failed, which is the state that leaves
+    the skill off.
+    """
+    if no_cycle:
+        log("enablement: skipping the cycle by request (--no-cycle)")
+        return True
+
+    skill_id = (os.environ.get("SKILL_ID") or "").strip()
+    stage = (os.environ.get("SKILL_STAGE") or "").strip() or "development"
+
+    if not skill_id:
+        log("!! SKILL_ID is not set, so skill enablement was NOT cycled.")
+        log("!! Voice playback is probably broken as of right now: Alexa will")
+        log("!! fall back to the default music provider and say so out loud,")
+        log("!! while this service keeps answering every request correctly and")
+        log("!! the catalog reports SUCCEEDED. Nothing will alert you.")
+        log("!! Run these two by hand, then say something to a device:")
+        log("!!   ask smapi delete-skill-enablement --skill-id <your-skill-id> "
+            "--stage development")
+        log("!!   ask smapi set-skill-enablement --skill-id <your-skill-id> "
+            "--stage development")
+        # Not a failure of the sync itself. The catalog did upload.
+        return True
+
+    log(f"enablement: cycling {skill_id} ({stage})")
+
+    deleted = _ask("delete-skill-enablement", skill_id, stage)
+    if deleted.returncode != 0:
+        # Deleting an enablement that does not exist is the normal state after
+        # a failed earlier run, and is not something to fail on: the set that
+        # follows is what actually matters.
+        log(f"enablement: delete returned {deleted.returncode}, continuing "
+            f"(harmless if it was not enabled): {deleted.stderr.strip()[:200]}")
+
+    enabled = _ask("set-skill-enablement", skill_id, stage)
+    if enabled.returncode != 0:
+        log(f"!! enablement: FAILED to re-enable rc={enabled.returncode}: "
+            f"{enabled.stderr.strip()[:200]}")
+        log("!! The skill is now disabled. Voice playback will fall back to the")
+        log("!! default provider until 'ask smapi set-skill-enablement' succeeds.")
+        return False
+
+    log("enablement: cycled")
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    no_cycle = "--no-cycle" in argv or os.environ.get("CATALOG_NO_CYCLE") == "1"
+
     missing = [k for k, v in CATALOGS.items() if not v]
     if missing:
         log(f"no catalog id configured for: {', '.join(missing)}")
@@ -227,7 +322,7 @@ def main() -> int:
 
     state = load_state()
     collected = collect()
-    failures = 0
+    failures = uploaded = 0
 
     for kind, entities in collected.items():
         if not entities:
@@ -236,10 +331,18 @@ def main() -> int:
         final, current = apply_timestamps(kind, entities, state)
         if upload(kind, CATALOGS[kind], final):
             state[kind] = current
+            uploaded += 1
         else:
             failures += 1
 
     save_state(state)
+
+    if uploaded:
+        if not cycle_enablement(no_cycle=no_cycle):
+            failures += 1
+    else:
+        log("nothing uploaded, leaving skill enablement alone")
+
     log("done" if not failures else f"done with {failures} failure(s)")
     return 1 if failures else 0
 

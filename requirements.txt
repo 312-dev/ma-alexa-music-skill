@@ -1,2 +1,8 @@
 flask==3.1.0
 gunicorn==23.0.0
+# Signs the setup session cookie. Flask already pulls it in, but setup_ui
+# imports it directly, so it is declared rather than relied on.
+itsdangerous==2.2.0
+# Request signature verification (signature.py). Optional at runtime: the
+# module degrades to an "unavailable" reason if it is not importable.
+cryptography==46.0.3
