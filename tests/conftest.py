@@ -59,6 +59,8 @@ SONGS = {
 # knows about but does not hold.
 ARTIST_NAMES = {"a1": "Gregory Alan Isakov", "a2": "Blind Pilot", "a3": "Iron and Wine"}
 ARTIST_ALBUMS = {"a1": ["al1", "al2"], "a2": ["al3"], "a3": ["al4"]}
+ALBUM_NAMES = {"al1": "Appaloosa Bones", "al2": "The Weatherman",
+               "al3": "3 Rounds", "al4": "Our Endless Numbered Days"}
 SIMILAR_ARTISTS = {
     "a1": [
         {"id": "a2", "name": "Blind Pilot"},
@@ -126,8 +128,8 @@ def fake_subsonic(monkeypatch):
             artist_id = kw.get("id", "a1")
             return {"artist": {
                 "name": ARTIST_NAMES.get(artist_id, "Gregory Alan Isakov"),
-                "album": [{"id": a} for a in
-                          ARTIST_ALBUMS.get(artist_id, ["al1", "al2"])],
+                "album": [{"id": a, "name": ALBUM_NAMES.get(a, "Unknown")}
+                          for a in ARTIST_ALBUMS.get(artist_id, ["al1", "al2"])],
             }}
         if view == "getArtists.view":
             return {"artists": {"index": [

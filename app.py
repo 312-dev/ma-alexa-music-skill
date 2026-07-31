@@ -35,17 +35,28 @@ from html import escape
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 import oauth
+import queue_api
 import queuestate
+import setup_ui
+import signature
 import subsonic
 
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-ICON_DIR = pathlib.Path(os.environ.get("ICON_DIR", "/data/icons"))
+ICON_DIR = pathlib.Path(os.environ.get("ICON_DIR", "/app/icons"))
 
 SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
-PUBLIC_BASE = os.environ.get(
-    "PUBLIC_BASE", "https://alexa-music.graysons.network"
-).rstrip("/")
+
+# The public HTTPS origin Amazon reaches this service on. No default: every
+# stream and art URL Amazon fetches is built from it, so a wrong value does not
+# fail here, it fails later as audio that will not play, with nothing in any log
+# to say why. Better to refuse to start.
+PUBLIC_BASE = os.environ.get("PUBLIC_BASE", "").rstrip("/")
+if not PUBLIC_BASE:
+    raise SystemExit(
+        "PUBLIC_BASE is not set. It must be the https:// origin Amazon can "
+        "reach this service on, for example https://music.example.com"
+    )
 
 # How long a stream URL stays valid. Amazon defaults to ~60s when validUntil is
 # omitted, which is far too short; we set it explicitly and generously.
@@ -55,6 +66,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("ma-music-skill")
 
 app = Flask(__name__)
+
+# Queue handoff for Music Assistant, which composes queues this service has no
+# other way to name. Registered here rather than defined inline so the wire
+# contract lives next to the provider that speaks it.
+app.register_blueprint(queue_api.bp)
+
+# Setup and status at /setup. It refuses to serve at all when ADMIN_TOKEN is
+# unset rather than serving open, which is the right default for something that
+# can create skills and read the library.
+app.register_blueprint(setup_ui.bp)
 
 # contentId -> [song, ...]. Whole records, not ids: re-fetching each song was
 # what pushed Initiate past 3s. Best-effort; a miss re-derives from Subsonic.
@@ -146,7 +167,16 @@ def artist_tracks(artist_id: str) -> list[dict]:
         return []
     with ThreadPoolExecutor(max_workers=min(8, len(albums))) as pool:
         results = list(pool.map(lambda alb: subsonic.album_tracks(alb["id"]), albums))
-    return [track for album in results for track in album]
+    # Stamp the album name from the album we asked for. An untagged file comes
+    # back with no album field of its own, and an Item without metadata.album
+    # is not shown as blank in the Alexa app: Alexa fills the slot with the
+    # provider name instead, so the card reads "Ampere" where the album should
+    # be. Seen live on two copies of Saint Valentine, one tagged and one not.
+    return [
+        track if track.get("album") else {**track, "album": album.get("name", "")}
+        for album, tracks in zip(albums, results)
+        for track in tracks
+    ]
 
 
 def similar_artist_ids(seed_id: str) -> list[str]:
@@ -249,6 +279,13 @@ def resolve_tracks(content_id: str) -> list[dict]:
             songs = subsonic.songs_by_genre(ident)
         elif kind == "star":
             songs = subsonic.starred_songs()
+        elif kind == "ext":
+            # A queue Music Assistant composed and handed over, which has no
+            # Subsonic identity of its own. An unknown or expired token is an
+            # empty answer that must not be cached, or the queue would stay
+            # empty for the life of the process after one late lookup.
+            songs = queue_api.resolve(ident)
+            cacheable = bool(songs)
         else:
             songs = subsonic.random_songs(50)
     except Exception:
@@ -596,7 +633,12 @@ def _lookup_content(prefix: str, native: str) -> tuple[str | None, str | None]:
             info = subsonic.call("getAlbum.view", id=native).get("album", {})
             return info.get("name"), info.get("coverArt")
         if prefix == "tr":
+            # song() answers None for a track it cannot find rather than
+            # raising, so a miss here is ordinary and must not be handled as a
+            # traceback per lookup.
             song = subsonic.song(native)
+            if not song:
+                return None, None
             return song.get("title"), song.get("coverArt")
         if prefix == "pl":
             for playlist in subsonic.playlists():
@@ -672,6 +714,36 @@ def station_content(artist_id: str, spoken: str | None) -> Response:
 def handle_get_playable_content(payload: dict) -> Response:
     attrs = (payload.get("selectionCriteria") or {}).get("attributes") or []
     station, attrs = station_request(attrs)
+
+    # Checked ahead of the catalog, because a real playlist that happens to
+    # share the handoff phrase would otherwise win and Music Assistant would
+    # silently play something else. Resolved to the concrete token of the
+    # newest published queue rather than to a moving alias: Alexa echoes this
+    # contentId back for the life of the queue, so an alias would swap the
+    # music underneath a session that was already playing.
+    spoken = " ".join(
+        str(a.get("value")) for a in attrs if a.get("value")
+    ).strip()
+    if queue_api.is_handoff_phrase(spoken):
+        content_id = queue_api.handoff_content_id()
+        if not content_id:
+            return error("Alexa.Media", "CONTENT_NOT_FOUND",
+                         "nothing has been handed over yet")
+        logger.info("handoff phrase resolved to %s", content_id)
+        return envelope(
+            "Alexa.Media.Search",
+            "GetPlayableContent.Response",
+            {
+                "content": {
+                    "id": content_id,
+                    "metadata": {
+                        "type": "PLAYLIST",
+                        "name": name_prop(queue_api.handoff_name()),
+                        "art": art_block(None),
+                    },
+                }
+            },
+        )
 
     # When Alexa resolves speech against our uploaded catalog it returns the
     # catalog's own entity id (e.g. "artist.<navidrome id>") rather than free
@@ -916,14 +988,19 @@ def _locate(payload: dict, key: str = "currentItemReference") -> tuple[str, int,
 
 def handle_get_next_item(payload: dict) -> Response:
     content_id, index, queue_id = _locate(payload)
-    total = len(queue_order(content_id, queue_id))
     state = queuestate.get(queue_id)
 
     nxt_index = index + 1
-    if nxt_index >= total and state.get("loop") and total:
-        # Loop on: the last track is followed by the first, and the queue never
-        # reports finished.
-        nxt_index = 0
+    if state.get("loop"):
+        # Only loop needs to know where the end is, and item_at resolves the
+        # queue again anyway. Asking for it unconditionally meant every single
+        # GetNextItem resolved the queue twice, which on a cold cache is two
+        # discography walks against Amazon's 400ms p99 budget for a track
+        # transition. Alexa gives up quietly when that budget is missed and the
+        # queue simply stops.
+        total = len(queue_order(content_id, queue_id))
+        if total and nxt_index >= total:
+            nxt_index = 0
 
     nxt = item_at(content_id, nxt_index, queue_id)
     if nxt is None:
@@ -1215,6 +1292,15 @@ ROUTES = {
 @app.post("/music")
 @app.post("/")
 def music():
+    # Off by default (VERIFY_REQUESTS=warn), because switching it on breaks a
+    # working deployment silently: a rejected directive is indistinguishable
+    # from a skill that was never called, and a music skill cannot be simulated
+    # to check first. Watch a day of real traffic pass in the log, then set on.
+    allow, why = signature.check_request()
+    if not allow:
+        logger.warning("rejected unverified request: %s", why)
+        return error("Alexa", "INVALID_DIRECTIVE", f"unverified request: {why}", "3.0"), 403
+
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return error("Alexa", "INVALID_DIRECTIVE", "expected JSON body", "3.0"), 400
@@ -1371,7 +1457,7 @@ def oauth_authorize_submit():
         logger.warning("account link rejected: bad passphrase")
         return "Incorrect passphrase.", 403, {"Content-Type": "text/plain"}
 
-    code = oauth.mint("code", oauth.CODE_TTL, sub="grayson")
+    code = oauth.mint("code", oauth.CODE_TTL, sub="owner")
     sep = "&" if "?" in redirect_uri else "?"
     target = f"{redirect_uri}{sep}code={code}&state={urllib.parse.quote(state)}"
     logger.info("account linked, redirecting to %s", redirect_uri)

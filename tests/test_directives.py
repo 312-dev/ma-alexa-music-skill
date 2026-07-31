@@ -8,6 +8,8 @@ playing the whole library at random.
 
 from __future__ import annotations
 
+import pytest
+
 from conftest import directive
 
 
@@ -386,3 +388,75 @@ def test_top_songs_not_used_for_artists(client, app, monkeypatch):
     app._QUEUE_CACHE.clear()
     post(client, directive("Alexa.Media.Playback", "Initiate", {"contentId": "ar:a1"}))
     assert called == []
+
+
+# --- Music Assistant handoff ------------------------------------------------
+#
+# The wiring between queue_api and the directive router: an ext: contentId has
+# to resolve like any other, and the handoff phrase has to beat the catalog to
+# the answer, because a real playlist of the same name would otherwise win and
+# Music Assistant would play something else without saying so.
+
+import queue_api  # noqa: E402
+
+
+@pytest.fixture
+def published(tmp_path, monkeypatch):
+    """Publish queues into a store of this test's own.
+
+    STATE_DIR is read once at import, so the attribute is patched rather than
+    the environment.
+    """
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "external")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def publish(tracks, name=""):
+        return "ext:" + queue_api.publish(list(tracks), name)["token"]
+
+    return publish
+
+
+def _ask_for(client, spoken, entity_id=None):
+    attr = {"type": "ARTIST", "value": spoken}
+    if entity_id:
+        attr["entityId"] = entity_id
+    return post(client, directive(
+        "Alexa.Media.Search", "GetPlayableContent",
+        {"selectionCriteria": {"attributes": [attr]}},
+    ))
+
+
+def test_ext_content_resolves_like_any_other_queue(app, published):
+    content_id = published(["t3", "t1"])
+    assert [s["id"] for s in app.resolve_tracks(content_id)] == ["t3", "t1"]
+
+
+def test_unknown_ext_token_is_not_cached(app, published):
+    """An empty answer must not stick, or one late lookup kills the queue."""
+    assert app.resolve_tracks("ext:nosuchtoken") == []
+    assert "ext:nosuchtoken" not in app._QUEUE_CACHE
+
+
+def test_handoff_phrase_resolves_to_the_newest_queue(client, app, published):
+    published(["t1"])
+    expected = published(["t2", "t3"], "evening")
+    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0])
+    assert body["payload"]["content"]["id"] == expected
+
+
+def test_handoff_phrase_beats_a_catalog_entity_of_the_same_name(client, published):
+    """The entity branch wins on order alone if this is not checked first."""
+    expected = published(["t2"])
+    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0], entity_id="playlist.p1")
+    assert body["payload"]["content"]["id"] == expected
+
+
+def test_handoff_with_nothing_published_is_content_not_found(client, published):
+    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0])
+    assert body["payload"]["type"] == "CONTENT_NOT_FOUND"
+
+
+def test_an_ordinary_request_still_reaches_the_catalog(client, published):
+    published(["t1"])
+    body = _ask_for(client, "Gregory Alan Isakov", entity_id="artist.a1")
+    assert body["payload"]["content"]["id"] == "ar:a1"

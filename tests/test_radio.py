@@ -461,3 +461,39 @@ def test_warm_failure_does_not_break_playback(client, app, monkeypatch):
         raise RuntimeError("navidrome down")
     monkeypatch.setattr(app, "continuation_content", boom)
     app.warm_continuation("tr:t1")
+
+
+# --- album metadata ---------------------------------------------------------
+#
+# An Item with no metadata.album is not rendered as blank by Alexa: it fills
+# the slot with the provider name, so the now-playing card reads "Ampere"
+# where the album should be. Seen live on an untagged copy of a track whose
+# other copy was tagged, which is what makes it look intermittent.
+
+
+def test_untagged_track_inherits_its_album_name(app, monkeypatch):
+    """A file with no album tag still names the album it was fetched from."""
+    monkeypatch.setattr(
+        app.subsonic, "album_tracks",
+        lambda aid: [{"id": "x1", "title": "Untagged", "artist": "Someone"}],
+    )
+    tracks = app.artist_tracks("a1")
+    assert tracks, "expected the discography walk to return something"
+    assert all(t["album"] for t in tracks)
+
+
+def test_a_real_album_tag_is_never_overwritten(app, monkeypatch):
+    monkeypatch.setattr(
+        app.subsonic, "album_tracks",
+        lambda aid: [{"id": "x1", "title": "Tagged", "album": "Real Album"}],
+    )
+    assert {t["album"] for t in app.artist_tracks("a1")} == {"Real Album"}
+
+
+def test_built_item_carries_the_album_through(app):
+    item = app.build_item(
+        {"id": "t1", "title": "Light Year", "artist": "GAI",
+         "album": "Appaloosa Bones", "duration": 240},
+        0, 3,
+    )
+    assert item["metadata"]["album"]["name"]["display"] == "Appaloosa Bones"
