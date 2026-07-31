@@ -1,0 +1,39 @@
+{% if not proof.token %}
+  <form method="post" action="/setup/endpoint/proof"
+        hx-post="/setup/endpoint/proof" hx-target="#proof">
+    <button type="submit">Make a verification link</button>
+  </form>
+{% elif proof.status == 'seen' %}
+  <p><span class="pill ok">confirmed</span>
+    The link was opened from outside this network. The public path works.</p>
+  <form method="post" action="/setup/endpoint/proof"
+        hx-post="/setup/endpoint/proof" hx-target="#proof">
+    <button type="submit" class="secondary outline">Make another</button>
+  </form>
+{% elif proof.status in ('expired', 'unknown') %}
+  <p><span class="pill bad">expired</span> That link is no longer valid.</p>
+  <form method="post" action="/setup/endpoint/proof"
+        hx-post="/setup/endpoint/proof" hx-target="#proof">
+    <button type="submit">Make a new one</button>
+  </form>
+{% else %}
+  <div hx-get="/setup/endpoint/proof?token={{ proof.token }}"
+       hx-trigger="every 5s" hx-target="#proof" hx-swap="innerHTML">
+    {% if proof.svg %}
+      <div class="qr">{{ proof.svg|safe }}</div>
+      <p class="quiet"><small>Turn WiFi off on the phone first. On WiFi the
+        request never leaves the building and proves nothing.</small></p>
+    {% else %}
+      <p class="loud">
+        The link is too long to fit in a QR code this encoder can build, so
+        open it by hand instead. <strong>The phone must be on cellular, not
+        WiFi</strong>, or this test proves nothing.
+      </p>
+    {% endif %}
+    <p class="big-code">{{ proof.url }}</p>
+    <p class="quiet">Code: <span class="mono">{{ proof.code }}</span>,
+      valid for {{ ttl_minutes }} minutes.</p>
+    <p><span class="pill warn">waiting for the scan</span>
+      <noscript>Reload this page after scanning.</noscript></p>
+  </div>
+{% endif %}

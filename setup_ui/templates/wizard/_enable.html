@@ -1,0 +1,21 @@
+{% if result %}
+  <p>{% if result.ok %}<span class="pill ok">enabled</span>
+     {% else %}<span class="pill bad">failed</span>{% endif %}
+     {{ result.detail }}</p>
+{% endif %}
+<p>
+  This deletes the enablement and sets it again. That looks pointless and is
+  not: a catalog upload silently unbinds the skill, after which Alexa announces
+  "Here's ... from Spotify" while <span class="mono">ER_INGESTION</span> reports
+  SUCCEEDED and the bridge answers every request it is given correctly, because
+  it is no longer given any. Cycling is the only fix, and nothing anywhere else
+  hints that it is needed.
+</p>
+<form method="post" action="/setup/wizard/enable"
+      hx-post="/setup/wizard/enable" hx-target="#step-enable">
+  <button type="submit" {% if not state.skill_id %}disabled{% endif %}>
+    Cycle enablement, stage development</button>
+</form>
+{% if not state.skill_id %}
+  <small class="quiet">Create the skill first.</small>
+{% endif %}

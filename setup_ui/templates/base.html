@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Ampere setup{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='setup.css') }}">
+<script src="{{ url_for('setup.static', filename='vendor/htmx.min.js') }}" defer></script>
+</head>
+<body>
+<main class="container">
+  <nav>
+    <ul><li class="brand"><svg class="mark" viewBox="0 0 512 512" aria-hidden="true"><g transform="translate(0,-66)"><path d="M 99.5 244.4 A 260 260 0 0 1 370.0 218.3" fill="none" stroke="#E8A33D" stroke-width="38" stroke-linecap="round"/><path d="M 382.0 224.6 A 260 260 0 0 1 412.5 244.4" fill="none" stroke="#D8542F" stroke-width="38" stroke-linecap="round"/><path d="M 258.5 444.4 L 324.6 240.9" stroke="currentColor" stroke-width="26" stroke-linecap="round"/><circle cx="256" cy="452" r="21" fill="#E8A33D"/></g></svg><strong>Ampere</strong></li></ul>
+    <ul>
+      <li><a href="/setup">Status</a></li>
+      <li><a href="/setup/endpoint">Endpoint</a></li>
+      <li><a href="/setup/wizard">Wizard</a></li>
+      <li><a href="/setup/alias">Alias</a></li>
+      <li><a href="/setup/stations">Stations</a></li>
+    </ul>
+  </nav>
+  {% block body %}{% endblock %}
+  <footer>
+    <small><a href="/setup/logout">Log out</a></small>
+  </footer>
+</main>
+</body>
+</html>

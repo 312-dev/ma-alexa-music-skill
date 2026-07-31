@@ -1,0 +1,27 @@
+{% if error %}
+  <p class="loud">{{ error }}</p>
+{% elif pool %}
+  {% if pool.degraded %}
+  <p class="loud">
+    <strong>This station is the seed artist alone.</strong> The similar-artist
+    lookup returned nothing usable, so every track will be by
+    {{ pool.artist }}. Out loud this sounds like a working station for about
+    twenty minutes.
+  </p>
+  {% endif %}
+  <p>
+    <span class="pill {% if pool.degraded %}bad{% else %}ok{% endif %}">
+      {{ pool.artist_count }} artist(s)</span>
+    {{ pool.track_count }} tracks in the pool for <strong>{{ pool.artist }}</strong>.
+  </p>
+  <table>
+    <thead><tr><th>Artist</th><th>Tracks</th></tr></thead>
+    <tbody>
+      {% for name, count in pool.rows %}
+        <tr><td>{{ name }}</td><td>{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% elif seed %}
+  <p class="quiet">Nothing to show.</p>
+{% endif %}

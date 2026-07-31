@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ampere setup is disabled</title>
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
+</head>
+<body>
+<main class="container">
+  <h1>Setup is disabled</h1>
+  <p>
+    <strong>ADMIN_TOKEN is not set</strong>, so these pages will not be served.
+  </p>
+  <p>
+    Setup can create skills and catalogs against your Amazon developer account
+    and can read your music server's configuration. There is no safe way to
+    offer that to whoever finds the URL, so with no token configured the answer
+    is no rather than open.
+  </p>
+  <p>
+    Set <code>ADMIN_TOKEN</code> in the environment, restart the bridge, and
+    sign in at <code>/setup/login</code>. The same token already gates
+    <code>/diag</code> and <code>/captures</code>.
+  </p>
+</main>
+</body>
+</html>

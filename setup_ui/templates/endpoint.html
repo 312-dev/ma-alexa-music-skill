@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Ampere: endpoint check{% endblock %}
+{% block body %}
+<h1>Endpoint</h1>
+<p class="quiet">
+  Run this before creating the skill. Every check here has failed silently at
+  least once: Amazon reports none of them, and the bridge cannot tell the
+  difference between "never called" and "not yet called".
+</p>
+<div id="checks">
+  {% include "_checks.html" %}
+</div>
+{% endblock %}

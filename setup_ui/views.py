@@ -1,0 +1,639 @@
+"""The /setup blueprint.
+
+Deliberately imports nothing from app: the parent registers this blueprint on
+that module, so a module-level import back would be circular. The two places
+that genuinely need the bridge's own station logic import it inside the view
+function instead. Everything else comes from the environment, which is where
+app reads it from too.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import pathlib
+import time
+
+from flask import Blueprint, make_response, redirect, render_template, request
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+
+import subsonic
+
+from . import qr, smapi, state as store, validate
+
+bp = Blueprint(
+    "setup", __name__,
+    url_prefix="/setup",
+    template_folder="templates",
+    static_folder="static",
+    static_url_path="/static",
+)
+
+TOKENS = validate.Tokens()
+
+_COOKIE = "ampere_setup"
+_SESSION_MAX_AGE = 12 * 3600
+
+# A browser cannot set X-Admin-Token on a normal navigation, so the header auth
+# app uses everywhere else is swapped for a signed cookie carrying a digest of
+# the same token. Rotating ADMIN_TOKEN therefore invalidates every session.
+_FALLBACK_KEY = os.urandom(32)
+
+
+def _signing_key() -> bytes:
+    return os.environ.get("SIGNING_KEY", "").encode() or _FALLBACK_KEY
+
+
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_signing_key(), salt="ampere-setup-session")
+
+
+def _fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+
+def _admin_token() -> str:
+    return os.environ.get("ADMIN_TOKEN") or ""
+
+
+def authed() -> bool:
+    expected = _admin_token()
+    if not expected:
+        return False
+    supplied = request.headers.get("X-Admin-Token")
+    if supplied and hmac.compare_digest(supplied, expected):
+        return True
+    cookie = request.cookies.get(_COOKIE)
+    if not cookie:
+        return False
+    try:
+        value = _serializer().loads(cookie, max_age=_SESSION_MAX_AGE)
+    except BadSignature:
+        return False
+    return hmac.compare_digest(str(value), _fingerprint(expected))
+
+
+_OPEN = {"setup.static", "setup.login", "setup.verify"}
+
+
+@bp.before_request
+def _guard():
+    if request.endpoint == "setup.static":
+        return None
+    if not _admin_token():
+        # Serving this open would hand anyone who finds the URL the ability to
+        # run ask against the operator's Amazon account. Refusing is the only
+        # safe default, and saying why beats a blank 404.
+        return render_template("disabled.html"), 503
+    if request.endpoint in _OPEN:
+        return None
+    if authed():
+        return None
+    return render_template("login.html", target=request.path, failed=False), 401
+
+
+# --- helpers ----------------------------------------------------------------
+
+
+def fragment(template: str, back: str = "/setup/wizard", **context):
+    """Render a partial, wrapped in the layout when HTMX is not driving.
+
+    Every page has to work without JavaScript, and a bare partial returned to a
+    plain form post is a wall of unstyled text with no way back.
+    """
+    if request.headers.get("HX-Request"):
+        return render_template(template, **context)
+    return render_template("fragment.html", fragment=template, back=back, **context)
+
+
+def public_base() -> str:
+    return os.environ.get("PUBLIC_BASE", "").rstrip("/")
+
+
+def log_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
+
+
+def ago(when: float) -> str:
+    delta = max(0, int(time.time() - when))
+    if delta < 60:
+        return f"{delta} seconds ago"
+    if delta < 3600:
+        return f"{delta // 60} minutes ago"
+    if delta < 86400:
+        return f"{delta // 3600} hours ago"
+    return f"{delta // 86400} days ago"
+
+
+def last_requests(limit: int = 4) -> list[dict]:
+    """The newest inbound captures.
+
+    Sorted by mtime and truncated before anything is parsed. The capture
+    directory grows without bound on a busy day, and this panel refreshes every
+    ten seconds, so reading all of it would be the most expensive thing the
+    process does.
+    """
+    try:
+        entries = [e for e in os.scandir(log_dir()) if e.name.endswith(".json")]
+    except OSError:
+        return []
+    entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+
+    out = []
+    for entry in entries[:limit]:
+        stamp = entry.stat().st_mtime
+        directive = entry.name.split("-", 1)[-1][:-5] or entry.name
+        signed = None
+        try:
+            body = json.loads(pathlib.Path(entry.path).read_text())
+            header = (body.get("body") or {}).get("header") or {}
+            if header.get("namespace"):
+                directive = f"{header['namespace']}.{header.get('name', '?')}"
+            headers = body.get("headers") or {}
+            signed = any(k.lower().startswith("signature") for k in headers)
+        except (OSError, ValueError, AttributeError):
+            pass
+        out.append({"directive": directive, "when": stamp, "ago": ago(stamp),
+                    "signed": signed})
+    return out
+
+
+def subsonic_probe() -> dict:
+    """The same cheap search /diag uses."""
+    try:
+        result = subsonic.search("the", songs=3)
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:200]}
+    songs = result.get("song") or []
+    return {"ok": True,
+            "detail": f"{len(songs)} result(s) for a sample search",
+            "sample": [s.get("title") for s in songs[:3]]}
+
+
+# SMAPI reads mean shelling out to `ask` once per catalog, which is seconds
+# each. The volatile panel polls every ten seconds and must never pay that, so
+# it reads this cache and only an explicit refresh recomputes it.
+_SMAPI_CACHE: dict = {"at": 0.0, "value": None}
+_SMAPI_TTL = 300
+
+
+def catalog_ids(current: dict) -> dict[str, str]:
+    stored = current.get("catalogs") or {}
+    kinds = ("artists", "albums", "tracks", "playlists", "genres")
+    return {
+        kind: os.environ.get(f"CATALOG_{kind.upper()}", "") or stored.get(kind, "")
+        for kind in kinds
+    }
+
+
+def smapi_snapshot(force: bool = False) -> dict | None:
+    if not force and _SMAPI_CACHE["value"] is not None:
+        if time.time() - _SMAPI_CACHE["at"] < _SMAPI_TTL:
+            return _SMAPI_CACHE["value"]
+    if not force and _SMAPI_CACHE["value"] is None:
+        return None
+
+    current = store.load()
+    skill_id = os.environ.get("SKILL_ID", "") or current.get("skill_id", "")
+    snapshot = {
+        "ask": smapi.ask_on_path(),
+        "configured": smapi.ask_configured(),
+        "skill_id": skill_id,
+        "enablement": None,
+        "catalogs": [],
+        "worst": smapi.classify_ingestion(None),
+    }
+    if not (snapshot["ask"] and snapshot["configured"] and skill_id):
+        _SMAPI_CACHE.update(at=time.time(), value=snapshot)
+        return snapshot
+
+    snapshot["enablement"] = smapi.classify_enablement(smapi.enablement_status(skill_id))
+
+    rank = {"failed": 0, "none": 1, "waiting": 2, "ok": 3}
+    worst = None
+    for kind, catalog_id in catalog_ids(current).items():
+        if not catalog_id:
+            continue
+        verdict = smapi.classify_ingestion(smapi.latest_upload(catalog_id))
+        snapshot["catalogs"].append({"kind": kind, "id": catalog_id, **verdict})
+        if worst is None or rank[verdict["state"]] < rank[worst["state"]]:
+            worst = verdict
+    snapshot["worst"] = worst or smapi.classify_ingestion(None)
+    _SMAPI_CACHE.update(at=time.time(), value=snapshot)
+    return snapshot
+
+
+def status_context(force: bool = False) -> dict:
+    current = store.load()
+    return {
+        "public_base": public_base(),
+        "after_content": os.environ.get("AFTER_CONTENT", "stop"),
+        "signing_key_set": bool(os.environ.get("SIGNING_KEY")),
+        "admin_token_set": bool(_admin_token()),
+        "subsonic": subsonic_probe(),
+        "subsonic_url": os.environ.get("SUBSONIC_URL", "") or current.get("subsonic_url", ""),
+        "requests": last_requests(),
+        "smapi": smapi_snapshot(force),
+        "checked_ago": ago(_SMAPI_CACHE["at"]) if _SMAPI_CACHE["at"] else "never",
+        "alias": current.get("alias", ""),
+        "state": current,
+    }
+
+
+# --- login ------------------------------------------------------------------
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        return render_template("login.html", target=request.args.get("next", "/setup"),
+                               failed=False)
+    supplied = (request.form.get("token") or "").strip()
+    if not hmac.compare_digest(supplied, _admin_token()):
+        return render_template("login.html", target=request.form.get("target", "/setup"),
+                               failed=True), 401
+    target = request.form.get("target") or "/setup"
+    if not target.startswith("/setup"):
+        target = "/setup"
+    response = make_response(redirect(target))
+    response.set_cookie(
+        _COOKIE,
+        _serializer().dumps(_fingerprint(_admin_token())),
+        max_age=_SESSION_MAX_AGE, httponly=True, samesite="Lax",
+        secure=public_base().startswith("https://"),
+    )
+    return response
+
+
+@bp.get("/logout")
+def logout():
+    response = make_response(redirect("/setup/login"))
+    response.delete_cookie(_COOKIE)
+    return response
+
+
+# --- status -----------------------------------------------------------------
+
+
+@bp.get("")
+@bp.get("/")
+def status():
+    return render_template("status.html", **status_context())
+
+
+@bp.get("/status")
+def status_partial():
+    return render_template("_status.html", **status_context())
+
+
+@bp.post("/status/refresh")
+def status_refresh():
+    return fragment("_status.html", back="/setup", **status_context(force=True))
+
+
+# --- endpoint validation ----------------------------------------------------
+
+
+def run_checks(base: str) -> list[dict]:
+    rows = [validate.check_scheme(base)]
+    later = ("Resolves to a public address", "TLS handshake and certificate",
+             "GET /healthz over the public URL", "POST /music with a real directive")
+    if not rows[0]["ok"]:
+        rows += [validate.check(name, None, "Skipped: fix PUBLIC_BASE first.")
+                 for name in later]
+        return rows
+    rows.append(validate.check_address(base))
+    rows.append(validate.check_tls(base))
+    rows.append(validate.check_healthz(base))
+    rows.append(validate.check_music_post(base))
+    return rows
+
+
+def endpoint_context() -> dict:
+    base = public_base()
+    rows = run_checks(base)
+    passed = all(row["ok"] for row in rows)
+    cert_type = next((r["note"] for r in rows if r["name"].startswith("TLS")), "")
+    store.update(endpoint_ok=passed, cert_type=cert_type)
+    token = request.args.get("token") or ""
+    return {
+        "public_base": base,
+        "rows": rows,
+        "passed": passed,
+        "cert_type": cert_type,
+        "proof": proof_context(token),
+        "ttl_minutes": TOKENS.ttl // 60,
+    }
+
+
+def proof_context(token: str) -> dict:
+    if not token:
+        return {"token": "", "status": "none", "url": "", "svg": "", "code": ""}
+    url = f"{public_base()}/setup/verify/{token}"
+    matrix = qr.encode(url)
+    return {
+        "token": token,
+        "status": TOKENS.status(token),
+        "url": url,
+        "svg": qr.svg(matrix) if matrix else "",
+        # Read out loud or typed by hand when the QR will not scan.
+        "code": token,
+    }
+
+
+@bp.get("/endpoint")
+def endpoint():
+    return render_template("endpoint.html", **endpoint_context())
+
+
+@bp.get("/endpoint/checks")
+def endpoint_checks():
+    return fragment("_checks.html", back="/setup/endpoint", **endpoint_context())
+
+
+@bp.post("/endpoint/proof")
+def endpoint_proof_new():
+    token = TOKENS.mint()
+    if not request.headers.get("HX-Request"):
+        return redirect(f"/setup/endpoint?token={token}")
+    return render_template("_proof.html", proof=proof_context(token),
+                           ttl_minutes=TOKENS.ttl // 60)
+
+
+@bp.get("/endpoint/proof")
+def endpoint_proof():
+    return render_template("_proof.html",
+                           proof=proof_context(request.args.get("token", "")),
+                           ttl_minutes=TOKENS.ttl // 60)
+
+
+@bp.get("/verify/<token>")
+def verify(token: str):
+    """Hit by a phone on cellular, so it carries no cookie and cannot require one.
+
+    This is the only check that proves the route Amazon actually takes. Every
+    other test here runs from inside the network the bridge is on, where a
+    tailnet address or a split-horizon DNS answer looks perfectly healthy.
+    """
+    outcome = TOKENS.mark_seen(token, request.headers.get("User-Agent", ""))
+    codes = {"seen": 200, "expired": 410, "unknown": 404}
+    return render_template("verify.html", outcome=outcome), codes[outcome]
+
+
+# --- alias ------------------------------------------------------------------
+
+
+@bp.route("/alias", methods=["GET", "POST"])
+def alias():
+    candidate = (request.values.get("candidate") or "").strip()
+    result = validate.assess_alias(candidate, subsonic) if candidate else None
+    template = "_alias.html" if request.headers.get("HX-Request") else "alias.html"
+    return render_template(template, candidate=candidate, result=result,
+                           saved=store.load().get("alias", ""))
+
+
+@bp.post("/alias/save")
+def alias_save():
+    candidate = (request.form.get("candidate") or "").strip()
+    store.update(alias=candidate)
+    result = validate.assess_alias(candidate, subsonic) if candidate else None
+    return fragment("_alias.html", back="/setup/alias", candidate=candidate,
+                    result=result, saved=candidate)
+
+
+# --- stations ---------------------------------------------------------------
+
+
+def station_context() -> dict:
+    current = store.load()
+    import app as bridge  # lazy: app registers this blueprint, so not at import
+
+    return {
+        "modes": bridge.AFTER_CONTENT_MODES,
+        "live": {
+            "after_content": bridge.AFTER_CONTENT,
+            "radio_artists": bridge.RADIO_ARTISTS,
+            "radio_tracks_per_artist": bridge.RADIO_TRACKS_PER_ARTIST,
+        },
+        "saved": {
+            "after_content": current.get("after_content") or bridge.AFTER_CONTENT,
+            "radio_artists": current.get("radio_artists") or bridge.RADIO_ARTISTS,
+            "radio_tracks_per_artist": (current.get("radio_tracks_per_artist")
+                                        or bridge.RADIO_TRACKS_PER_ARTIST),
+        },
+    }
+
+
+@bp.get("/stations")
+def stations():
+    return render_template("stations.html", stored=None, **station_context())
+
+
+@bp.post("/stations")
+def stations_save():
+    import app as bridge
+
+    mode = (request.form.get("after_content") or "").strip().lower()
+    if mode not in bridge.AFTER_CONTENT_MODES:
+        mode = bridge.AFTER_CONTENT
+
+    def positive(field: str, fallback: int) -> int:
+        try:
+            return max(1, min(100, int(request.form.get(field, ""))))
+        except (TypeError, ValueError):
+            return fallback
+
+    store.update(
+        after_content=mode,
+        radio_artists=positive("radio_artists", bridge.RADIO_ARTISTS),
+        radio_tracks_per_artist=positive("radio_tracks_per_artist",
+                                         bridge.RADIO_TRACKS_PER_ARTIST),
+    )
+    return render_template("stations.html", stored=True, **station_context())
+
+
+@bp.get("/stations/preview")
+def stations_preview():
+    """The artist pool a seed actually produces.
+
+    A station that had quietly degraded to its seed artist alone was found by
+    ear, over hours. It is one glance here.
+    """
+    seed = (request.args.get("seed") or "").strip()
+    if not seed:
+        return fragment("_pool.html", back="/setup/stations", seed="", error="", pool=None)
+
+    import app as bridge
+
+    try:
+        hits = subsonic.search(seed, songs=0, albums=0, artists=5)
+        artists = hits.get("artist") or []
+        if not artists:
+            return fragment("_pool.html", back="/setup/stations", seed=seed, pool=None,
+                            error=f"No artist matching {seed} in the library.")
+        chosen = artists[0]
+        artist_ids = bridge.similar_artist_ids(chosen["id"])
+        tracks = bridge.radio_pool(chosen["id"], artist_ids)
+    except Exception as exc:
+        return fragment("_pool.html", back="/setup/stations", seed=seed, pool=None,
+                        error=f"Could not build the pool: {exc}")
+
+    counts: dict[str, int] = {}
+    for track in tracks:
+        counts[track.get("artist") or "Unknown"] = counts.get(track.get("artist") or "Unknown", 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return fragment(
+        "_pool.html", back="/setup/stations", seed=seed, error="",
+        pool={
+            "artist": chosen.get("name", seed),
+            "artist_count": len(artist_ids),
+            "track_count": len(tracks),
+            "rows": ordered,
+            "degraded": len(artist_ids) <= 1,
+        },
+    )
+
+
+# --- wizard -----------------------------------------------------------------
+
+
+CATALOG_KINDS = {
+    "artists": "AMAZON.MusicGroup",
+    "albums": "AMAZON.MusicAlbum",
+    "tracks": "AMAZON.MusicRecording",
+    "playlists": "AMAZON.MusicPlaylist",
+    "genres": "AMAZON.Genre",
+}
+
+
+def wizard_context(**extra) -> dict:
+    current = store.load()
+    context = {
+        "state": current,
+        "public_base": public_base(),
+        "ask": {"on_path": smapi.ask_on_path(), "configured": smapi.ask_configured(),
+                "config_path": str(smapi.CLI_CONFIG)},
+        "catalog_ids": catalog_ids(current),
+        "kinds": CATALOG_KINDS,
+        "subsonic_url": os.environ.get("SUBSONIC_URL", "") or current.get("subsonic_url", ""),
+        "subsonic_user": os.environ.get("SUBSONIC_USER", "") or current.get("subsonic_user", ""),
+        "message": None,
+        "ingestion": None,
+    }
+    context.update(extra)
+    return context
+
+
+@bp.get("/wizard")
+def wizard():
+    return render_template("wizard.html", **wizard_context())
+
+
+@bp.post("/wizard/subsonic")
+def wizard_subsonic():
+    url = (request.form.get("url") or "").strip()
+    user = (request.form.get("user") or "").strip()
+    password = request.form.get("password") or ""
+    result = validate.subsonic_ping(url, user, password)
+    if result["ok"]:
+        # The password is never written down here. It has to reach the bridge
+        # through the environment like every other secret, and storing a copy
+        # in /data would be a second place for it to leak from.
+        store.update(subsonic_url=url, subsonic_user=user)
+    return fragment("wizard/_subsonic.html", result=result, **wizard_context())
+
+
+@bp.get("/wizard/ask")
+def wizard_ask():
+    return fragment("wizard/_ask.html", **wizard_context())
+
+
+@bp.post("/wizard/skill")
+def wizard_skill():
+    current = store.load()
+    if not current.get("endpoint_ok"):
+        return fragment("wizard/_skill.html", blocked=True, result=None,
+                        **wizard_context())
+
+    vendor_id = (request.form.get("vendor_id") or current.get("vendor_id") or "").strip()
+    alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
+    if not vendor_id:
+        return fragment("wizard/_skill.html", blocked=False, result={
+            "ok": False, "detail": "A vendor id is required. Run "
+                                   "ask smapi get-vendor-list to find yours."},
+            **wizard_context())
+
+    body = smapi.manifest(
+        name=alias_word.title(),
+        public_base=public_base(),
+        cert_type=current.get("cert_type") or "Trusted",
+    )
+    path = smapi.write_manifest(body, os.environ.get("SETUP_STATE_DIR", "/data"))
+    outcome = smapi.create_skill(path, vendor_id)
+    data = outcome.data() or {}
+    skill_id = data.get("skillId") or data.get("skill_id") or ""
+    if outcome.ok and skill_id:
+        store.update(skill_id=skill_id, vendor_id=vendor_id, alias=alias_word)
+    return fragment("wizard/_skill.html", blocked=False, result={
+        "ok": bool(outcome.ok and skill_id),
+        "detail": f"Created {skill_id}" if skill_id else outcome.message,
+        "manifest_path": path,
+    }, **wizard_context())
+
+
+@bp.post("/wizard/catalogs")
+def wizard_catalogs():
+    current = store.load()
+    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
+    vendor_id = current.get("vendor_id", "")
+    if not (skill_id and vendor_id):
+        return fragment("wizard/_catalogs.html", results=None,
+                        **wizard_context(message="Create the skill first."))
+
+    catalogs = dict(current.get("catalogs") or {})
+    results = []
+    for kind, catalog_type in CATALOG_KINDS.items():
+        if catalogs.get(kind):
+            results.append({"kind": kind, "ok": True,
+                            "detail": f"already {catalogs[kind]}"})
+            continue
+        outcome = smapi.create_catalog(f"Ampere {kind}", catalog_type, vendor_id)
+        data = outcome.data() or {}
+        catalog_id = data.get("id") or data.get("catalogId") or ""
+        if outcome.ok and catalog_id:
+            catalogs[kind] = catalog_id
+            smapi.associate_catalog(catalog_id, skill_id)
+            results.append({"kind": kind, "ok": True, "detail": catalog_id})
+        else:
+            results.append({"kind": kind, "ok": False, "detail": outcome.message})
+    store.update(catalogs=catalogs)
+    return fragment("wizard/_catalogs.html", results=results, **wizard_context())
+
+
+@bp.get("/wizard/ingestion")
+def wizard_ingestion():
+    current = store.load()
+    rows = []
+    for kind, catalog_id in catalog_ids(current).items():
+        if not catalog_id:
+            continue
+        rows.append({"kind": kind, "id": catalog_id,
+                     **smapi.classify_ingestion(smapi.latest_upload(catalog_id))})
+    return fragment("wizard/_ingestion.html", rows=rows, **wizard_context())
+
+
+@bp.post("/wizard/enable")
+def wizard_enable():
+    current = store.load()
+    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
+    if not skill_id:
+        return fragment("wizard/_enable.html", result={
+            "ok": False, "detail": "No skill id yet."}, **wizard_context())
+    outcomes = smapi.cycle_enablement(skill_id)
+    ok = outcomes[-1].ok
+    return fragment("wizard/_enable.html", result={
+        "ok": ok,
+        "detail": "Enabled for development." if ok else outcomes[-1].message,
+    }, **wizard_context())

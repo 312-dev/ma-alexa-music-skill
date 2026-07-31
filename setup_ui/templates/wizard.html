@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Ampere: wizard{% endblock %}
+{% block body %}
+<h1>Wizard</h1>
+<p class="quiet">
+  Each step is independent and safe to re-run. The one thing that cannot be
+  automated is <span class="mono">ask configure</span>, which is a browser
+  OAuth flow, and is the reason this is a web page rather than a script.
+</p>
+
+<article>
+  <header><strong>1. Music server</strong></header>
+  <div id="step-subsonic">{% include "wizard/_subsonic.html" %}</div>
+</article>
+
+<article>
+  <header><strong>2. ASK CLI</strong></header>
+  <div id="step-ask">{% include "wizard/_ask.html" %}</div>
+</article>
+
+<article>
+  <header><strong>3. Alias</strong></header>
+  <p>
+    Saved: <span class="mono">{{ state.alias or 'not chosen' }}</span>.
+    Check a candidate against your own library on the
+    <a href="/setup/alias">alias page</a> before committing. The word becomes
+    part of the skill name in the manifest.
+  </p>
+</article>
+
+<article>
+  <header><strong>4. Skill</strong></header>
+  <div id="step-skill">{% include "wizard/_skill.html" %}</div>
+</article>
+
+<article>
+  <header><strong>5. Catalogs</strong></header>
+  <div id="step-catalogs">{% include "wizard/_catalogs.html" %}</div>
+  <div id="step-ingestion" hx-get="/setup/wizard/ingestion"
+       hx-trigger="every 30s" hx-swap="innerHTML"></div>
+  <p><a href="/setup/wizard/ingestion" role="button" class="secondary outline"
+        hx-get="/setup/wizard/ingestion" hx-target="#step-ingestion">
+      Check ingestion</a></p>
+</article>
+
+<article>
+  <header><strong>6. Enablement</strong></header>
+  <div id="step-enable">{% include "wizard/_enable.html" %}</div>
+</article>
+{% endblock %}

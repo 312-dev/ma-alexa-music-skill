@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ampere endpoint check</title>
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
+</head>
+<body>
+<main class="container">
+{% if outcome == 'seen' %}
+  <h1>Got it</h1>
+  <p>Your bridge is reachable from outside your network.</p>
+  <p>Go back to the setup page on your computer. The check has already gone green.</p>
+{% elif outcome == 'expired' %}
+  <h1>That link has expired</h1>
+  <p>Generate a new one on the endpoint page and scan it again.</p>
+{% else %}
+  <h1>Unknown link</h1>
+  <p>This verification link is not one this bridge is waiting on. Generate a
+     fresh one on the endpoint page.</p>
+{% endif %}
+</main>
+</body>
+</html>

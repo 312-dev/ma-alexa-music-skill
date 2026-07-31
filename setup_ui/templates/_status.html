@@ -1,0 +1,141 @@
+{% if smapi and smapi.enablement and not smapi.enablement.enabled %}
+<article class="loud">
+  <h3>The skill is not enabled, so Alexa is not using it</h3>
+  <p>
+    Playback falls back to the default provider and Alexa says so out loud:
+    "Here's ... from Spotify". Nothing else reports a fault. The endpoint
+    answers, the catalog ingests, the manifest validates, and the skill still
+    replies correctly to every request it is given, because it is not being
+    given any.
+  </p>
+  <p>{{ smapi.enablement.detail }}</p>
+  <p class="mono">ask smapi set-skill-enablement -s &lt;skill-id&gt; -g development</p>
+  <p><small>A catalog upload silently unbinds the skill, so this can appear
+    right after a successful sync. Cycling enablement is the fix.</small></p>
+</article>
+{% endif %}
+
+<article>
+  <header><strong>Last request received from Amazon</strong></header>
+  {% if requests %}
+    <p>
+      <span class="pill ok">{{ requests[0].ago }}</span>
+      <span class="mono">{{ requests[0].directive }}</span>
+      {% if requests[0].signed is not none %}
+        <br><small class="quiet">
+          {% if requests[0].signed %}Carried Amazon's signature headers.
+          {% else %}No signature headers, so this was probably not Amazon.{% endif %}
+        </small>
+      {% endif %}
+    </p>
+    {% if requests|length > 1 %}
+    <details>
+      <summary>Earlier</summary>
+      <table>
+        <tbody>
+        {% for entry in requests[1:] %}
+          <tr><td>{{ entry.ago }}</td><td class="mono">{{ entry.directive }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+  {% else %}
+    <p><span class="pill idle">nothing yet</span></p>
+    <p class="quiet">
+      No captured request. Alexa is not calling this bridge at all, which is a
+      completely different problem from Alexa calling it and discarding the
+      answer. Check enablement and the endpoint, not the directive handlers.
+    </p>
+  {% endif %}
+</article>
+
+<article>
+  <header><strong>Catalog ingestion</strong>
+    <small class="quiet"> checked {{ checked_ago }}</small></header>
+  {% if smapi is none %}
+    <p class="quiet">Not checked yet. Reading this means running the ASK CLI once
+      per catalog, which takes a few seconds, so it is not on the ten-second poll.</p>
+  {% elif not smapi.ask %}
+    <p><span class="pill idle">no ask CLI</span> The ASK CLI is not on PATH.</p>
+  {% elif not smapi.configured %}
+    <p><span class="pill idle">ask not configured</span>
+      Run <span class="mono">ask configure</span>. See the
+      <a href="/setup/wizard">wizard</a>.</p>
+  {% elif not smapi.skill_id %}
+    <p><span class="pill idle">no skill yet</span>
+      Create one in the <a href="/setup/wizard">wizard</a>.</p>
+  {% else %}
+    <p>
+      {% if smapi.worst.voice_ready %}<span class="pill ok">voice works</span>
+      {% elif smapi.worst.state == 'failed' %}<span class="pill bad">broken</span>
+      {% else %}<span class="pill warn">not ready</span>{% endif %}
+      <strong>{{ smapi.worst.headline }}</strong>
+    </p>
+    <p>{{ smapi.worst.detail }}</p>
+    {% if smapi.catalogs %}
+    <table>
+      <thead><tr><th>Catalog</th><th>ER_INGESTION</th><th>SLU_MODELING</th><th>Top level</th></tr></thead>
+      <tbody>
+      {% for row in smapi.catalogs %}
+        <tr>
+          <td>{{ row.kind }}</td>
+          <td>{{ row.er or '-' }}</td>
+          <td>{{ row.slu or '-' }}</td>
+          <td>{{ row.top or '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  {% endif %}
+  <form hx-post="/setup/status/refresh" hx-target="#live" method="post"
+        action="/setup/status/refresh">
+    <button type="submit" class="secondary">Check with the ASK CLI now</button>
+  </form>
+  <footer>
+    <small>
+      <strong>ER_INGESTION: SUCCEEDED</strong> is the only gate. Once it says
+      that, voice resolution works.<br>
+      <strong>SLU_MODELING: PENDING</strong> is normal, takes weeks, and never
+      blocks playback.<br>
+      <strong>A top-level status of IN_PROGRESS carries no information</strong>,
+      because SLU_MODELING pins it there for exactly as long.
+    </small>
+  </footer>
+</article>
+
+<article>
+  <header><strong>Music server</strong></header>
+  {% if subsonic.ok %}
+    <p><span class="pill ok">reachable</span> {{ subsonic.detail }}</p>
+  {% else %}
+    <p><span class="pill bad">unreachable</span> <span class="mono">{{ subsonic.detail }}</span></p>
+  {% endif %}
+  {% if subsonic_url %}<p class="mono"><small>{{ subsonic_url }}</small></p>{% endif %}
+</article>
+
+<article>
+  <header><strong>Configuration</strong></header>
+  <table>
+    <tbody>
+      <tr><th>PUBLIC_BASE</th>
+          <td class="mono">{{ public_base or 'not set' }}
+            {% if public_base %}<a href="/setup/endpoint">check it</a>{% endif %}</td></tr>
+      <tr><th>AFTER_CONTENT</th>
+          <td class="mono">{{ after_content }}
+            <a href="/setup/stations">tune</a></td></tr>
+      <tr><th>Alias</th>
+          <td class="mono">{{ alias or 'not chosen' }}
+            <a href="/setup/alias">check for collisions</a></td></tr>
+      <tr><th>SIGNING_KEY</th>
+          <td>{% if signing_key_set %}<span class="pill ok">set</span>
+              {% else %}<span class="pill bad">not set</span>
+              <small>Signed stream URLs will not survive a restart.</small>{% endif %}</td></tr>
+      <tr><th>ADMIN_TOKEN</th>
+          <td>{% if admin_token_set %}<span class="pill ok">set</span>
+              {% else %}<span class="pill bad">not set</span>{% endif %}</td></tr>
+    </tbody>
+  </table>
+  <footer><small class="quiet">Secret values are never shown here.</small></footer>
+</article>

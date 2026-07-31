@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Ampere: alias check{% endblock %}
+{% block body %}
+<h1>Alias</h1>
+<p>
+  The alias is the word you say after "on": <em>"Alexa, play Radiohead on
+  ampere"</em>. Alexa resolves what you asked for against your uploaded catalog
+  <strong>before</strong> it decides which provider to route to, so every
+  artist, album, track, playlist and genre in your library competes with the
+  alias word for that slot.
+</p>
+<p class="quiet">
+  Which means collisions are specific to your library and cannot be listed in
+  advance. Here, "jukebox" was taken by the artist <em>Jukebox The Ghost</em>
+  and the track <em>Juke Box Hero</em>; "gray tunes" resolved to the artist
+  <em>Conan Gray</em>.
+</p>
+<p class="quiet">
+  One class of failure this page cannot find for you is mishearing. "phono"
+  was heard as "Sonos" every single time, and no textual or soundalike test
+  finds that pair. Say your shortlist out loud to an Echo before committing to
+  one.
+</p>
+
+<form method="post" action="/setup/alias"
+      hx-post="/setup/alias" hx-target="#alias-result">
+  <label>
+    Candidate alias
+    <input type="text" name="candidate" value="{{ candidate }}"
+           placeholder="ampere" autofocus>
+  </label>
+  <button type="submit">Check it against my library</button>
+</form>
+
+<div id="alias-result">
+  {% include "_alias.html" %}
+</div>
+{% endblock %}

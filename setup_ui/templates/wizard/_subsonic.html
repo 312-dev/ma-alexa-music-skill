@@ -1,0 +1,24 @@
+{% if result %}
+  <p>
+    {% if result.ok %}<span class="pill ok">connected</span>
+    {% else %}<span class="pill bad">failed</span>{% endif %}
+    {{ result.detail }}
+  </p>
+{% endif %}
+<form method="post" action="/setup/wizard/subsonic"
+      hx-post="/setup/wizard/subsonic" hx-target="#step-subsonic">
+  <label>Server URL
+    <input type="url" name="url" value="{{ subsonic_url }}"
+           placeholder="http://192.168.1.10:4533" required></label>
+  <label>Username
+    <input type="text" name="user" value="{{ subsonic_user }}" required></label>
+  <label>Password
+    <input type="password" name="password" autocomplete="off" required></label>
+  <button type="submit">Test the connection</button>
+</form>
+<small class="quiet">
+  The password is only used for this test. It is never written to disk here:
+  the bridge reads it from <span class="mono">SUBSONIC_PASSWORD</span> in the
+  environment, and a second copy under <span class="mono">/data</span> would
+  just be a second place for it to leak from.
+</small>

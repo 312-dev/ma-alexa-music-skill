@@ -1,0 +1,52 @@
+{% if blocked %}
+  <p class="loud">
+    <strong>Blocked.</strong> The endpoint checks have not all passed, and a
+    skill created against an endpoint Amazon cannot reach fails with no error
+    on either side. Fix that first.
+  </p>
+  <p><a href="/setup/endpoint" role="button">Back to the endpoint checks</a></p>
+{% else %}
+  {% if result %}
+    <p>{% if result.ok %}<span class="pill ok">created</span>
+       {% else %}<span class="pill bad">failed</span>{% endif %}
+       {{ result.detail }}</p>
+    {% if result.manifest_path %}
+      <p class="quiet"><small>Manifest written to
+        <span class="mono">{{ result.manifest_path }}</span></small></p>
+    {% endif %}
+  {% endif %}
+
+  {% if state.skill_id %}
+    <p><span class="pill ok">skill</span>
+      <span class="mono">{{ state.skill_id }}</span></p>
+  {% endif %}
+
+  {% if not state.endpoint_ok %}
+    <p class="loud">
+      Endpoint checks have not passed. Skill creation is locked.
+      <a href="/setup/endpoint">Run them</a>.
+    </p>
+  {% else %}
+    <p class="quiet">
+      The manifest declares <span class="mono">apis.music</span> with an HTTPS
+      endpoint rather than a Lambda ARN, and carries
+      <span class="mono">sslCertificateType:
+      {{ state.cert_type or 'Trusted' }}</span> derived from your live
+      certificate. That field is required for an HTTPS endpoint and is not
+      mentioned in Amazon's music-skill documentation.
+    </p>
+    <form method="post" action="/setup/wizard/skill"
+          hx-post="/setup/wizard/skill" hx-target="#step-skill">
+      <label>Vendor id
+        <input type="text" name="vendor_id" value="{{ state.vendor_id }}"
+               placeholder="M1ABCDEFGHIJKL" required></label>
+      <label>Alias
+        <input type="text" name="alias" value="{{ state.alias }}"
+               placeholder="ampere" required></label>
+      <button type="submit">Create the skill</button>
+    </form>
+    <small class="quiet">
+      <span class="mono">ask smapi get-vendor-list</span> prints your vendor id.
+    </small>
+  {% endif %}
+{% endif %}

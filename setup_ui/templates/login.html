@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Ampere setup: sign in{% endblock %}
+{% block body %}
+<h1>Sign in</h1>
+{% if failed %}<p class="loud">That token did not match.</p>{% endif %}
+<p>
+  Setup can run the ASK CLI against your Amazon developer account, so it is
+  behind the same <span class="mono">ADMIN_TOKEN</span> the bridge uses for
+  <span class="mono">/diag</span> and <span class="mono">/captures</span>.
+  Browsers cannot send that as a header on a normal navigation, so entering it
+  here sets a signed cookie instead.
+</p>
+<form method="post" action="/setup/login">
+  <input type="hidden" name="target" value="{{ target }}">
+  <label>
+    Admin token
+    <input type="password" name="token" autocomplete="current-password" autofocus required>
+  </label>
+  <button type="submit">Sign in</button>
+</form>
+{% endblock %}

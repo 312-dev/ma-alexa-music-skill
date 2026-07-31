@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Ampere: stations{% endblock %}
+{% block body %}
+<h1>Stations</h1>
+
+{% if stored %}<p class="pill ok">saved</p>{% endif %}
+
+<form method="post" action="/setup/stations">
+  <label>
+    After the requested content runs out
+    <select name="after_content">
+      {% for mode in modes %}
+        <option value="{{ mode }}" {% if mode == saved.after_content %}selected{% endif %}>{{ mode }}</option>
+      {% endfor %}
+    </select>
+    <small class="quiet">
+      Anything but <span class="mono">stop</span> extends the queue past its
+      last track rather than replacing it, seeded from the request itself. It
+      never pre-empts what was asked for.
+    </small>
+  </label>
+
+  <label>
+    RADIO_ARTISTS
+    <input type="number" name="radio_artists" min="1" max="100"
+           value="{{ saved.radio_artists }}">
+    <small class="quiet">How many similar artists a station draws on.</small>
+  </label>
+
+  <label>
+    RADIO_TRACKS_PER_ARTIST
+    <input type="number" name="radio_tracks_per_artist" min="1" max="100"
+           value="{{ saved.radio_tracks_per_artist }}">
+    <small class="quiet">
+      Per-artist cap. Uncapped, a seed artist with two hundred tracks next to
+      neighbours with ten gives a station that is mostly the seed artist again.
+    </small>
+  </label>
+
+  <button type="submit">Save</button>
+</form>
+
+<article>
+  <header><strong>Currently in effect</strong></header>
+  <table>
+    <tbody>
+      <tr><th>AFTER_CONTENT</th><td class="mono">{{ live.after_content }}</td></tr>
+      <tr><th>RADIO_ARTISTS</th><td class="mono">{{ live.radio_artists }}</td></tr>
+      <tr><th>RADIO_TRACKS_PER_ARTIST</th><td class="mono">{{ live.radio_tracks_per_artist }}</td></tr>
+    </tbody>
+  </table>
+  <footer><small class="loud">
+    The bridge reads these from the environment at startup. Saved values are
+    recorded here but do not take effect until you put them in the environment
+    and restart, so the two tables can disagree until you do.
+  </small></footer>
+</article>
+
+<article>
+  <header><strong>Preview a station's artist pool</strong></header>
+  <p class="quiet">
+    A station that had quietly collapsed to its seed artist alone was found by
+    ear, over several hours. It is one glance here.
+  </p>
+  <form method="get" action="/setup/stations/preview"
+        hx-get="/setup/stations/preview" hx-target="#pool">
+    <label>
+      Seed artist
+      <input type="text" name="seed" placeholder="Gregory Alan Isakov">
+    </label>
+    <button type="submit" class="secondary">Build the pool</button>
+  </form>
+  <div id="pool"></div>
+</article>
+{% endblock %}

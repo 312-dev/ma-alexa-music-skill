@@ -1,0 +1,88 @@
+/* Small additions on top of Pico. Pico already handles light and dark from
+   prefers-color-scheme, so nothing here may hardcode a page colour. */
+
+.pill {
+  display: inline-block;
+  padding: .12rem .6rem;
+  border-radius: 1rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff;
+}
+.pill.ok   { background: #1b7f4c; }
+.pill.warn { background: #8a6100; }
+.pill.bad  { background: #a11d1d; }
+.pill.idle { background: #5b5b5b; }
+
+.check {
+  display: flex;
+  gap: .8rem;
+  align-items: flex-start;
+  padding: .7rem 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.check > div { min-width: 0; }
+.check p { margin: 0; }
+.check .what { font-weight: 600; }
+
+.mono { font-family: var(--pico-font-family-monospace); word-break: break-all; }
+.big-code {
+  font-family: var(--pico-font-family-monospace);
+  font-size: 1.4rem;
+  letter-spacing: .08em;
+  word-break: break-all;
+}
+
+.loud {
+  border-left: .3rem solid #a11d1d;
+  padding: .8rem 1rem;
+  background: var(--pico-card-sectioning-background-color);
+}
+.quiet { color: var(--pico-muted-color); }
+
+.qr { display: block; margin: 1rem 0; }
+
+table { font-size: .92rem; }
+td, th { vertical-align: top; }
+
+nav ul { flex-wrap: wrap; }
+@media (max-width: 40rem) {
+  nav ul li { padding: .25rem .5rem; }
+}
+
+/* Brand. Pico's default accent is a generic blue; the amber matches the mark
+   and, more usefully, stops the setup pages looking like a stock template
+   someone forgot to finish. Set through Pico's own variables so light and dark
+   both keep working, and at Pico's own specificity: it scopes its palette
+   under :root:not([data-theme=...]), so a bare :root loses and the override
+   silently does nothing. */
+:root:not([data-theme=dark]) {
+  --pico-primary: #b06f10;
+  --pico-primary-hover: #8d5809;
+  --pico-primary-focus: rgba(232, 163, 61, .3);
+  --pico-primary-underline: rgba(176, 111, 16, .5);
+  --pico-primary-background: #b06f10;
+  --pico-primary-border: #b06f10;
+  --pico-primary-hover-background: #8d5809;
+  --pico-primary-hover-border: #8d5809;
+  --pico-primary-inverse: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --pico-primary: #E8A33D;
+    --pico-primary-hover: #f2b45a;
+    --pico-primary-focus: rgba(232, 163, 61, .25);
+    --pico-primary-underline: rgba(232, 163, 61, .5);
+    --pico-primary-background: #E8A33D;
+    --pico-primary-border: #E8A33D;
+    --pico-primary-hover-background: #f2b45a;
+    --pico-primary-hover-border: #f2b45a;
+    --pico-primary-inverse: #17130F;
+  }
+}
+
+.brand { display: flex; align-items: center; gap: .5rem; }
+.mark { width: 1.8rem; height: 1.8rem; flex: none; color: var(--pico-color); }
