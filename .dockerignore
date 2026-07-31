@@ -1,0 +1,11 @@
+.git/
+.venv/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+docs/
+brand/
+tests/
+node_modules/
+NEXT-STEPS.md
