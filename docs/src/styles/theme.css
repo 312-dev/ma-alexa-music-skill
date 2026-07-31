@@ -1,0 +1,206 @@
+/* Ampere docs theme.
+   Warm amber on a deep neutral, a nod to an analogue meter face.
+   Dark is the primary design; light is a deliberate second, not an inversion. */
+
+:root {
+	/* Amber and copper, taken from the meter mark. */
+	--sl-color-accent-low: #3e2a12;
+	--sl-color-accent: #b4762a;
+	--sl-color-accent-high: #e8a33d;
+
+	/* Warm neutral ramp, dark theme. */
+	--sl-color-white: #f5efe6;
+	--sl-color-gray-1: #e6dfd4;
+	--sl-color-gray-2: #c2bbaf;
+	--sl-color-gray-3: #8f887c;
+	--sl-color-gray-4: #5a544a;
+	--sl-color-gray-5: #38332c;
+	--sl-color-gray-6: #26221c;
+	--sl-color-black: #17130f;
+
+	--ampere-meter: #e8a33d;
+	--ampere-meter-dim: #8a5f1c;
+	--ampere-rule: color-mix(in srgb, var(--sl-color-gray-5) 80%, transparent);
+	--sl-content-width: 48rem;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #f7e4c4;
+	--sl-color-accent: #9a5f12;
+	--sl-color-accent-high: #4a2f05;
+
+	--sl-color-white: #17130f;
+	--sl-color-gray-1: #26211b;
+	--sl-color-gray-2: #3f3930;
+	--sl-color-gray-3: #6b6458;
+	--sl-color-gray-4: #91897b;
+	--sl-color-gray-5: #cac3b6;
+	--sl-color-gray-6: #e9e3d8;
+	--sl-color-gray-7: #f5efe6;
+	--sl-color-black: #fdfbf7;
+
+	--ampere-meter: #a2670a;
+	--ampere-meter-dim: #d8b47a;
+	--ampere-rule: color-mix(in srgb, var(--sl-color-gray-5) 90%, transparent);
+}
+
+/* Headings sit a little tighter than the default and carry the accent on h1. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+	letter-spacing: -0.015em;
+}
+
+.sl-markdown-content h2 {
+	padding-top: 0.35rem;
+	border-top: 1px solid var(--ampere-rule);
+}
+
+.sl-markdown-content h2:first-of-type {
+	border-top: none;
+}
+
+/* Tables: the site leans on them heavily, so they get real attention. */
+.sl-markdown-content table {
+	display: block;
+	overflow-x: auto;
+	border-collapse: collapse;
+	font-size: var(--sl-text-sm);
+	width: 100%;
+}
+
+.sl-markdown-content th {
+	text-align: left;
+	font-weight: 600;
+	color: var(--sl-color-white);
+	border-bottom: 2px solid var(--ampere-meter-dim);
+	white-space: nowrap;
+}
+
+.sl-markdown-content td,
+.sl-markdown-content th {
+	padding: 0.5rem 0.85rem 0.5rem 0;
+	vertical-align: top;
+	border-bottom: 1px solid var(--ampere-rule);
+}
+
+.sl-markdown-content tr:last-child td {
+	border-bottom: none;
+}
+
+.sl-markdown-content td code {
+	white-space: nowrap;
+}
+
+/* Inline code reads as a distinct object rather than tinted prose. */
+.sl-markdown-content :not(pre) > code {
+	background-color: color-mix(in srgb, var(--sl-color-gray-6) 70%, transparent);
+	border: 1px solid var(--ampere-rule);
+	border-radius: 0.25rem;
+	padding: 0.1em 0.35em;
+	font-size: 0.9em;
+}
+
+/* Site header: a thin meter line under the chrome. */
+.header {
+	border-bottom: 1px solid var(--ampere-rule);
+	box-shadow: inset 0 -2px 0 -1px color-mix(in srgb, var(--ampere-meter) 35%, transparent);
+}
+
+/* Splash page hero. */
+.hero h1 {
+	font-weight: 650;
+	letter-spacing: -0.03em;
+}
+
+.hero .tagline {
+	max-width: 34rem;
+	color: var(--sl-color-gray-2);
+}
+
+/* Diagram figures. */
+.ampere-figure {
+	margin: 1.75rem 0;
+	padding: 1.1rem;
+	border: 1px solid var(--ampere-rule);
+	border-radius: 0.5rem;
+	background: color-mix(in srgb, var(--sl-color-gray-6) 45%, transparent);
+}
+
+/* The diagram scrolls on a narrow screen; the caption stays readable. */
+.ampere-scroll {
+	overflow-x: auto;
+}
+
+.ampere-figure svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	min-width: 30rem;
+	max-width: 44rem;
+	margin: 0 auto;
+}
+
+.ampere-figure figcaption {
+	margin-top: 0.85rem;
+	font-size: var(--sl-text-xs);
+	color: var(--sl-color-gray-3);
+	text-align: center;
+	text-wrap: pretty;
+}
+
+.ampere-figure .node {
+	fill: color-mix(in srgb, var(--sl-color-gray-6) 90%, transparent);
+	stroke: var(--ampere-rule);
+}
+
+.ampere-figure .node-accent {
+	fill: color-mix(in srgb, var(--ampere-meter) 16%, transparent);
+	stroke: var(--ampere-meter-dim);
+}
+
+.ampere-figure .label {
+	fill: var(--sl-color-white);
+	font-family: var(--__sl-font);
+	font-size: 13px;
+}
+
+.ampere-figure .label-sub {
+	fill: var(--sl-color-gray-3);
+	font-family: var(--__sl-font-mono);
+	font-size: 11px;
+}
+
+.ampere-figure .edge {
+	stroke: var(--sl-color-gray-4);
+	fill: none;
+	stroke-width: 1.4;
+}
+
+.ampere-figure .edge-accent {
+	stroke: var(--ampere-meter);
+	fill: none;
+	stroke-width: 1.6;
+}
+
+.ampere-figure .edge-dashed {
+	stroke: var(--sl-color-gray-4);
+	fill: none;
+	stroke-width: 1.4;
+	stroke-dasharray: 5 4;
+}
+
+.ampere-figure .arrow {
+	fill: var(--sl-color-gray-4);
+}
+
+.ampere-figure .arrow-accent {
+	fill: var(--ampere-meter);
+}
+
+/* Mobile: give tables and figures room to breathe. */
+@media (max-width: 50rem) {
+	.ampere-figure {
+		padding: 0.75rem;
+	}
+}

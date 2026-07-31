@@ -1,0 +1,19 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ampere">
+  <title>Ampere</title>
+  <rect width="512" height="512" rx="112" fill="#17130F"/>
+  <!-- A VU meter, because an ampere is measured by an ammeter and a VU meter
+       is the same instrument. The narrow 74 degree sweep and the needle
+       pivoting from below the scale are what keep it from reading as a
+       speedometer; the red zone on the right tail is the part only a VU meter
+       has, and it is still legible at 32px. The badge form is for the Alexa skill tile; the
+       needle goes cream there so it separates from the amber scale. -->
+  <g transform="translate(0,-66)">
+    <path d="M 99.5 244.4 A 260 260 0 0 1 370.0 218.3" fill="none"
+          stroke="#E8A33D" stroke-width="38" stroke-linecap="round"/>
+    <path d="M 382.0 224.6 A 260 260 0 0 1 412.5 244.4" fill="none"
+          stroke="#D8542F" stroke-width="38" stroke-linecap="round"/>
+    <path d="M 258.5 444.4 L 324.6 240.9" stroke="#F5EFE6" stroke-width="26"
+          stroke-linecap="round"/>
+    <circle cx="256" cy="452" r="21" fill="#E8A33D"/>
+  </g>
+</svg>
