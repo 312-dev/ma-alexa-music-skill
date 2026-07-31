@@ -42,10 +42,28 @@ walks the whole path and is honest about which steps are slow.
 ## Quick start
 
 ```sh
-cp .env.example .env        # fill in PUBLIC_BASE, SUBSONIC_*, SIGNING_KEY, ADMIN_TOKEN
-docker build -t ampere .
-docker run -p 5056:5056 --env-file .env -v ampere-data:/data ampere
+git clone https://github.com/GraysonCAdams/ampere && cd ampere
+cp .env.example .env        # PUBLIC_BASE, SUBSONIC_*, SIGNING_KEY, ADMIN_TOKEN
+docker compose up -d
 ```
+
+That pulls a published image; nothing is built locally. Or without compose:
+
+```sh
+docker run -p 5056:5056 --env-file .env -v ampere-data:/data \
+  ghcr.io/graysoncadams/ampere:latest
+```
+
+Images are published to GHCR for **linux/amd64 and linux/arm64**, built from
+the tagged commit with build provenance attached. Pin by digest rather than by
+tag for anything you care about, since a tag can move under a container that
+never reports having moved:
+
+```sh
+docker pull ghcr.io/graysoncadams/ampere@sha256:...
+```
+
+Building from source still works: `docker build -t ampere .`
 
 Then open `https://your-host/setup`. The wizard validates that Amazon can
 actually reach your endpoint **before** it creates the skill, creates and

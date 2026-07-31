@@ -8,9 +8,32 @@ sidebar:
 The bridge is a small Flask application. It has two runtime dependencies,
 `flask` and `gunicorn`, and it keeps almost nothing on disk.
 
-## Build
+## Get the image
 
-There is no published image. Build from the repository:
+Images are published to the GitHub Container Registry for **linux/amd64 and
+linux/arm64**, built from the tagged commit with build provenance attached, so
+there is nothing to compile on a Pi or an ARM VPS.
+
+```sh
+docker pull ghcr.io/graysoncadams/ampere:latest
+```
+
+Tags are `latest` for the newest release, a version tag such as `1.2` or
+`1.2.3`, and `edge` for the tip of `main`.
+
+:::caution[Pin by digest for anything you care about]
+A tag is mutable. `:latest` can change under a container that never reports
+having moved, which is a bad way to find out your bridge restarted onto a
+different build.
+
+```sh
+docker pull ghcr.io/graysoncadams/ampere@sha256:...
+```
+
+The digest of every published build is printed in the summary of its CI run.
+:::
+
+Building from source works if you would rather:
 
 ```sh
 git clone https://github.com/GraysonCAdams/ampere.git
@@ -66,7 +89,7 @@ docker run -d --name ampere --restart unless-stopped \
   -p 127.0.0.1:5056:5056 \
   --env-file .env \
   -v ampere-data:/data \
-  ampere
+  ghcr.io/graysoncadams/ampere:latest
 ```
 
 Binding to `127.0.0.1` is deliberate: the reverse proxy is the only thing that
@@ -77,7 +100,7 @@ The same as Compose:
 ```yaml
 services:
   ampere:
-    build: .
+    image: ghcr.io/graysoncadams/ampere:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:5056:5056"

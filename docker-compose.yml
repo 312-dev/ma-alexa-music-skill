@@ -1,0 +1,16 @@
+services:
+  ampere:
+    # Pinned by tag here for readability. Pin by digest in anything you care
+    # about: a tag is mutable, so :latest can change under a container that
+    # never reports having moved.
+    image: ghcr.io/graysoncadams/ampere:latest
+    container_name: ampere
+    restart: unless-stopped
+    ports:
+      - "5056:5056"
+    env_file: .env
+    volumes:
+      - ampere-data:/data
+
+volumes:
+  ampere-data:
