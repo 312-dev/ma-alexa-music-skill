@@ -1,4 +1,4 @@
-"""GetDisplayableContent — the browse experience.
+"""GetDisplayableContent, the browse experience.
 
 Note this directive answers on payloadVersion 2.0 while its errors still go out
 on Alexa.Media at 1.0, and it takes an ARRAY of resolved criteria rather than

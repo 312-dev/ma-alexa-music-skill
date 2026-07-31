@@ -164,7 +164,7 @@ def test_token_rejects_forged_code(client):
 
 def test_refresh_token_grant(client):
     import oauth
-    refresh = oauth.mint("refresh", 3600, sub="grayson")
+    refresh = oauth.mint("refresh", 3600, sub="owner")
     resp = client.post("/oauth/token", data={
         "grant_type": "refresh_token", "refresh_token": refresh,
         "client_id": "ma-alexa", "client_secret": "test-client-secret",
@@ -175,7 +175,7 @@ def test_refresh_token_grant(client):
 def test_access_token_not_accepted_as_refresh_token(client):
     """Token kinds must not be interchangeable."""
     import oauth
-    access = oauth.mint("access", 3600, sub="grayson")
+    access = oauth.mint("access", 3600, sub="owner")
     resp = client.post("/oauth/token", data={
         "grant_type": "refresh_token", "refresh_token": access,
         "client_id": "ma-alexa", "client_secret": "test-client-secret",

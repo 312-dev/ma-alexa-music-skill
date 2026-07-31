@@ -74,8 +74,8 @@ def redirect_allowed(uri: str) -> bool:
 
 def issue_tokens() -> dict:
     return {
-        "access_token": mint("access", ACCESS_TTL, sub="grayson"),
-        "refresh_token": mint("refresh", 365 * 24 * 3600, sub="grayson"),
+        "access_token": mint("access", ACCESS_TTL, sub="owner"),
+        "refresh_token": mint("refresh", 365 * 24 * 3600, sub="owner"),
         "token_type": "Bearer",
         "expires_in": ACCESS_TTL,
     }
