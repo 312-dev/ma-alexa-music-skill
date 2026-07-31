@@ -1,0 +1,380 @@
+"""Out-of-band queues: a stable contentId for a track list that has no name.
+
+Every other contentId this service issues names something Subsonic already
+knows about: an album, a playlist, an artist, a genre. The id alone is enough
+to re-derive the track list on any later request, which is what keeps Initiate
+inside Amazon's budget and lets the service hold no per-user playback state.
+
+Music Assistant breaks that assumption. A queue MA composes is the output of a
+smart playlist, or three albums shuffled together, or whatever the user
+dragged into order thirty seconds ago. The individual tracks still live on the
+Subsonic server, and they have to: the bridge streams from there and nowhere
+else. The *list* is what has no name. There is nothing for a contentId to
+point at. Alexa still needs one: it echoes the contentId it was handed at Initiate
+back on every later queue request, for the life of the queue, and an Item
+carries no field to hand back a different one. Content cannot be swapped
+mid-queue, and a queue with no id cannot be played at all.
+
+So the list is published here, ahead of playback, and is given an opaque id
+that behaves like every other one: stable, re-derivable, and good for the life
+of the queue. `ext:<token>` is that id.
+
+The token is an HMAC of the track list under SIGNING_KEY, truncated. Hashing
+the list means republishing an unchanged queue returns the id Alexa is already
+holding instead of orphaning it. HMAC rather than a plain digest means someone
+who knows a few song ids still cannot enumerate other people's queues.
+
+Records are written to disk, not held in memory, for the same two reasons
+queuestate is: gunicorn runs several workers and a dict would give each its own
+view, and a bridge restart in the middle of a song must not end playback.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import pathlib
+import re
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+from flask import Blueprint, jsonify, request
+
+import subsonic
+
+logger = logging.getLogger("ma-music-skill.queue-api")
+
+bp = Blueprint("queue_api", __name__)
+
+# Same key app.py signs stream URLs with. If SIGNING_KEY is unset both modules
+# fall back to their own random key, which is fine here: nothing outside this
+# module ever has to reproduce one of these tokens.
+SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
+
+# A subdirectory of the queuestate root rather than the root itself, so these
+# never share a namespace with the per-queueId shuffle/loop files.
+STATE_DIR = pathlib.Path(
+    os.environ.get("QUEUE_STATE_DIR", "/data/queuestate")
+) / "external"
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Seven days. A published queue is dead weight the moment Alexa stops asking
+# for it, but there is no event that tells us when that happened, so the only
+# safe bound is one long enough that no real listening session outlives it.
+TTL = int(os.environ.get("EXTERNAL_QUEUE_TTL", str(7 * 24 * 3600)))
+MAX_QUEUES = int(os.environ.get("EXTERNAL_QUEUE_MAX", "64"))
+
+CONTENT_PREFIX = "ext"
+
+# The alias resolve() accepts for "whatever was published most recently". It is
+# deliberately never handed to Alexa; see handoff_content_id below.
+CURRENT = "current"
+
+TOKEN_BYTES = 12
+
+# Song lookups run wide because a published queue can be a few hundred tracks
+# and each one is a round trip. This is off the Alexa request path entirely
+# (publishing happens before anyone says anything), but a user waiting on a
+# speaker to start is still waiting.
+_FETCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="extq-fetch")
+
+
+# --------------------------------------------------------------------------
+# the handoff phrase
+# --------------------------------------------------------------------------
+#
+# Publishing a queue solves the id problem and none of the utterance problem.
+# Alexa resolves what was *said* against the uploaded catalog and hands us the
+# result; an arbitrary MA queue has no name anyone can say. Three ways out were
+# considered:
+#
+#   (a) An on-deck slot: publish, then let the next Initiate from that account
+#       claim whatever is pending. Requires no phrase at all, and is wrong the
+#       first time two things start at once or the user says something else in
+#       between. The failure is silent and plays the wrong music.
+#   (b) One fixed phrase that always means "the queue I just published". The
+#       user says it once per handoff and never sees it again, because MA
+#       speaks it, not them.
+#   (c) Refuse anything without a catalog identity, so MA can only ever ask for
+#       an album or a playlist that already exists. Correct, and gives up the
+#       entire point of the provider.
+#
+# (b) is chosen. It is the only one that is both deterministic and general.
+# The cost is a word that competes with the library: Alexa resolves content
+# before it routes to a provider, so a phrase matching a real artist or track
+# will be eaten by it (this is the same failure that cost "jukebox" and "gray
+# tunes" their alias). Hence a list, so a user whose library really does
+# contain a "Music Assistant" can move to a phrase that it does not.
+#
+# The phrase resolves at search time to the concrete `ext:<token>` of the
+# newest published queue, never to the `ext:current` alias. Alexa would echo an
+# alias back for hours and quietly follow it onto a later queue; a token pins
+# the answer at the moment the user asked.
+
+HANDOFF_PHRASES = tuple(
+    p.strip().lower()
+    for p in os.environ.get("MA_HANDOFF_PHRASE", "music assistant").split(",")
+    if p.strip()
+)
+
+_NOISE = re.compile(r"\b(playlist|station|radio|queue)s?\b", re.I)
+_PUNCT = re.compile(r"[^\w\s]+")
+
+
+def _normalise(text: str) -> str:
+    """Flatten spoken text enough to compare it against a configured phrase.
+
+    Speech arrives with inconsistent casing, an occasional trailing "playlist",
+    and whatever punctuation the ASR felt like. match_playlist in app.py strips
+    the same things for the same reason.
+    """
+    value = _PUNCT.sub(" ", (text or "").lower())
+    value = _NOISE.sub(" ", value)
+    return " ".join(value.split())
+
+
+def is_handoff_phrase(text: str) -> bool:
+    """True when this utterance is asking for the published Music Assistant queue."""
+    spoken = _normalise(text)
+    return bool(spoken) and any(spoken == _normalise(p) for p in HANDOFF_PHRASES)
+
+
+def handoff_content_id() -> str | None:
+    """The contentId the handoff phrase should resolve to right now.
+
+    None when nothing has been published yet, which is a CONTENT_NOT_FOUND
+    rather than something to guess at.
+    """
+    record = _newest()
+    return f"{CONTENT_PREFIX}:{record['token']}" if record else None
+
+
+def handoff_name() -> str:
+    """What the Alexa app should call the handoff queue."""
+    record = _newest()
+    label = (record or {}).get("name") or ""
+    return label or "Music Assistant"
+
+
+# --------------------------------------------------------------------------
+# storage
+# --------------------------------------------------------------------------
+
+
+def _safe(token: str) -> str:
+    # Tokens are ours (hex), but never trust an id straight into a path.
+    return "".join(c for c in (token or "") if c.isalnum() or c in "-_")[:80]
+
+
+def _path(token: str) -> pathlib.Path:
+    return STATE_DIR / f"{_safe(token)}.json"
+
+
+def token_for(track_ids: list[str]) -> str:
+    """Stable, unguessable token for an ordered track list."""
+    msg = ("extq\n" + "\n".join(track_ids)).encode()
+    return hmac.new(SIGNING_KEY, msg, hashlib.sha256).hexdigest()[: TOKEN_BYTES * 2]
+
+
+def _write(record: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    target = _path(record["token"])
+    fd, tmp = tempfile.mkstemp(dir=str(STATE_DIR), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(record, handle)
+        os.replace(tmp, target)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _read(path: pathlib.Path) -> dict | None:
+    try:
+        record = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) and record.get("token") else None
+
+
+def _expired(record: dict, now: float | None = None) -> bool:
+    return (now or time.time()) - float(record.get("published", 0)) > TTL
+
+
+def _records() -> list[dict]:
+    """Every live record, newest first. Expired files are deleted on the way."""
+    now = time.time()
+    out = []
+    for path in STATE_DIR.glob("*.json"):
+        record = _read(path)
+        if record is None or _expired(record, now):
+            # An unreadable file is as useless as an expired one and will never
+            # become readable, so both go.
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        out.append(record)
+    out.sort(key=lambda r: float(r.get("published", 0)), reverse=True)
+    return out
+
+
+def _newest() -> dict | None:
+    """The most recently published live record.
+
+    Ordered by mtime and read one at a time rather than through _records,
+    because this runs on the Alexa search path when the handoff phrase is
+    resolved, and reading the whole store to answer it would put a few dozen
+    file reads in front of a speaker that is waiting to start.
+    """
+    try:
+        paths = sorted(
+            STATE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+    except OSError:
+        return None
+    now = time.time()
+    for path in paths:
+        record = _read(path)
+        if record is not None and not _expired(record, now):
+            return record
+    return None
+
+
+def _evict() -> None:
+    """Keep the store bounded. Oldest publish time goes first."""
+    records = _records()
+    for record in records[MAX_QUEUES:]:
+        try:
+            _path(record["token"]).unlink()
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# publish / resolve
+# --------------------------------------------------------------------------
+
+
+def _fetch(song_id: str) -> dict | None:
+    try:
+        return subsonic.song(song_id)
+    except Exception:
+        # One track that has left the library must not cost the whole queue.
+        logger.warning("published queue references unknown song %s", song_id)
+        return None
+
+
+def publish(track_ids: list[str], name: str = "") -> dict:
+    """Store an ordered track list and return its record.
+
+    Whole song records are stored, not ids, for the reason resolve_tracks
+    caches whole records: re-fetching each song per Item put Initiate seconds
+    over budget. Publishing is the one moment there is time to do the lookups.
+    """
+    ids = [str(i) for i in track_ids if str(i or "").strip()]
+    token = token_for(ids)
+
+    songs = [s for s in _FETCH_POOL.map(_fetch, ids) if s and s.get("id")]
+    record = {
+        "token": token,
+        "name": (name or "").strip(),
+        "tracks": songs,
+        "requested": len(ids),
+        "published": time.time(),
+    }
+    _write(record)
+    _evict()
+    return record
+
+
+def resolve(token: str) -> list[dict]:
+    """Song records for a published token, or [] if unknown or expired.
+
+    Shape matches what resolve_tracks returns for every other prefix: a list of
+    Subsonic song dicts as subsonic.song hands them back. app.py's `ext:`
+    branch can drop this straight in.
+    """
+    if token == CURRENT:
+        record = _newest()
+    else:
+        record = _read(_path(token))
+        if record is not None and _expired(record):
+            record = None
+    if record is None:
+        return []
+    return [s for s in record.get("tracks", []) if s and s.get("id")]
+
+
+# --------------------------------------------------------------------------
+# routes
+# --------------------------------------------------------------------------
+
+
+def _authorized() -> bool:
+    # Deliberately a copy of app._authorized rather than an import: this module
+    # is imported by app, and importing back would be a cycle.
+    expected = os.environ.get("ADMIN_TOKEN")
+    return bool(expected) and request.headers.get("X-Admin-Token") == expected
+
+
+@bp.post("/queue")
+def publish_queue():
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    tracks = body.get("tracks")
+    if not isinstance(tracks, list) or not tracks:
+        return jsonify({"error": "tracks must be a non-empty list of song ids"}), 400
+    if not all(isinstance(t, str) for t in tracks):
+        return jsonify({"error": "tracks must be a non-empty list of song ids"}), 400
+
+    record = publish(tracks, str(body.get("name") or ""))
+    logger.info(
+        "published external queue %s (%d of %d tracks) %r",
+        record["token"], len(record["tracks"]), record["requested"], record["name"],
+    )
+    return jsonify(
+        {
+            "content_id": f"{CONTENT_PREFIX}:{record['token']}",
+            "count": len(record["tracks"]),
+            "requested": record["requested"],
+        }
+    )
+
+
+@bp.get("/queue/<token>")
+def show_queue(token: str):
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    record = _newest() if token == CURRENT else _read(_path(token))
+    if record is None or _expired(record):
+        return jsonify({"error": "unknown queue"}), 404
+    return jsonify(
+        {
+            "content_id": f"{CONTENT_PREFIX}:{record['token']}",
+            "name": record.get("name", ""),
+            "count": len(record.get("tracks", [])),
+            "requested": record.get("requested", 0),
+            "published": record.get("published", 0),
+            "tracks": [
+                {
+                    "id": s.get("id"),
+                    "title": s.get("title"),
+                    "artist": s.get("artist"),
+                    "album": s.get("album"),
+                }
+                for s in record.get("tracks", [])
+            ],
+        }
+    )

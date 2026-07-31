@@ -1,0 +1,16 @@
+{
+  "type": "player",
+  "domain": "ampere",
+  "stage": "experimental",
+  "name": "Ampere (Alexa music skill)",
+  "description": "Play Music Assistant queues on Echo devices and Alexa speaker groups through the Ampere music skill, as a native Alexa queue with per-track metadata.",
+  "codeowners": ["@GraysonCAdams"],
+  "credits": [
+    "[alexapy](https://gitlab.com/keatontaylor/alexapy)",
+    "[alexa provider](https://github.com/music-assistant/server/tree/master/music_assistant/providers/alexa) by @alams154, whose auth and discovery this follows"
+  ],
+  "requirements": ["alexapy==1.29.17"],
+  "documentation": "https://github.com/GraysonCAdams/ampere/blob/main/ma_provider/README.md",
+  "multi_instance": true,
+  "builtin": false
+}

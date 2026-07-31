@@ -1,0 +1,9 @@
+# Installed into the Music Assistant container, not the bridge. MA reads the
+# manifest's `requirements` and installs them itself, so this file exists to
+# state the pin in one obvious place and to let the directory be pip-installed
+# by hand when debugging outside MA.
+#
+# Pinned to the version Music Assistant 2.9.10 ships for its own alexa
+# provider. A different pin would give pip two versions to reconcile inside one
+# container the moment both providers are enabled.
+alexapy==1.29.17
