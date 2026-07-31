@@ -21,7 +21,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import subsonic
 
-from . import qr, smapi, state as store, validate
+from . import access, qr, smapi, state as store, validate
 
 bp = Blueprint(
     "setup", __name__,
@@ -78,6 +78,12 @@ def authed() -> bool:
 _OPEN = {"setup.static", "setup.login", "setup.verify"}
 
 
+def request_ip() -> str:
+    return access.client_ip(
+        request.remote_addr, request.headers.get("X-Forwarded-For")
+    )
+
+
 @bp.before_request
 def _guard():
     if request.endpoint == "setup.static":
@@ -87,8 +93,28 @@ def _guard():
         # run ask against the operator's Amazon account. Refusing is the only
         # safe default, and saying why beats a blank 404.
         return render_template("disabled.html"), 503
+
+    ip = request_ip()
+
+    # The verify route is the one thing here that is deliberately reachable
+    # from anywhere: its entire purpose is to be opened on a phone that is off
+    # the WiFi, to prove the endpoint answers from the public internet. It
+    # carries a random short-lived token and reveals nothing.
+    if request.endpoint != "setup.verify" and not access.address_allowed(ip):
+        # Amazon never needs the admin plane, so there is no cost to refusing
+        # it everywhere Amazon might be calling from.
+        return render_template(
+            "blocked.html", ip=ip,
+            networks=os.environ.get("SETUP_ALLOW_NETWORKS") or "private",
+            proxied=bool(request.headers.get("X-Forwarded-For")),
+            trusted=os.environ.get("TRUSTED_PROXIES") or "",
+        ), 403
+
     if request.endpoint in _OPEN:
         return None
+
+    if remaining := access.locked_out(ip):
+        return render_template("lockout.html", seconds=remaining), 429
     if authed():
         return None
     return render_template("login.html", target=request.path, failed=False), 401
@@ -250,10 +276,18 @@ def login():
     if request.method == "GET":
         return render_template("login.html", target=request.args.get("next", "/setup"),
                                failed=False)
+    ip = request_ip()
+    if remaining := access.locked_out(ip):
+        return render_template("lockout.html", seconds=remaining), 429
+
     supplied = (request.form.get("token") or "").strip()
     if not hmac.compare_digest(supplied, _admin_token()):
+        # Counted per address. A single shared token is otherwise guessable at
+        # whatever rate the reverse proxy will pass through.
+        access.record_failure(ip)
         return render_template("login.html", target=request.form.get("target", "/setup"),
                                failed=True), 401
+    access.record_success(ip)
     target = request.form.get("target") or "/setup"
     if not target.startswith("/setup"):
         target = "/setup"

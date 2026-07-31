@@ -38,6 +38,7 @@ export default defineConfig({
 						{ label: 'Choosing an alias', slug: 'setup/alias' },
 						{ label: 'Public HTTPS endpoint', slug: 'setup/ingress' },
 						{ label: 'Deploy the bridge', slug: 'setup/deploy' },
+						{ label: 'Reaching setup safely', slug: 'setup/admin-access' },
 						{ label: 'Validate the endpoint', slug: 'setup/validate' },
 						{ label: 'Create the skill', slug: 'setup/skill' },
 						{ label: 'Catalog and enablement', slug: 'setup/catalog' },

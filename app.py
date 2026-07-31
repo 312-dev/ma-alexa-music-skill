@@ -40,6 +40,7 @@ import queuestate
 import setup_ui
 import signature
 import subsonic
+from setup_ui import access
 
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1366,8 +1367,18 @@ def art(cover_id: str, expires: int, sig: str):
 
 
 def _authorized() -> bool:
+    """Token, and only from a network setup is allowed on.
+
+    /captures replays inbound Amazon requests and /diag names the music server,
+    so they belong to the admin plane even though they live on the port Amazon
+    calls. Amazon never asks for either, so nothing is lost by refusing them
+    from off the LAN. Same rule and same variables as /setup.
+    """
     expected = os.environ.get("ADMIN_TOKEN")
-    return bool(expected) and request.headers.get("X-Admin-Token") == expected
+    if not expected or request.headers.get("X-Admin-Token") != expected:
+        return False
+    client = access.client_ip(request.remote_addr, request.headers.get("X-Forwarded-For"))
+    return access.address_allowed(client)
 
 
 @app.get("/healthz")

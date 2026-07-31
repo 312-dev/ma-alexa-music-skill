@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ampere setup is locked</title>
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
+</head>
+<body>
+<main class="container">
+  <h1>Too many failed attempts</h1>
+  <p>
+    This address is locked out for about
+    <strong>{{ (seconds // 60) + 1 }} minute{{ '' if seconds < 60 else 's' }}</strong>.
+  </p>
+  <p>
+    The admin token is a single shared secret, so without a limit it can be
+    guessed at whatever rate the network allows. Tune with
+    <code>SETUP_LOCKOUT_THRESHOLD</code> and
+    <code>SETUP_LOCKOUT_SECONDS</code>, or restart the bridge to clear it.
+  </p>
+</main>
+</body>
+</html>
