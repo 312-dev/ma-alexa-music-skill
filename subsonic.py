@@ -1,4 +1,8 @@
-"""Minimal Subsonic/OpenSubsonic client for Navidrome.
+"""Minimal Subsonic API client.
+
+Plain Subsonic 1.16.1, no OpenSubsonic extensions, so any Subsonic-compatible
+server should work. Token auth sets the compatibility floor at 1.13. Tested
+against Navidrome.
 
 Navidrome lives on the tailnet and is not internet-routable, so everything the
 skill exposes to Amazon is proxied back through this service. That is a feature
@@ -87,12 +91,73 @@ def random_songs(size: int = 50, genre: str | None = None) -> list[dict]:
     )
 
 
+def playlists() -> list[dict]:
+    return call("getPlaylists.view").get("playlists", {}).get("playlist", [])
+
+
+def playlist_tracks(playlist_id: str) -> list[dict]:
+    """Tracks of a playlist, in the playlist's own order."""
+    return call("getPlaylist.view", id=playlist_id).get("playlist", {}).get("entry", [])
+
+
+def genres() -> list[dict]:
+    return call("getGenres.view").get("genres", {}).get("genre", [])
+
+
+def songs_by_genre(genre: str, count: int = 100) -> list[dict]:
+    """Ordered genre listing.
+
+    Preferred over random_songs(genre=...) because it is deterministic, which
+    matters when a queue is re-derived from its contentId on a later request.
+    """
+    return (
+        call("getSongsByGenre.view", genre=genre, count=count)
+        .get("songsByGenre", {})
+        .get("song", [])
+    )
+
+
+def starred_songs() -> list[dict]:
+    return call("getStarred2.view").get("starred2", {}).get("song", [])
+
+
+def star(song_id: str) -> None:
+    call("star.view", id=song_id)
+
+
+def unstar(song_id: str) -> None:
+    call("unstar.view", id=song_id)
+
+
 def artist_top_songs(artist_name: str, count: int = 50) -> list[dict]:
     return (
         call("getTopSongs.view", artist=artist_name, count=count)
         .get("topSongs", {})
         .get("song", [])
     )
+
+
+def similar_artists(artist_id: str, count: int = 20) -> list[dict]:
+    """Artists similar to this one that exist in the local library.
+
+    getArtistInfo2 answers in ~725ms with ~20 usable artists, which is what
+    makes stations affordable. The obvious alternative, getSimilarSongs2, hands
+    back local songs directly but takes ~10s every single time, uncached, so it
+    can never sit on an Alexa request. It looked "unsupported" for a long while
+    only because it was quietly exceeding TIMEOUT.
+
+    includeNotPresent is pinned off: a similar artist with nothing in the
+    library is a name with no tracks behind it. Servers that ignore the flag
+    mark those entries with a negative id, so they are filtered again here.
+    """
+    info = call(
+        "getArtistInfo2.view", id=artist_id, count=count, includeNotPresent="false"
+    ).get("artistInfo2", {})
+    return [
+        artist
+        for artist in info.get("similarArtist", [])
+        if str(artist.get("id") or "") and not str(artist.get("id")).startswith("-")
+    ]
 
 
 def stream_url(song_id: str, *, fmt: str = "mp3", bitrate: int = 256) -> str:
