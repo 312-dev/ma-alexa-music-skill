@@ -649,10 +649,38 @@ CATALOG_KINDS = {
 }
 
 
+_VENDORS = {"at": 0.0, "value": None}
+
+
+def vendor_prefill() -> dict:
+    """The vendor the account already knows, so the form arrives filled in.
+
+    Cached for five minutes: it is one SMAPI call per render otherwise, and
+    vendors change roughly never. An account with several vendors gets them
+    all, for a dropdown rather than an env-var errand.
+    """
+    if not smapi_rest.connected():
+        return {"detected": "", "options": [], "error": ""}
+    now = time.time()
+    if _VENDORS["value"] is not None and now - _VENDORS["at"] < 300:
+        return _VENDORS["value"]
+    try:
+        options = [(v.get("id", ""), v.get("name", ""))
+                   for v in smapi_rest.vendors()]
+        forced = (os.environ.get("VENDOR_ID") or "").strip()
+        detected = forced or (options[0][0] if len(options) == 1 else "")
+        value = {"detected": detected, "options": options, "error": ""}
+    except Exception as exc:
+        value = {"detected": "", "options": [], "error": str(exc)}
+    _VENDORS.update(at=now, value=value)
+    return value
+
+
 def wizard_context(**extra) -> dict:
     current = store.load()
     context = {
         "state": current,
+        "vendor": vendor_prefill(),
         "public_base": public_base(),
         "amazon": {
             "connected": smapi_rest.connected(),
@@ -865,18 +893,19 @@ def wizard_skill():
             **wizard_context())
 
     alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
+    vendor = (request.form.get("vendor_id") or "").strip()
     manifest = smapi.manifest(
         name=alias_word.title(),
         public_base=public_base(),
         cert_type=current.get("cert_type") or "Trusted",
     )
     try:
-        skill_id = smapi_rest.create_skill(manifest)
+        skill_id = smapi_rest.create_skill(manifest, vendor)
     except Exception as exc:
         return fragment("wizard/_skill.html", blocked=False, result={
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
 
-    store.update(skill_id=skill_id, alias=alias_word)
+    store.update(skill_id=skill_id, alias=alias_word, vendor_id=vendor)
     return step_completed("wizard/_skill.html", blocked=False, result={
         "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
 

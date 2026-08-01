@@ -284,9 +284,14 @@ def _unwrap(manifest: dict) -> dict:
     return inner if isinstance(inner, dict) else manifest
 
 
-def create_skill(manifest: dict) -> str:
+def vendors() -> list[dict]:
+    """Every vendor on the account, for the wizard to offer rather than guess."""
+    return call("GET", "/v1/vendors").get("vendors") or []
+
+
+def create_skill(manifest: dict, vendor: str = "") -> str:
     result = call("POST", "/v1/skills", {
-        "vendorId": vendor_id(), "manifest": _unwrap(manifest),
+        "vendorId": vendor or vendor_id(), "manifest": _unwrap(manifest),
     })
     skill_id = result.get("skillId")
     if not skill_id:

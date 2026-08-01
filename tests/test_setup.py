@@ -70,6 +70,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(smapi, "ask_configured", lambda: False)
 
     views._SMAPI_CACHE.update(at=0.0, value=None)
+    views._VENDORS.update(at=0.0, value=None)
     views.TOKENS = validate.Tokens()
     yield
 
@@ -702,8 +703,9 @@ def fake_rest(monkeypatch, **overrides):
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
     created = {"skills": [], "catalogs": [], "associations": []}
 
-    def create_skill(manifest):
+    def create_skill(manifest, vendor=""):
         created["skills"].append(manifest)
+        created["vendor"] = vendor
         return "amzn1.ask.skill.abc"
 
     def create_catalog(title, catalog_type):
@@ -1067,6 +1069,49 @@ def test_wizard_alias_save_surfaces_a_collision_but_still_saves(ui, monkeypatch)
     assert "Jukebox The Ghost" in body
     assert "Continue with" in body
     assert store.load()["alias"] == "jukebox"
+
+
+def _skill_step_ready(monkeypatch):
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    store.update(endpoint_ok=True, alias="ampere")
+
+
+def test_skill_step_prefills_the_detected_vendor(ui, monkeypatch):
+    """A value the wizard can read is shown filled in, never as a placeholder."""
+    _skill_step_ready(monkeypatch)
+    monkeypatch.setattr(smapi_rest, "vendors",
+                        lambda: [{"id": "M1REAL", "name": "Grayson"}])
+    body = ui.get("/setup/wizard/skill").data.decode()
+    assert 'value="M1REAL"' in body
+    assert "placeholder" not in body
+    assert 'data-reset="sk-vendor"' in body
+    assert 'value="ampere"' in body          # alias arrives filled too
+
+
+def test_skill_step_offers_a_dropdown_when_the_account_has_several_vendors(ui, monkeypatch):
+    _skill_step_ready(monkeypatch)
+    monkeypatch.setattr(smapi_rest, "vendors", lambda: [
+        {"id": "M1A", "name": "one"}, {"id": "M1B", "name": "two"}])
+    body = ui.get("/setup/wizard/skill").data.decode()
+    assert "<select" in body
+    assert "M1A" in body and "M1B" in body
+
+
+def test_creating_the_skill_uses_the_vendor_from_the_form(ui, monkeypatch):
+    _skill_step_ready(monkeypatch)
+    seen = {}
+
+    def create(manifest, vendor=""):
+        seen["vendor"] = vendor
+        return "amzn1.ask.skill.new"
+
+    monkeypatch.setattr(smapi_rest, "create_skill", create)
+    ui.post("/setup/wizard/skill", data={"vendor_id": "M1CHOSEN",
+                                         "alias": "ampere"},
+            headers={"HX-Request": "true"})
+    assert seen["vendor"] == "M1CHOSEN"
+    assert store.load()["skill_id"] == "amzn1.ask.skill.new"
 
 
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):

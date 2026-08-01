@@ -5,7 +5,15 @@
 // fallback is a primary path here, not a legacy nicety. Without JavaScript the
 // rows degrade to readonly inputs that can still be selected and copied by
 // hand.
+// Reset buttons restore an input to the value the server derived, after the
+// operator has typed over it.
 document.addEventListener("click", function (event) {
+  var reset = event.target.closest("[data-reset]");
+  if (reset) {
+    var target = document.getElementById(reset.getAttribute("data-reset"));
+    if (target) target.value = reset.getAttribute("data-reset-value") || "";
+    return;
+  }
   var button = event.target.closest("[data-copy]");
   if (!button) return;
   var input = document.getElementById(button.getAttribute("data-copy"));

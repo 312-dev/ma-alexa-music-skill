@@ -419,6 +419,20 @@ body.bare {
   padding: .45rem .9rem;
 }
 
+/* A button that reads as a link: used for small in-place actions like
+   restoring a derived value, where a full button would outweigh the form
+   control it serves. */
+button.linklike {
+  all: unset;
+  cursor: pointer;
+  color: var(--pico-primary);
+  text-decoration: underline;
+  font: inherit;
+}
+button.linklike:focus-visible {
+  outline: 2px solid var(--pico-primary); outline-offset: 1px;
+}
+
 .mono { font-family: var(--pico-font-family-monospace); word-break: break-all; }
 .big-code {
   font-family: var(--pico-font-family-monospace);
