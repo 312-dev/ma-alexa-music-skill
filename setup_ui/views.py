@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import pathlib
+import socket
 import time
 
 from flask import Blueprint, make_response, redirect, render_template, request
@@ -79,6 +80,17 @@ def authed() -> bool:
 
 _OPEN = {"setup.static", "setup.login", "setup.verify",
          "setup.oauth_callback"}
+
+
+@bp.context_processor
+def _template_defaults() -> dict:
+    """Values every template in this blueprint can assume are present.
+
+    container_hint is the hostname, which inside Docker is the container id, so
+    the command shown on the sign-in page is one the reader can paste rather
+    than a placeholder they have to go and resolve first.
+    """
+    return {"container_hint": socket.gethostname() or "ampere"}
 
 
 def request_ip() -> str:

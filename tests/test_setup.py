@@ -858,3 +858,26 @@ def test_teardown_removes_the_skill_and_its_catalogs(ui, monkeypatch):
     assert removed["skills"] == ["amzn1.ask.skill.abc"]
     assert sorted(removed["catalogs"]) == ["cat-1", "cat-2"]
     assert store.load()["skill_id"] == ""
+
+
+# --- the sign-in page has to be usable by someone who did not deploy it -----
+
+
+def test_login_page_says_where_to_find_the_token(anon):
+    body = anon.get("/setup").data.decode()
+    assert "ADMIN_TOKEN" in body
+    # The three places a self-hoster would actually have put it.
+    for hint in ("printenv ADMIN_TOKEN", "nomad var get", ".env"):
+        assert hint in body, hint
+
+
+def test_login_page_covers_having_lost_the_token(anon):
+    body = anon.get("/setup").data.decode()
+    assert "openssl rand" in body
+    assert "signs out every existing session" in body
+
+
+def test_login_page_never_contains_the_token(anon, monkeypatch):
+    """The page explains where the secret lives. It must not be the secret."""
+    monkeypatch.setenv("ADMIN_TOKEN", "super-secret-value")
+    assert b"super-secret-value" not in anon.get("/setup").data
