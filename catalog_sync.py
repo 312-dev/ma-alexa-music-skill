@@ -98,9 +98,14 @@ def base(entity_id: str, name: str) -> dict:
 # --- collection -------------------------------------------------------------
 
 
-def collect() -> dict[str, list[dict]]:
+def collect(progress=None) -> dict[str, list[dict]]:
+    """Read the whole library. `progress` gets a short human line at each
+    stage; the album-by-album track crawl is minutes long on a real
+    collection, and a silent minutes-long job reads as a hung one."""
+    tell = progress or (lambda text: None)
     out: dict[str, list[dict]] = {k: [] for k in CATALOGS}
 
+    tell("reading artists")
     artist_name: dict[str, str] = {}
     for index in subsonic.call("getArtists.view").get("artists", {}).get("index", []):
         for artist in index.get("artist", []):
@@ -108,6 +113,7 @@ def collect() -> dict[str, list[dict]]:
             out["artists"].append(base(f"artist.{artist['id']}", artist.get("name")))
     log(f"artists: {len(out['artists'])}")
 
+    tell(f"reading albums ({len(out['artists'])} artists found)")
     albums, offset = [], 0
     while True:
         page = (
@@ -141,8 +147,12 @@ def collect() -> dict[str, list[dict]]:
             log(f"  skip album {album['id']}: {exc}")
             return album, []
 
+    done = 0
     with ThreadPoolExecutor(max_workers=8) as pool:
         for album, songs in pool.map(tracks_of, albums):
+            done += 1
+            tell(f"reading tracks: album {done} of {len(albums)}, "
+                 f"{len(out['tracks'])} tracks so far")
             for song in songs:
                 entity = base(f"track.{song['id']}", song.get("title"))
                 aid = song.get("artistId") or album.get("artistId")
@@ -159,6 +169,7 @@ def collect() -> dict[str, list[dict]]:
                 out["tracks"].append(entity)
     log(f"tracks: {len(out['tracks'])}")
 
+    tell(f"reading playlists ({len(out['tracks'])} tracks found)")
     for playlist in subsonic.playlists():
         out["playlists"].append(base(f"playlist.{playlist['id']}", playlist.get("name")))
     log(f"playlists: {len(out['playlists'])}")

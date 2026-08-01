@@ -1290,7 +1290,7 @@ def test_upload_runs_as_a_job_and_reports_progress(ui, monkeypatch):
 
     monkeypatch.setattr(views.threading, "Thread", Immediate)
     monkeypatch.setattr(views.catalog_sync, "collect",
-                        lambda: {"artists": [{"id": "a1"}]})
+                        lambda progress=None: {"artists": [{"id": "a1"}]})
     monkeypatch.setattr(views.catalog_sync, "apply_timestamps",
                         lambda kind, entities, saved: (entities, "hash"))
     monkeypatch.setattr(smapi_rest, "upload_catalog",

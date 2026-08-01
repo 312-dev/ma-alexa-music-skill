@@ -1104,15 +1104,16 @@ def _run_upload() -> None:
         current = store.load()
         ids = catalog_ids(current)
         _UPLOAD["phase"] = "reading the library"
-        collected = catalog_sync.collect()
+        collected = catalog_sync.collect(
+            progress=lambda text: _UPLOAD.__setitem__("phase", text))
         saved = store.load().get("catalog_hashes") or {}
         results, uploads = [], dict(current.get("uploads") or {})
         for kind, entities in collected.items():
             catalog_id = ids.get(kind)
             if not catalog_id or not entities:
                 continue
-            _UPLOAD["phase"] = f"uploading {kind}"
             final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
+            _UPLOAD["phase"] = f"uploading {kind} ({len(final)} entities)"
             payload = json.dumps({
                 "type": catalog_sync.TYPES[kind], "version": 2.0,
                 "locales": catalog_sync.LOCALES, "entities": final,
