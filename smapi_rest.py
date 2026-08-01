@@ -339,11 +339,15 @@ def enablement_status(skill_id: str, stage: str = "development") -> bool:
 
 
 def create_catalog(title: str, catalog_type: str) -> str:
+    # The usage must pair with the type exactly: AMAZON.MusicGroup goes with
+    # AlexaMusic.Catalog.MusicGroup, and so on. Any other combination is
+    # refused with "The specified type/usage combination is invalid."
+    usage = catalog_type.replace("AMAZON.", "AlexaMusic.Catalog.", 1)
     result = call("POST", "/v0/catalogs", {
         "vendorId": vendor_id(),
         "title": title,
         "type": catalog_type,
-        "usage": "AlexaMusic.Catalog.Undefined",
+        "usage": usage,
     })
     catalog_id = result.get("id") or result.get("catalogId")
     if not catalog_id:

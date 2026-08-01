@@ -148,6 +148,23 @@ def test_a_bare_manifest_passes_through():
     assert smapi_rest._unwrap(bare) is bare
 
 
+def test_catalog_usage_pairs_with_its_type(monkeypatch):
+    """AMAZON.MusicGroup must ship with AlexaMusic.Catalog.MusicGroup; a
+    mismatched usage is refused with a type/usage 404."""
+    sent = {}
+
+    def call(method, path, body=None):
+        sent.update(body or {})
+        return {"id": "cat-1"}
+
+    monkeypatch.setattr(smapi_rest, "call", call)
+    monkeypatch.setattr(smapi_rest, "vendor_id", lambda: "M1")
+    smapi_rest.create_catalog("ampere-artists", "AMAZON.MusicGroup")
+    assert sent["usage"] == "AlexaMusic.Catalog.MusicGroup"
+    smapi_rest.create_catalog("ampere-genres", "AMAZON.Genre")
+    assert sent["usage"] == "AlexaMusic.Catalog.Genre"
+
+
 # --- vendors ----------------------------------------------------------------
 
 
