@@ -456,6 +456,9 @@ nav.steps a, nav.steps .locked {
   color: var(--pico-muted-color);
 }
 nav.steps a:hover .label { color: var(--amp-ink); }
+/* Cap the label to less than a column's width so two-word titles wrap into
+   their own lane instead of spilling sideways into the neighbors' text. */
+nav.steps .label { max-width: 4.5rem; }
 nav.steps .num {
   display: grid; place-items: center; flex: none;
   width: 1.6rem; height: 1.6rem; border-radius: 50%;
