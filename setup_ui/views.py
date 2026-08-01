@@ -22,6 +22,7 @@ from flask import Blueprint, make_response, redirect, render_template, request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import catalog_sync
+import logring
 import smapi_rest
 import subsonic
 
@@ -241,6 +242,42 @@ def last_requests(limit: int = 4) -> list[dict]:
     return out
 
 
+def _logs_context() -> dict:
+    records = list(logring.RING.records)[-200:]
+    records.reverse()
+    rows = [dict(r, ago=ago(r["at"])) for r in records]
+    captures = []
+    try:
+        entries = [e for e in os.scandir(log_dir()) if e.name.endswith(".json")]
+        entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+        for entry in entries[:8]:
+            try:
+                body = json.loads(pathlib.Path(entry.path).read_text())
+            except (OSError, ValueError):
+                body = {}
+            headers = body.get("headers") or {}
+            captures.append({
+                "name": entry.name,
+                "ago": ago(entry.stat().st_mtime),
+                "signed": any(k.lower().startswith("signature")
+                              for k in headers),
+                "pretty": json.dumps(body.get("body"), indent=2)[:4000],
+            })
+    except OSError:
+        pass
+    return {"records": rows, "captures": captures}
+
+
+@bp.get("/logs")
+def logs_page():
+    return render_template("logs.html", **_logs_context())
+
+
+@bp.get("/logs/tail")
+def logs_tail():
+    return fragment("_logs.html", **_logs_context())
+
+
 def subsonic_probe() -> dict:
     """The same cheap search /diag uses."""
     try:
@@ -248,8 +285,9 @@ def subsonic_probe() -> dict:
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:200]}
     songs = result.get("song") or []
+    noun = "result" if len(songs) == 1 else "results"
     return {"ok": True,
-            "detail": f"{len(songs)} result(s) for a sample search",
+            "detail": f"{len(songs)} {noun} for a sample search",
             "sample": [s.get("title") for s in songs[:3]]}
 
 

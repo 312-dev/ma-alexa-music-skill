@@ -1,0 +1,42 @@
+<article>
+  <h2>Application log</h2>
+  {% if records %}
+  <div class="table-container">
+    <table class="table logtail">
+      <tbody>
+      {% for r in records %}
+        <tr>
+          <td class="quiet">{{ r.ago }}</td>
+          <td>{% if r.level == 'INFO' %}<span class="pill idle">info</span>
+              {% elif r.level == 'WARNING' %}<span class="pill warn">warn</span>
+              {% else %}<span class="pill bad">{{ r.level|lower }}</span>{% endif %}</td>
+          <td class="mono">{{ r.message }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="quiet">Nothing logged since the process started.</p>
+  {% endif %}
+</article>
+
+<article>
+  <h2>Inbound captures</h2>
+  <p class="quiet">
+    The newest requests that reached the music endpoint, request body included.
+    Signed means Amazon's signature headers were present; an unsigned capture
+    is a probe or a manual test, not Alexa.
+  </p>
+  {% for c in captures %}
+  <details class="well">
+    <summary>{{ c.name }}
+      <span class="quiet">{{ c.ago }}</span>
+      {% if c.signed %}<span class="pill ok">signed</span>
+      {% else %}<span class="pill warn">unsigned</span>{% endif %}</summary>
+    <pre><code>{{ c.pretty }}</code></pre>
+  </details>
+  {% else %}
+  <p class="quiet">No captures yet.</p>
+  {% endfor %}
+</article>

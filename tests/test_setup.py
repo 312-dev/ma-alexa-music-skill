@@ -9,6 +9,7 @@ validate.http_post_json) and the single seam every ask invocation goes through
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pathlib
 import time
@@ -1333,6 +1334,20 @@ def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
     assert views._UPLOAD["message"].startswith("Stopped")
     assert views._UPLOAD["running"] is False
     assert store.load().get("uploads") in (None, {})
+
+
+def test_logs_page_shows_the_ring_tail_and_captures(ui, anon):
+    assert anon.get("/setup/logs").status_code == 401
+    logging.getLogger("ma-music-skill").info("ring probe line 4711")
+    capture_file(
+        "20260101T000000-Alexa.Media.Search.GetPlayableContent.json",
+        {"headers": {"Signature": "x"},
+         "body": {"header": {"namespace": "Alexa.Media.Search",
+                             "name": "GetPlayableContent"}}})
+    body = ui.get("/setup/logs").data.decode()
+    assert "ring probe line 4711" in body
+    assert "GetPlayableContent" in body
+    assert "signed" in body
 
 
 def test_ingestion_table_reports_real_step_statuses(ui, monkeypatch):

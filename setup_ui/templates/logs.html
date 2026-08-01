@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Ampere logs{% endblock %}
+{% block body %}
+<div class="page-head">
+  <h1>Logs</h1>
+  <p>The newest application log lines and inbound request captures, for
+    debugging. This is the tail since the last restart; the full stream lives
+    in the alloc logs on the host.</p>
+</div>
+<div id="logs" hx-get="/setup/logs/tail" hx-trigger="every 10s"
+     hx-swap="innerHTML">{% include "_logs.html" %}</div>
+{% endblock %}

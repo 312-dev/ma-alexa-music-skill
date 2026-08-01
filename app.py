@@ -34,6 +34,7 @@ from html import escape
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
+import logring
 import mdns
 import oauth
 import queue_api
@@ -65,6 +66,7 @@ if not PUBLIC_BASE:
 STREAM_TTL = int(os.environ.get("STREAM_TTL", str(12 * 3600)))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logring.attach()  # after basicConfig: a prior root handler would no-op it
 logger = logging.getLogger("ma-music-skill")
 
 app = Flask(__name__)
@@ -839,7 +841,7 @@ def handle_get_playable_content(payload: dict) -> Response:
     usable = [a for a in attrs if a.get("value") and a.get("type") != "MEDIA_TYPE"]
     query = " ".join(a["value"] for a in usable).strip()
 
-    # Alexa tells us what kind of thing the user asked for. Honour it: asking
+    # Alexa tells us what kind of thing the user asked for. Honor it: asking
     # for an artist should queue that artist, not one track whose title happens
     # to match better.
     wanted = next((a.get("type") for a in usable if a.get("type")), None)
