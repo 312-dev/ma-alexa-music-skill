@@ -73,6 +73,13 @@ td, th { vertical-align: top; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 
+/* Pico redefines --pico-color inside every <a> to the link colour, so a rule
+   saying color: var(--pico-color) turns amber on exactly the links it was
+   meant to neutralise. Capturing the body's ink here substitutes the value at
+   body level, before any link overrides the token, and children inherit the
+   resolved colour. */
+body { --amp-ink: var(--pico-color); }
+
 /* --- application shell ------------------------------------------------------
    Sidebar plus content, the standard shape for an admin surface. The rail is
    navigation only and stays put; the content column is capped so tables do
@@ -124,7 +131,7 @@ aside.side {
   gap: .5rem;
   padding: .42rem .6rem; margin: .1rem 0;
   border-radius: var(--amp-radius);
-  color: var(--pico-color); text-decoration: none;
+  color: var(--amp-ink); text-decoration: none;
   border-left: 3px solid transparent;
   font-size: .92rem;
 }
@@ -315,7 +322,7 @@ nav.steps .num {
   color: var(--pico-color);
   font-size: .7rem; font-weight: 700;
 }
-nav.steps li.done a { color: var(--pico-color); }
+nav.steps li.done a { color: var(--amp-ink); }
 nav.steps li.done .num { background: var(--amp-ok); color: #fff; font-size: 0; }
 nav.steps li.done .num::after { content: "\2713"; font-size: .75rem; }
 nav.steps li.current a {
