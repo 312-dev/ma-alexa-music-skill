@@ -284,7 +284,8 @@ def classify_enablement(result: Result) -> dict:
 
 
 def manifest(*, name: str, public_base: str, cert_type: str,
-             summary: str = "", vendor_email: str = "") -> dict:
+             summary: str = "", vendor_email: str = "",
+             aliases: list[str] | None = None) -> dict:
     """A music-skill manifest.
 
     Two things here are not in Amazon's music-skill documentation and both were
@@ -334,17 +335,33 @@ def manifest(*, name: str, public_base: str, cert_type: str,
                         "uri": f"{base}/music",
                         "sslCertificateType": cert_type,
                     },
+                    # Each interface must name its requests. Declaring the
+                    # namespace alone reads to the async validator as an
+                    # interface that answers nothing, and the skill fails
+                    # validation AFTER creation returned a skillId, leaving a
+                    # corpse that 404s on catalog association.
                     "interfaces": [
-                        {"namespace": "Alexa.Media.Search", "version": "1.0"},
-                        {"namespace": "Alexa.Media.Playback", "version": "1.0"},
-                        {"namespace": "Alexa.Media.PlayQueue", "version": "1.0"},
-                        {"namespace": "Alexa.Audio.PlayQueue", "version": "1.0"},
+                        {"namespace": "Alexa.Media.Search", "version": "1.0",
+                         "requests": [{"name": "GetPlayableContent"}]},
+                        {"namespace": "Alexa.Media.Playback", "version": "1.0",
+                         "requests": [{"name": "Initiate"}]},
+                        {"namespace": "Alexa.Audio.PlayQueue", "version": "1.0",
+                         "requests": [{"name": "GetNextItem"},
+                                      {"name": "GetPreviousItem"},
+                                      {"name": "JumpToItem"}]},
+                        {"namespace": "Alexa.Media.PlayQueue", "version": "1.0",
+                         "requests": [{"name": "GetItem"}, {"name": "GetView"},
+                                      {"name": "SetShuffle"}, {"name": "SetLoop"},
+                                      {"name": "SetRepeat"}]},
+                        {"namespace": "Alexa.UserPreference", "version": "2.0",
+                         "requests": [{"name": "ReceiveFeedback"}]},
                     ],
-                    "locales": {"en-US": {}},
-                    "regions": {"NA": {"endpoint": {
-                        "uri": f"{base}/music",
-                        "sslCertificateType": cert_type,
-                    }}},
+                    "locales": {"en-US": {
+                        "promptName": name,
+                        "aliases": [{"name": alias} for alias in
+                                    (aliases or [name.lower()])],
+                        "features": [{"name": "EXPLICIT_LANGUAGE_FILTER"}],
+                    }},
                 }
             },
             "privacyAndCompliance": {

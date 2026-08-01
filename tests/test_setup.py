@@ -717,7 +717,16 @@ def fake_rest(monkeypatch, **overrides):
     monkeypatch.setattr(smapi_rest, "create_catalog",
                         overrides.get("create_catalog", create_catalog))
     monkeypatch.setattr(smapi_rest, "associate_catalog",
-                        lambda s, c: created["associations"].append((s, c)))
+                        overrides.get("associate_catalog",
+                                      lambda s, c: created["associations"].append((s, c))))
+    created["deleted"] = []
+    monkeypatch.setattr(smapi_rest, "skill_status", overrides.get(
+        "skill_status",
+        lambda sid: {"manifest": {"lastUpdateRequest": {"status": "SUCCEEDED"}}}))
+    monkeypatch.setattr(smapi_rest, "delete_skill", overrides.get(
+        "delete_skill", created["deleted"].append))
+    monkeypatch.setattr(smapi_rest, "list_catalogs",
+                        overrides.get("list_catalogs", lambda: []))
     return created
 
 
@@ -1176,6 +1185,56 @@ def test_removing_a_leftover_skill_requires_confirmation(ui, monkeypatch):
                    headers={"HX-Request": "true"}).data.decode()
     assert "Deleted amzn1.ask.skill.old" in body
     assert removed == ["amzn1.ask.skill.old"]
+
+
+def test_the_manifest_declares_every_required_music_request():
+    """Bare namespaces fail async validation with "an interface is missing"."""
+    body = json.dumps(smapi.manifest(name="Ampere",
+                                     public_base="https://ampere.example.com",
+                                     cert_type="Trusted", aliases=["ampere"]))
+    for request_name in ("GetPlayableContent", "Initiate", "GetNextItem",
+                         "GetPreviousItem"):
+        assert request_name in body, request_name
+
+
+def test_a_skill_that_fails_validation_is_deleted_and_explained(ui, monkeypatch):
+    """Creation returning a skillId is not acceptance."""
+    created = fake_rest(monkeypatch, skill_status=lambda sid: {
+        "manifest": {"lastUpdateRequest": {
+            "status": "FAILED",
+            "errors": [{"message": "An interface is missing"}]}}})
+    store.update(endpoint_ok=True, alias="ampere")
+    body = ui.post("/setup/wizard/skill", data={"alias": "ampere"},
+                   headers={"HX-Request": "true"}).data.decode()
+    assert "Amazon rejected the manifest" in body
+    assert "An interface is missing" in body
+    assert created["deleted"] == ["amzn1.ask.skill.abc"]
+    assert not store.load().get("skill_id")
+
+
+def test_catalog_step_reuses_orphans_and_records_before_association(ui, monkeypatch):
+    """A created-but-unassociated catalog must be found again, not re-minted."""
+    boom = {"raise": True}
+
+    def associate(skill_id, catalog_id):
+        if boom["raise"]:
+            raise smapi_rest.SmapiError("association exploded")
+
+    created = fake_rest(monkeypatch, associate_catalog=associate,
+                        list_catalogs=lambda: [
+                            {"id": "cat-orphan", "title": "Ampere artists"}])
+    store.update(endpoint_ok=True, skill_id="amzn1.ask.skill.a")
+
+    ui.post("/setup/wizard/catalogs", headers={"HX-Request": "true"})
+    saved = store.load()["catalogs"]
+    assert saved["artists"] == "cat-orphan"       # reused, not re-created
+    assert all(saved.values())                    # recorded despite failures
+    assert ("artists", "AMAZON.MusicGroup") not in created["catalogs"]
+
+    boom["raise"] = False                          # association healed
+    resp = ui.post("/setup/wizard/catalogs", headers={"HX-Request": "true"})
+    assert resp.status_code == 204                 # every kind associated
+    assert store.load()["catalogs"] == saved       # nothing minted twice
 
 
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):

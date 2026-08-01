@@ -716,6 +716,32 @@ def step_completed(template: str, **context):
     return fragment(template, **context)
 
 
+def _manifest_verdict(skill_id: str, tries: int = 8, delay: float = 1.5) -> str:
+    """Wait out the async manifest validation that follows skill creation.
+
+    Creation returning a skillId is not acceptance: validation runs after,
+    and its failure is otherwise silent until catalog association 404s. An
+    empty return means validated, or still pending after a patient wait;
+    a non-empty return is Amazon's own error text.
+    """
+    for attempt in range(tries):
+        try:
+            status = smapi_rest.skill_status(skill_id)
+        except Exception:
+            return ""
+        last = (status.get("manifest") or {}).get("lastUpdateRequest") or {}
+        state = last.get("status", "")
+        if state == "SUCCEEDED":
+            return ""
+        if state == "FAILED":
+            return ("; ".join(e.get("message", "")
+                              for e in last.get("errors") or [])
+                    or "manifest validation failed")
+        if attempt + 1 < tries:
+            time.sleep(delay)
+    return ""
+
+
 def _existing_music_skills(exclude: str = "") -> list[dict]:
     """Music skills already on the vendor, which would compete for the alias.
 
@@ -933,12 +959,26 @@ def wizard_skill():
         name=alias_word.title(),
         public_base=public_base(),
         cert_type=current.get("cert_type") or "Trusted",
+        aliases=[alias_word.lower()],
     )
     try:
         skill_id = smapi_rest.create_skill(manifest, vendor)
     except Exception as exc:
         return fragment("wizard/_skill.html", blocked=False, result={
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
+
+    if problem := _manifest_verdict(skill_id):
+        # A skill that failed validation exists in name only: it lists, it
+        # 404s for catalog association, and nothing ever calls its endpoint.
+        # Better deleted now, with Amazon's own words shown, than discovered
+        # two steps later.
+        try:
+            smapi_rest.delete_skill(skill_id)
+        except Exception:
+            pass
+        return fragment("wizard/_skill.html", blocked=False, result={
+            "ok": False, "detail": f"Amazon rejected the manifest: {problem}"},
+            existing_skills=_existing_music_skills(), **wizard_context())
 
     store.update(skill_id=skill_id, alias=alias_word, vendor_id=vendor)
     return step_completed("wizard/_skill.html", blocked=False, result={
@@ -974,21 +1014,31 @@ def wizard_catalogs():
                         **wizard_context(message="Create the skill first."))
 
     catalogs = dict(current.get("catalogs") or {})
+    # Orphans from an earlier run: a catalog created moments before its
+    # association failed was never recorded anywhere. Reusing by title means
+    # a re-run heals instead of minting duplicates on the vendor.
+    try:
+        existing = {c.get("title", ""): c.get("id", "")
+                    for c in smapi_rest.list_catalogs()}
+    except Exception:
+        existing = {}
     results = []
     for kind, catalog_type in CATALOG_KINDS.items():
-        if catalogs.get(kind):
-            results.append({"kind": kind, "ok": True,
-                            "detail": f"already {catalogs[kind]}"})
-            continue
+        title = f"Ampere {kind}"
         try:
-            catalog_id = smapi_rest.create_catalog(f"Ampere {kind}", catalog_type)
+            catalog_id = catalogs.get(kind) or existing.get(title, "")
+            if not catalog_id:
+                catalog_id = smapi_rest.create_catalog(title, catalog_type)
+            # Recorded before association, so a failure there cannot orphan it.
+            catalogs[kind] = catalog_id
+            store.update(catalogs=catalogs)
             # Association has to happen before any upload or the content has
-            # nowhere to resolve against.
+            # nowhere to resolve against. The PUT is idempotent, so running it
+            # again for an already-associated catalog is a no-op, not an error.
             smapi_rest.associate_catalog(skill_id, catalog_id)
         except Exception as exc:
             results.append({"kind": kind, "ok": False, "detail": _rest_error(exc)})
             continue
-        catalogs[kind] = catalog_id
         results.append({"kind": kind, "ok": True, "detail": catalog_id})
     store.update(catalogs=catalogs)
     if results and all(row["ok"] for row in results):
