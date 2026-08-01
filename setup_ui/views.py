@@ -261,7 +261,11 @@ def _logs_context() -> dict:
                 "ago": ago(entry.stat().st_mtime),
                 "signed": any(k.lower().startswith("signature")
                               for k in headers),
-                "pretty": json.dumps(body.get("body"), indent=2)[:4000],
+                "pretty": json.dumps(
+                    {"request": body.get("body"),
+                     "response": body.get("response",
+                                          "not recorded (older capture)")},
+                    indent=2)[:4000],
             })
     except OSError:
         pass

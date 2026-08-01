@@ -365,9 +365,11 @@ progress::-moz-progress-bar {
 #ingestion { margin-top: .9rem; }
 #ingestion + p { margin-top: .9rem; }
 
-/* Side-by-side action buttons, each its own form (plain-POST fallback). */
-.btnrow { display: flex; gap: .6rem; flex-wrap: wrap; }
-.btnrow form { margin: 0; }
+/* Side-by-side action buttons, each its own form (plain-POST fallback).
+   The .content scope outranks the stacked-form margins below, which would
+   otherwise indent every form but the first. */
+.btnrow { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+.btnrow form, .content .btnrow form { margin: 0; }
 
 /* Step bodies stack tables, forms and prose; give the block elements even
    breathing room instead of letting them touch. */

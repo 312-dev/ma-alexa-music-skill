@@ -1364,11 +1364,13 @@ def music():
     namespace, name = header.get("namespace", "?"), header.get("name", "?")
     payload = body.get("payload") or {}
 
-    capture({"headers": dict(request.headers), "body": body}, f"{namespace}.{name}")
+    record = {"headers": dict(request.headers), "body": body}
+    kind = f"{namespace}.{name}"
 
     handler = ROUTES.get((namespace, name))
     if handler is None:
         logger.warning("unhandled directive %s.%s", namespace, name)
+        capture(record, kind)
         return error("Alexa", "INVALID_DIRECTIVE", f"unhandled {namespace}.{name}", "3.0")
 
     started = time.monotonic()
@@ -1376,7 +1378,16 @@ def music():
         resp = handler(payload)
     except Exception:
         logger.exception("handler %s.%s failed", namespace, name)
+        record["response"] = {"error": "handler failed"}
+        capture(record, kind)
         return error("Alexa", "INTERNAL_ERROR", "handler failed", "3.0")
+    # Store what we answered next to what arrived: "did the request route all
+    # the way through" is unanswerable from the request alone.
+    try:
+        record["response"] = json.loads(resp.get_data(as_text=True))
+    except Exception:
+        record["response"] = {"unserializable": True}
+    capture(record, kind)
     logger.info("%s.%s served in %dms", namespace, name, (time.monotonic() - started) * 1000)
     return resp
 
