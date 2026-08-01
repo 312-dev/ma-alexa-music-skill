@@ -1124,6 +1124,60 @@ def test_creating_the_skill_uses_the_vendor_from_the_form(ui, monkeypatch):
     assert store.load()["skill_id"] == "amzn1.ask.skill.new"
 
 
+def test_a_created_skill_replaces_the_form_and_refuses_duplicates(ui, monkeypatch):
+    """The create button must not be able to mint duplicates."""
+    created = fake_rest(monkeypatch)
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    store.update(endpoint_ok=True, alias="ampere",
+                 skill_id="amzn1.ask.skill.already")
+    body = ui.get("/setup/wizard/skill").data.decode()
+    # The step title still says Create the skill; the button must be gone.
+    assert '<button type="submit">Create the skill</button>' not in body
+    assert "amzn1.ask.skill.already" in body
+
+    resp = ui.post("/setup/wizard/skill", data={"alias": "ampere"},
+                   headers={"HX-Request": "true"})
+    assert resp.status_code == 204          # acknowledged, nothing created
+    assert created["skills"] == []
+    assert store.load()["skill_id"] == "amzn1.ask.skill.already"
+
+
+def test_a_preexisting_music_skill_is_surfaced_with_removal_guidance(ui, monkeypatch):
+    fake_rest(monkeypatch)
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    store.update(endpoint_ok=True, alias="ampere")
+    monkeypatch.setattr(smapi_rest, "list_skills", lambda: [
+        {"skillId": "amzn1.ask.skill.old", "apis": ["music"],
+         "nameByLocale": {"en-US": "Old Bridge"}, "stage": "development"},
+        {"skillId": "amzn1.ask.skill.game", "apis": ["custom"],
+         "nameByLocale": {"en-US": "Trivia"}, "stage": "development"},
+    ])
+    body = ui.get("/setup/wizard/skill").data.decode()
+    assert "already has a music skill" in body
+    assert "Old Bridge" in body
+    assert "Trivia" not in body             # non-music skills are not noise
+
+
+def test_removing_a_leftover_skill_requires_confirmation(ui, monkeypatch):
+    fake_rest(monkeypatch)
+    monkeypatch.setattr(smapi_rest, "list_skills", lambda: [])
+    removed = []
+    monkeypatch.setattr(smapi_rest, "delete_skill", removed.append)
+    store.update(endpoint_ok=True)
+
+    body = ui.post("/setup/wizard/skill/remove",
+                   data={"skill_id": "amzn1.ask.skill.old"},
+                   headers={"HX-Request": "true"}).data.decode()
+    assert "confirmation" in body
+    assert removed == []
+
+    body = ui.post("/setup/wizard/skill/remove",
+                   data={"skill_id": "amzn1.ask.skill.old", "confirm": "yes"},
+                   headers={"HX-Request": "true"}).data.decode()
+    assert "Deleted amzn1.ask.skill.old" in body
+    assert removed == ["amzn1.ask.skill.old"]
+
+
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):
     """Every value the Amazon console asks for is a copy row, not prose."""
     monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")

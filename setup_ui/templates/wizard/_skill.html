@@ -7,26 +7,55 @@
   <p><a href="/setup/endpoint" role="button">Back to the endpoint checks</a></p>
 {% else %}
   {% if result %}
-    <p>{% if result.ok %}<span class="pill ok">created</span>
+    <p>{% if result.ok %}<span class="pill ok">done</span>
        {% else %}<span class="pill bad">failed</span>{% endif %}
        {{ result.detail }}</p>
-    {% if result.manifest_path %}
-      <p class="quiet"><small>Manifest written to
-        <span class="mono">{{ result.manifest_path }}</span></small></p>
-    {% endif %}
   {% endif %}
 
   {% if state.skill_id %}
-    <p><span class="pill ok">skill</span>
+    <p><span class="pill ok">created</span>
       <span class="mono">{{ state.skill_id }}</span></p>
-  {% endif %}
-
-  {% if not state.endpoint_ok %}
+    <p>
+      The skill exists on your developer account, and this step is done: use
+      Continue below. To rebuild it from nothing, use start over on the finish
+      page, which deletes the skill first.
+    </p>
+  {% elif not state.endpoint_ok %}
     <p class="loud">
       Endpoint checks have not passed. Skill creation is locked.
       <a href="/setup/endpoint">Run them</a>.
     </p>
   {% else %}
+    {% if existing_skills %}
+    <article class="loud">
+      <h3>This account already has a music skill</h3>
+      <p>
+        Alexa routes an invocation across every enabled music skill, so a
+        leftover from an earlier install competes with the one this wizard is
+        about to create, and the loser is chosen silently. Remove anything
+        this bridge is replacing before creating another.
+      </p>
+      {% for s in existing_skills %}
+      <form method="post" action="/setup/wizard/skill/remove"
+            hx-post="/setup/wizard/skill/remove" hx-target="#step-body">
+        <p><strong>{{ s.name or "unnamed skill" }}</strong>
+          <span class="mono">{{ s.id }}</span>
+          <span class="quiet">({{ s.stage }})</span></p>
+        <input type="hidden" name="skill_id" value="{{ s.id }}">
+        <label>
+          <input type="checkbox" name="confirm" value="yes" required>
+          Delete this skill from my Amazon account
+        </label>
+        <button type="submit" class="secondary">Delete skill</button>
+      </form>
+      {% endfor %}
+      <p class="quiet">
+        Deleting a development-stage skill removes it and its enablement
+        immediately; catalogs survive on the account and can be reused.
+      </p>
+    </article>
+    {% endif %}
+
     <p class="quiet">
       The manifest declares <span class="mono">apis.music</span> with an HTTPS
       endpoint rather than a Lambda ARN, and carries

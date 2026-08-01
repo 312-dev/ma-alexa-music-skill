@@ -716,13 +716,37 @@ def step_completed(template: str, **context):
     return fragment(template, **context)
 
 
+def _existing_music_skills(exclude: str = "") -> list[dict]:
+    """Music skills already on the vendor, which would compete for the alias.
+
+    Alexa routes an invocation across every enabled music skill, so a leftover
+    from an earlier install fights the new skill for the same words. Surfaced
+    before creation, not discovered by ear afterwards.
+    """
+    if not smapi_rest.connected():
+        return []
+    found = []
+    try:
+        for summary in smapi_rest.list_skills():
+            if summary.get("skillId") == exclude:
+                continue
+            if "music" not in (summary.get("apis") or []):
+                continue
+            name = next(iter((summary.get("nameByLocale") or {}).values()), "")
+            found.append({"id": summary.get("skillId", ""), "name": name,
+                          "stage": summary.get("stage", "")})
+    except Exception:
+        return []
+    return found
+
+
 def step_context(step_key: str) -> dict:
     state = store.load()
     rows = wizard_steps.progress(state)
     step = wizard_steps.BY_KEY[step_key]
     index = [r["key"] for r in rows].index(step_key)
     row = rows[index]
-    return {
+    context = {
         "rows": rows,
         "step": row,
         "step_template": step.template,
@@ -730,6 +754,9 @@ def step_context(step_key: str) -> dict:
         "next": rows[index + 1]["key"] if index + 1 < len(rows) else None,
         **wizard_context(),
     }
+    if step_key == "skill" and not state.get("skill_id"):
+        context["existing_skills"] = _existing_music_skills()
+    return context
 
 
 @bp.get("/wizard")
@@ -892,6 +919,14 @@ def wizard_skill():
             "ok": False, "detail": "Connect to Amazon first."},
             **wizard_context())
 
+    if current.get("skill_id"):
+        # Guard against a resubmitted form or an old tab: the button must not
+        # be able to mint duplicates on the developer account.
+        return step_completed("wizard/_skill.html", blocked=False, result={
+            "ok": True,
+            "detail": f"The skill already exists: {current['skill_id']}. "
+                      "Nothing was created."}, **wizard_context())
+
     alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
     vendor = (request.form.get("vendor_id") or "").strip()
     manifest = smapi.manifest(
@@ -908,6 +943,26 @@ def wizard_skill():
     store.update(skill_id=skill_id, alias=alias_word, vendor_id=vendor)
     return step_completed("wizard/_skill.html", blocked=False, result={
         "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
+
+
+@bp.post("/wizard/skill/remove")
+def wizard_skill_remove():
+    """Delete a leftover music skill that would compete for the alias."""
+    skill_id = (request.form.get("skill_id") or "").strip()
+    if not skill_id or request.form.get("confirm") != "yes":
+        return fragment("wizard/_skill.html", blocked=False, result={
+            "ok": False,
+            "detail": "Deletion needs the confirmation box ticked."},
+            existing_skills=_existing_music_skills(), **wizard_context())
+    try:
+        smapi_rest.delete_skill(skill_id)
+    except Exception as exc:
+        return fragment("wizard/_skill.html", blocked=False, result={
+            "ok": False, "detail": _rest_error(exc)},
+            existing_skills=_existing_music_skills(), **wizard_context())
+    return fragment("wizard/_skill.html", blocked=False, result={
+        "ok": True, "detail": f"Deleted {skill_id}."},
+        existing_skills=_existing_music_skills(), **wizard_context())
 
 
 @bp.post("/wizard/catalogs")
