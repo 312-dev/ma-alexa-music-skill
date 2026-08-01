@@ -231,6 +231,11 @@ def last_requests(limit: int = 4) -> list[dict]:
             signed = any(k.lower().startswith("signature") for k in headers)
         except (OSError, ValueError, AttributeError):
             pass
+        if "?" in directive:
+            # The endpoint stamps "?" for a JSON body with no Alexa envelope
+            # (a health probe, a curl smoke test), so the file is literally
+            # named "?.?". Say what it was instead of echoing the filename.
+            directive = "unrecognized request (not an Alexa directive)"
         out.append({"directive": directive, "when": stamp, "ago": ago(stamp),
                     "signed": signed})
     return out
