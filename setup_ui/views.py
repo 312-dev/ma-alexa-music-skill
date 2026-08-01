@@ -1092,28 +1092,34 @@ def wizard_upload():
                         **wizard_context(message="Create the catalogs first."))
     with _UPLOAD_LOCK:
         if not _UPLOAD["running"]:
-            _UPLOAD.update(running=True, phase="starting", results=None,
-                           message="", done_at=0.0)
+            _UPLOAD.update(running=True, phase="starting", percent=None,
+                           results=None, message="", done_at=0.0)
             threading.Thread(target=_run_upload, daemon=True).start()
     return fragment("wizard/_upload_progress.html", job=dict(_UPLOAD),
                     back="/setup/wizard/upload")
 
 
 def _run_upload() -> None:
+    # The crawl owns 0-85% of the bar (it dominates wall time); the five
+    # catalog uploads share the last 15%.
+    def _tell(text, fraction=None):
+        _UPLOAD["phase"] = text
+        _UPLOAD["percent"] = None if fraction is None else round(fraction * 85)
+
     try:
         current = store.load()
         ids = catalog_ids(current)
-        _UPLOAD["phase"] = "reading the library"
-        collected = catalog_sync.collect(
-            progress=lambda text: _UPLOAD.__setitem__("phase", text))
+        _tell("reading the library", 0.0)
+        collected = catalog_sync.collect(progress=_tell)
         saved = store.load().get("catalog_hashes") or {}
         results, uploads = [], dict(current.get("uploads") or {})
-        for kind, entities in collected.items():
+        for index, (kind, entities) in enumerate(collected.items()):
             catalog_id = ids.get(kind)
             if not catalog_id or not entities:
                 continue
             final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
             _UPLOAD["phase"] = f"uploading {kind} ({len(final)} entities)"
+            _UPLOAD["percent"] = 85 + round(15 * index / max(1, len(collected)))
             payload = json.dumps({
                 "type": catalog_sync.TYPES[kind], "version": 2.0,
                 "locales": catalog_sync.LOCALES, "entities": final,
@@ -1137,8 +1143,8 @@ def _run_upload() -> None:
         _UPLOAD["done_at"] = time.time()
 
 
-_UPLOAD = {"running": False, "phase": "", "results": None, "message": "",
-           "done_at": 0.0}
+_UPLOAD = {"running": False, "phase": "", "percent": None, "results": None,
+           "message": "", "done_at": 0.0}
 _UPLOAD_LOCK = threading.Lock()
 
 

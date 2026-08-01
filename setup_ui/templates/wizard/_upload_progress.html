@@ -2,6 +2,11 @@
 <div hx-get="/setup/wizard/upload/progress" hx-trigger="every 2s"
      hx-swap="outerHTML">
   <p><span class="pill warn">working</span> {{ job.phase }}.</p>
+  {% if job.percent is not none %}
+  <progress value="{{ job.percent }}" max="100">{{ job.percent }}%</progress>
+  {% else %}
+  <progress max="100"></progress>
+  {% endif %}
   <p class="quiet">
     This reads the whole library and can take a few minutes on a large
     collection. Leave the page open; it reports each catalog as it goes and

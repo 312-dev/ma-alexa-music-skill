@@ -102,10 +102,10 @@ def collect(progress=None) -> dict[str, list[dict]]:
     """Read the whole library. `progress` gets a short human line at each
     stage; the album-by-album track crawl is minutes long on a real
     collection, and a silent minutes-long job reads as a hung one."""
-    tell = progress or (lambda text: None)
+    tell = progress or (lambda text, fraction=None: None)
     out: dict[str, list[dict]] = {k: [] for k in CATALOGS}
 
-    tell("reading artists")
+    tell("reading artists", 0.02)
     artist_name: dict[str, str] = {}
     for index in subsonic.call("getArtists.view").get("artists", {}).get("index", []):
         for artist in index.get("artist", []):
@@ -113,7 +113,7 @@ def collect(progress=None) -> dict[str, list[dict]]:
             out["artists"].append(base(f"artist.{artist['id']}", artist.get("name")))
     log(f"artists: {len(out['artists'])}")
 
-    tell(f"reading albums ({len(out['artists'])} artists found)")
+    tell(f"reading albums ({len(out['artists'])} artists found)", 0.05)
     albums, offset = [], 0
     while True:
         page = (
@@ -152,7 +152,8 @@ def collect(progress=None) -> dict[str, list[dict]]:
         for album, songs in pool.map(tracks_of, albums):
             done += 1
             tell(f"reading tracks: album {done} of {len(albums)}, "
-                 f"{len(out['tracks'])} tracks so far")
+                 f"{len(out['tracks'])} tracks so far",
+                 0.05 + 0.9 * done / max(1, len(albums)))
             for song in songs:
                 entity = base(f"track.{song['id']}", song.get("title"))
                 aid = song.get("artistId") or album.get("artistId")
@@ -169,7 +170,7 @@ def collect(progress=None) -> dict[str, list[dict]]:
                 out["tracks"].append(entity)
     log(f"tracks: {len(out['tracks'])}")
 
-    tell(f"reading playlists ({len(out['tracks'])} tracks found)")
+    tell(f"reading playlists ({len(out['tracks'])} tracks found)", 0.97)
     for playlist in subsonic.playlists():
         out["playlists"].append(base(f"playlist.{playlist['id']}", playlist.get("name")))
     log(f"playlists: {len(out['playlists'])}")
