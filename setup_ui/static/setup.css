@@ -123,3 +123,55 @@ main.container { max-width: 56rem; }
 
 details > summary { margin-bottom: .4rem; }
 .big-code { font-size: .95rem; }
+
+/* Stepper. A horizontal rail of numbered steps: done, current, and locked.
+   Wraps rather than scrolls, because a step you cannot see is a step you do
+   not know exists. */
+nav.steps { margin-bottom: 1.25rem; }
+nav.steps ol {
+  display: flex; flex-wrap: wrap; gap: .35rem .5rem;
+  list-style: none; margin: 0; padding: 0;
+}
+nav.steps li { margin: 0; }
+nav.steps a, nav.steps .locked {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .3rem .6rem; border-radius: 1rem;
+  font-size: .82rem; text-decoration: none;
+  border: 1px solid var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+}
+nav.steps .num {
+  display: inline-grid; place-items: center;
+  width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  background: var(--pico-muted-border-color);
+  color: var(--pico-background-color);
+  font-size: .7rem; font-weight: 700;
+}
+nav.steps li.done a { color: var(--pico-color); }
+nav.steps li.done .num { background: #1b7f4c; color: #fff; }
+nav.steps li.done .num::after { content: "\2713"; }
+nav.steps li.done .num { font-size: .75rem; }
+nav.steps li.current a {
+  border-color: var(--pico-primary); color: var(--pico-primary);
+  font-weight: 600;
+}
+nav.steps li.current .num { background: var(--pico-primary); color: #fff; }
+nav.steps .locked { opacity: .5; cursor: default; }
+
+/* Hide the number glyph on completed steps so the tick stands alone. */
+nav.steps li.done .num { font-size: 0; }
+nav.steps li.done .num::after { font-size: .75rem; }
+
+nav.stepnav ul {
+  display: flex; justify-content: space-between; align-items: center;
+  list-style: none; margin: 1rem 0 0; padding: 0;
+}
+nav.stepnav li { margin: 0; }
+/* Keeps Continue on the right even on the first step, where
+   there is no Back to balance it. */
+nav.stepnav li:last-child { margin-left: auto; }
+
+ul.links { list-style: none; padding: 0; }
+ul.links li { margin-bottom: .6rem; }
+ul.links li a { font-weight: 600; }
+ul.links li .quiet { display: block; font-size: .85rem; }

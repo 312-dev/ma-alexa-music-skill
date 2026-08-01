@@ -158,9 +158,16 @@ def test_missing_enablement_names_the_silent_fallback():
 
 
 def test_status_page_renders(ui):
-    resp = ui.get("/setup")
+    resp = ui.get("/setup/status")
     assert resp.status_code == 200
     assert b"ER_INGESTION" in resp.data
+
+
+def test_setup_root_leads_to_the_wizard_while_unfinished(ui):
+    """The wizard is the job in front of you until there is a skill."""
+    resp = ui.get("/setup")
+    assert resp.status_code == 302
+    assert "/setup/wizard" in resp.headers["Location"]
 
 
 def test_status_shows_the_last_request_from_amazon(ui):
@@ -183,7 +190,7 @@ def test_status_says_so_when_amazon_has_never_called(ui, monkeypatch, tmp_path):
 
 
 def test_status_never_prints_a_secret(ui):
-    body = ui.get("/setup").data.decode()
+    body = ui.get("/setup/status").data.decode()
     assert ADMIN not in body
     assert os.environ["SIGNING_KEY"] not in body
     assert "set</span>" in body
@@ -534,13 +541,13 @@ def test_the_route_list_is_not_empty():
 def test_wrong_token_is_rejected(client):
     resp = client.post("/setup/login", data={"token": "nope", "target": "/setup"})
     assert resp.status_code == 401
-    assert client.get("/setup").status_code == 401
+    assert client.get("/setup/status").status_code == 401
 
 
 def test_login_sets_a_working_cookie(client):
     resp = client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
     assert resp.status_code == 302
-    assert client.get("/setup").status_code == 200
+    assert client.get("/setup/status").status_code == 200
 
 
 def test_login_will_not_redirect_off_setup(client):
@@ -551,15 +558,15 @@ def test_login_will_not_redirect_off_setup(client):
 
 def test_cookie_dies_when_the_admin_token_rotates(client, monkeypatch):
     client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
-    assert client.get("/setup").status_code == 200
+    assert client.get("/setup/status").status_code == 200
     monkeypatch.setenv("ADMIN_TOKEN", "a-different-token")
-    assert client.get("/setup").status_code == 401
+    assert client.get("/setup/status").status_code == 401
 
 
 def test_logout_clears_the_cookie(client):
     client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
     client.get("/setup/logout")
-    assert client.get("/setup").status_code == 401
+    assert client.get("/setup/status").status_code == 401
 
 
 # --- state ------------------------------------------------------------------
@@ -864,7 +871,7 @@ def test_teardown_removes_the_skill_and_its_catalogs(ui, monkeypatch):
 
 
 def test_login_page_says_where_to_find_the_token(anon):
-    body = anon.get("/setup").data.decode()
+    body = anon.get("/setup/status").data.decode()
     assert "ADMIN_TOKEN" in body
     # The three places a self-hoster would actually have put it.
     for hint in ("printenv ADMIN_TOKEN", "nomad var get", ".env"):
@@ -872,7 +879,7 @@ def test_login_page_says_where_to_find_the_token(anon):
 
 
 def test_login_page_covers_having_lost_the_token(anon):
-    body = anon.get("/setup").data.decode()
+    body = anon.get("/setup/status").data.decode()
     assert "openssl rand" in body
     assert "signs out every existing session" in body
 
@@ -880,4 +887,72 @@ def test_login_page_covers_having_lost_the_token(anon):
 def test_login_page_never_contains_the_token(anon, monkeypatch):
     """The page explains where the secret lives. It must not be the secret."""
     monkeypatch.setenv("ADMIN_TOKEN", "super-secret-value")
-    assert b"super-secret-value" not in anon.get("/setup").data
+    assert b"super-secret-value" not in anon.get("/setup/status").data
+
+
+# --- the stepper ------------------------------------------------------------
+
+
+def _all_steps_done(monkeypatch):
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    store.update(endpoint_ok=True, alias="ampere", skill_id="amzn1.ask.skill.a",
+                 catalogs={"artists": "c1"}, uploads={"artists": "u1"},
+                 enabled=True)
+
+
+def test_the_wizard_resumes_at_the_first_unfinished_step(ui):
+    resp = ui.get("/setup/wizard")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/wizard/server")
+
+
+def test_a_later_step_is_locked_until_the_earlier_ones_are_done(ui):
+    resp = ui.get("/setup/wizard/enable")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/setup/wizard")
+
+
+def test_a_finished_step_can_be_revisited(ui, monkeypatch):
+    """Going back to review is not the same as redoing."""
+    _all_steps_done(monkeypatch)
+    assert ui.get("/setup/wizard/server").status_code == 200
+
+
+def test_each_step_offers_back_and_continue(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    body = ui.get("/setup/wizard/alias").data.decode()
+    assert "/setup/wizard/amazon" in body   # back
+    assert "/setup/wizard/skill" in body    # continue
+
+
+def test_continue_is_disabled_on_an_unfinished_step(ui):
+    body = ui.get("/setup/wizard/server").data.decode()
+    assert "<button disabled>Continue</button>" in body
+
+
+def test_a_finished_wizard_shows_the_done_page(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    body = ui.get("/setup/wizard").data.decode()
+    assert "Setup complete" in body
+    # The done page is a hub, not a dead end.
+    for link in ("/setup/alias", "/setup/stations", "/setup/endpoint", "/setup"):
+        assert link in body, link
+
+
+def test_a_finished_wizard_stops_hijacking_the_landing_page(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    assert ui.get("/setup").status_code == 200
+
+
+def test_an_unknown_step_goes_back_to_the_wizard(ui):
+    resp = ui.get("/setup/wizard/nonsense")
+    assert resp.status_code == 302
+
+
+def test_completion_is_derived_not_stored(ui, monkeypatch):
+    """A stored flag would still claim done after the skill was deleted."""
+    _all_steps_done(monkeypatch)
+    assert ui.get("/setup").status_code == 200
+    store.update(skill_id="")
+    assert ui.get("/setup").status_code == 302

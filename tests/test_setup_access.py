@@ -292,7 +292,8 @@ def test_signing_in_over_http_actually_authenticates(client):
     """The end-to-end version of the bug: follow the redirect and stay in."""
     base = "http://100.85.183.28:5056"
     _login(client, base)
+    # 302 to the wizard, not 401 with the form: proof the cookie survived.
     page = client.get("/setup", base_url=base,
                       environ_overrides={"REMOTE_ADDR": LAN})
-    assert page.status_code == 200
-    assert b"Sign in" not in page.data
+    assert page.status_code == 302
+    assert "/setup/wizard" in page.headers["Location"]

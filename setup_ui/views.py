@@ -24,7 +24,7 @@ import catalog_sync
 import smapi_rest
 import subsonic
 
-from . import access, qr, smapi, state as store, validate
+from . import access, qr, smapi, state as store, steps as wizard_steps, validate
 
 bp = Blueprint(
     "setup", __name__,
@@ -90,7 +90,12 @@ def _template_defaults() -> dict:
     the command shown on the sign-in page is one the reader can paste rather
     than a placeholder they have to go and resolve first.
     """
-    return {"container_hint": socket.gethostname() or "ampere"}
+    try:
+        finished = wizard_steps.complete(store.load())
+    except Exception:
+        finished = False
+    return {"container_hint": socket.gethostname() or "ampere",
+            "setup_complete": finished}
 
 
 def secure_cookie() -> bool:
@@ -372,11 +377,25 @@ def logout():
 
 @bp.get("")
 @bp.get("/")
-def status():
+def landing():
+    """Setup first, status afterwards.
+
+    Before the skill exists the status page has nothing to report and the
+    wizard is the only thing worth showing. After it exists the wizard is done
+    and status is what gets visited repeatedly.
+    """
+    if not wizard_steps.complete(store.load()):
+        return redirect("/setup/wizard")
     return render_template("status.html", **status_context())
 
 
 @bp.get("/status")
+def status():
+    """The status page on its own, reachable even mid-setup."""
+    return render_template("status.html", **status_context())
+
+
+@bp.get("/status/panel")
 def status_partial():
     return render_template("_status.html", **status_context())
 
@@ -625,9 +644,30 @@ def wizard_context(**extra) -> dict:
     return context
 
 
+def step_context(step_key: str) -> dict:
+    state = store.load()
+    rows = wizard_steps.progress(state)
+    step = wizard_steps.BY_KEY[step_key]
+    index = [r["key"] for r in rows].index(step_key)
+    row = rows[index]
+    return {
+        "rows": rows,
+        "step": row,
+        "step_template": step.template,
+        "previous": rows[index - 1]["key"] if index > 0 else None,
+        "next": rows[index + 1]["key"] if index + 1 < len(rows) else None,
+        **wizard_context(),
+    }
+
+
 @bp.get("/wizard")
 def wizard():
-    return render_template("wizard.html", **wizard_context())
+    """Resume where setup actually is, or show the finished page."""
+    state = store.load()
+    if wizard_steps.complete(state):
+        return render_template("done.html", **wizard_context())
+    return redirect(
+        f"/setup/wizard/{wizard_steps.STEPS[wizard_steps.current_index(state)].key}")
 
 
 @bp.post("/wizard/subsonic")
@@ -637,16 +677,26 @@ def wizard_subsonic():
     password = request.form.get("password") or ""
     result = validate.subsonic_ping(url, user, password)
     if result["ok"]:
-        # The password is never written down here. It has to reach the bridge
-        # through the environment like every other secret, and storing a copy
-        # in /data would be a second place for it to leak from.
+        # The password is not written here. It reaches the bridge through the
+        # environment like every other secret, and keeping a copy in /data
+        # would create a second place for it to leak from.
         store.update(subsonic_url=url, subsonic_user=user)
-    return fragment("wizard/_subsonic.html", result=result, **wizard_context())
+    return fragment("wizard/_subsonic.html", back="/setup/wizard/server",
+                    result=result, **wizard_context())
 
 
-@bp.get("/wizard/amazon")
-def wizard_amazon():
-    return fragment("wizard/_amazon.html", result=None, **wizard_context())
+@bp.get("/wizard/<step_key>")
+def wizard_step(step_key: str):
+    if step_key not in wizard_steps.BY_KEY:
+        return redirect("/setup/wizard")
+    state = store.load()
+    rows = wizard_steps.progress(state)
+    row = next(r for r in rows if r["key"] == step_key)
+    # Reachable means every earlier step is done. Going back is always allowed,
+    # since reviewing a finished step is not the same as redoing it.
+    if not (row["reachable"] or row["done"]):
+        return redirect("/setup/wizard")
+    return render_template("wizard.html", **step_context(step_key))
 
 
 # The verifier and state for an in-flight consent round trip. In memory on
@@ -866,6 +916,7 @@ def wizard_enable():
     except Exception as exc:
         return fragment("wizard/_enable.html", result={
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
+    store.update(enabled=True)
     return fragment("wizard/_enable.html", result={
         "ok": True, "detail": "Enabled for development."}, **wizard_context())
 
@@ -907,5 +958,6 @@ def wizard_teardown_run():
     except Exception as exc:
         results.append({"what": "skill", "ok": False, "detail": _rest_error(exc)})
 
-    store.update(skill_id="", catalogs={}, uploads={}, catalog_hashes={})
+    store.update(skill_id="", catalogs={}, uploads={}, catalog_hashes={},
+                 enabled=False)
     return fragment("wizard/_teardown.html", results=results, **wizard_context())

@@ -25,6 +25,9 @@ DEFAULTS = {
     "radio_artists": None,
     "radio_tracks_per_artist": None,
     "after_content": "",
+    "uploads": {},
+    "catalog_hashes": {},
+    "enabled": False,
 }
 
 

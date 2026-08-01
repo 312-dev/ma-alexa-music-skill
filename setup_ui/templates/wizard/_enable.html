@@ -4,12 +4,11 @@
      {{ result.detail }}</p>
 {% endif %}
 <p>
-  This deletes the enablement and sets it again. That looks pointless and is
-  not: a catalog upload silently unbinds the skill, after which Alexa announces
-  "Here's ... from Spotify" while <span class="mono">ER_INGESTION</span> reports
-  SUCCEEDED and the bridge answers every request it is given correctly, because
-  it is no longer given any. Cycling is the only fix, and nothing anywhere else
-  hints that it is needed.
+  This removes the enablement and sets it again, which is required rather than
+  redundant. A catalog upload unbinds the skill from the provider slot without
+  reporting it: ingestion still reports <span class="mono">SUCCEEDED</span>,
+  the service still answers correctly, and playback falls back to the default
+  music provider. Re-enabling restores the binding.
 </p>
 <form method="post" action="/setup/wizard/enable"
       hx-post="/setup/wizard/enable" hx-target="#step-enable">
