@@ -72,8 +72,9 @@ def isolated(monkeypatch, tmp_path):
     views._SMAPI_CACHE.update(at=0.0, value=None)
     views._VENDORS.update(at=0.0, value=None)
     views.wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
-    views._UPLOAD.update(running=False, phase="", results=None, message="",
-                         done_at=0.0)
+    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    views._UPLOAD.update(running=False, phase="", percent=None, results=None,
+                         message="", done_at=0.0, cancel=False)
     views.TOKENS = validate.Tokens()
     yield
 
@@ -1032,6 +1033,8 @@ def _all_steps_done(monkeypatch):
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
     monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: {
         "manifest": {"lastUpdateRequest": {"status": "SUCCEEDED"}}})
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "ingestionSteps": [{"name": "ER_INGESTION", "status": "SUCCEEDED"}]})
     store.update(endpoint_ok=True, alias="ampere", skill_id="amzn1.ask.skill.a",
                  catalogs={"artists": "c1"}, uploads={"artists": "u1"},
                  enabled=True)
@@ -1303,12 +1306,46 @@ def test_upload_runs_as_a_job_and_reports_progress(ui, monkeypatch):
     assert store.load()["uploads"]["artists"] == "up-1"
     assert "Reload" in body                    # the job already finished here
 
-    # The finished poll answers with a full-page refresh, so the rail and
-    # the ingestion panel re-derive together.
+    # The finished poll answers with a reload script (the leave guard has to
+    # come off before the reload, or the dialog would fire on success), so
+    # the rail and the ingestion panel re-derive together.
     resp = ui.get("/setup/wizard/upload/progress",
                   headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert b"location.reload()" in resp.data
+    assert b"removeEventListener" in resp.data
+
+
+def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
+    # The parting beacon flags the job; the next progress tick aborts it
+    # without recording anything.
+    views._UPLOAD.update(running=True, cancel=False)
+    resp = ui.post("/setup/wizard/upload/stop")
     assert resp.status_code == 204
-    assert resp.headers.get("HX-Refresh") == "true"
+    assert views._UPLOAD["cancel"] is True
+
+    called = []
+    monkeypatch.setattr(views.catalog_sync, "collect",
+                        lambda progress=None: called.append("collect"))
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    views._run_upload()
+    assert not called                      # aborted before the crawl began
+    assert views._UPLOAD["message"].startswith("Stopped")
+    assert views._UPLOAD["running"] is False
+    assert store.load().get("uploads") in (None, {})
+
+
+def test_upload_step_is_not_done_until_ingestion_succeeds(ui, monkeypatch):
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "ingestionSteps": [{"name": "ER_INGESTION", "status": "IN_PROGRESS"}]})
+    state = {"catalogs": {"artists": "c1"}, "uploads": {"artists": "u1"}}
+    assert views.wizard_steps._upload_done(state) is False
+
+    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "ingestionSteps": [{"name": "ER_INGESTION", "status": "SUCCEEDED"}]})
+    assert views.wizard_steps._upload_done(state) is True
 
 
 def test_upload_page_shows_the_running_phase(ui, monkeypatch):

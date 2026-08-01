@@ -119,8 +119,42 @@ def _catalogs_done(state: dict) -> bool:
     return bool(state.get("catalogs"))
 
 
+_INGESTION = {"at": 0.0, "sig": "", "ok": False}
+
+
+def _ingestion_complete(state: dict, max_age: float = 60.0) -> bool:
+    """Has ER_INGESTION succeeded for every uploaded catalog.
+
+    Uploading is not the finish line: until Amazon ingests the catalog, voice
+    resolution does not work, and enabling the skill early just produces a
+    skill that answers from the wrong provider. Cached so the rail does not
+    cost five SMAPI calls per render; on lookup trouble the last known verdict
+    stands rather than flapping the step over a network blip.
+    """
+    uploads = state.get("uploads") or {}
+    catalogs = state.get("catalogs") or {}
+    pairs = [(catalogs[k], u) for k, u in uploads.items() if catalogs.get(k)]
+    if not pairs:
+        return False
+    sig = ",".join(f"{c}:{u}" for c, u in sorted(pairs))
+    now = time.time()
+    if _INGESTION["sig"] == sig and now - _INGESTION["at"] < max_age:
+        return _INGESTION["ok"]
+    if not smapi_rest.connected():
+        return _INGESTION["ok"] if _INGESTION["sig"] == sig else False
+    try:
+        ok = all(
+            smapi_rest.ingestion_verdict(
+                smapi_rest.upload_status(catalog, upload))[0] == "ready"
+            for catalog, upload in pairs)
+    except Exception:
+        return _INGESTION["ok"] if _INGESTION["sig"] == sig else False
+    _INGESTION.update(at=now, sig=sig, ok=ok)
+    return ok
+
+
 def _upload_done(state: dict) -> bool:
-    return bool(state.get("uploads"))
+    return bool(state.get("uploads")) and _ingestion_complete(state)
 
 
 def _enabled_done(state: dict) -> bool:

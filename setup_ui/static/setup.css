@@ -301,22 +301,62 @@ table:not(.table) thead th {
   text-transform: uppercase; color: var(--muted-foreground);
 }
 
-/* Native <progress>: flat track, flat accent value bar, both schemes. Used by the
-   upload progress bar; Basecoat's .progress is a div pattern and does not
-   cover the element. */
+/* Native <progress>: flat track, striped accent value bar, both schemes. Used
+   by the upload progress bar; Basecoat's .progress is a div pattern and does
+   not cover the element. The stripes are hard-stop diagonals in the on-accent
+   ink, marching while work is under way; the global reduced-motion block
+   holds them still. */
+.progress-line {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 .55rem;
+}
+.progress-line .pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .85rem;
+  color: var(--muted-foreground);
+}
 progress {
   appearance: none;
   -webkit-appearance: none;
   display: block;
   width: 100%; height: .5rem;
+  margin: 0 0 1rem;
   border: none; border-radius: 2px;
   background: var(--amp-well);
   overflow: hidden;
   color: var(--amp-accent); /* value bar for engines that honor color */
 }
 progress::-webkit-progress-bar { background: var(--amp-well); border-radius: 2px; }
-progress::-webkit-progress-value { background: var(--amp-accent); }
-progress::-moz-progress-bar { background: var(--amp-accent); }
+progress::-webkit-progress-value {
+  background-color: var(--amp-accent);
+  background-image: linear-gradient(45deg,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 25%, transparent 25%,
+    transparent 50%,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 50%,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 75%, transparent 75%,
+    transparent);
+  background-size: 1rem 1rem;
+  animation: amp-stripes .8s linear infinite;
+}
+progress::-moz-progress-bar {
+  background-color: var(--amp-accent);
+  background-image: linear-gradient(45deg,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 25%, transparent 25%,
+    transparent 50%,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 50%,
+    color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 75%, transparent 75%,
+    transparent);
+  background-size: 1rem 1rem;
+  animation: amp-stripes .8s linear infinite;
+}
+@keyframes amp-stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+
+/* The upload step stacks a form, the ingestion panel, and its refresh
+   button; the empty panel's margins collapse into one even gap. */
+#ingestion { margin-top: .9rem; }
+#ingestion + p { margin-top: .9rem; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

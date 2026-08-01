@@ -1098,16 +1098,22 @@ def wizard_upload():
     with _UPLOAD_LOCK:
         if not _UPLOAD["running"]:
             _UPLOAD.update(running=True, phase="starting", percent=None,
-                           results=None, message="", done_at=0.0)
+                           results=None, message="", done_at=0.0, cancel=False)
             threading.Thread(target=_run_upload, daemon=True).start()
     return fragment("wizard/_upload_progress.html", job=dict(_UPLOAD),
                     back="/setup/wizard/upload")
+
+
+class _UploadStopped(Exception):
+    """The page that started the upload was left before it finished."""
 
 
 def _run_upload() -> None:
     # The crawl owns 0-85% of the bar (it dominates wall time); the five
     # catalog uploads share the last 15%.
     def _tell(text, fraction=None):
+        if _UPLOAD["cancel"]:
+            raise _UploadStopped()
         _UPLOAD["phase"] = text
         _UPLOAD["percent"] = None if fraction is None else round(fraction * 85)
 
@@ -1119,6 +1125,8 @@ def _run_upload() -> None:
         saved = store.load().get("catalog_hashes") or {}
         results, uploads = [], dict(current.get("uploads") or {})
         for index, (kind, entities) in enumerate(collected.items()):
+            if _UPLOAD["cancel"]:
+                raise _UploadStopped()
             catalog_id = ids.get(kind)
             if not catalog_id or not entities:
                 continue
@@ -1141,6 +1149,10 @@ def _run_upload() -> None:
                             "detail": f"{len(final)} entities, upload {upload_id}"})
         store.update(catalog_hashes=saved, uploads=uploads)
         _UPLOAD["results"] = results
+    except _UploadStopped:
+        _UPLOAD["message"] = ("Stopped: the page was left before the upload "
+                              "finished. Nothing was recorded; run it again "
+                              "when you are ready.")
     except Exception as exc:
         _UPLOAD["message"] = f"Could not read the library: {exc}"
     finally:
@@ -1149,8 +1161,19 @@ def _run_upload() -> None:
 
 
 _UPLOAD = {"running": False, "phase": "", "percent": None, "results": None,
-           "message": "", "done_at": 0.0}
+           "message": "", "done_at": 0.0, "cancel": False}
 _UPLOAD_LOCK = threading.Lock()
+
+
+@bp.post("/wizard/upload/stop")
+def wizard_upload_stop():
+    """The page's parting beacon. Leaving the upload page abandons the job:
+    the running thread sees the flag at its next progress tick and stops
+    without recording anything."""
+    with _UPLOAD_LOCK:
+        if _UPLOAD["running"]:
+            _UPLOAD["cancel"] = True
+    return "", 204
 
 
 @bp.get("/wizard/upload/progress")
@@ -1158,10 +1181,15 @@ def wizard_upload_progress():
     job = dict(_UPLOAD)
     if not job["running"] and request.headers.get("HX-Request"):
         # Finished since the last poll: reload the page so the rail, the
-        # Continue button and the ingestion panel all re-derive at once.
-        response = make_response("", 204)
-        response.headers["HX-Refresh"] = "true"
-        return response
+        # Continue button and the ingestion panel all re-derive at once. The
+        # guard has to come off before the reload, or the leave-warning
+        # dialog would fire on the moment of success.
+        return (
+            '<script>if (window.ampGuard) {'
+            ' removeEventListener("beforeunload", window.ampGuard);'
+            ' removeEventListener("pagehide", window.ampStop);'
+            ' window.ampGuard = null; window.ampStop = null; }'
+            ' location.reload();</script>', 200)
     return fragment("wizard/_upload_progress.html", job=job,
                     back="/setup/wizard/upload")
 
