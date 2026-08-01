@@ -1,11 +1,11 @@
 /* Ampere admin styles, layered on Basecoat.
 
-   The design language comes from the product's own world: analog audio gear.
-   Silkscreened small-cap labels, hairline rules, LED indicators, and an amber
-   backlight, on a dark faceplate or a silver-faced panel depending on the
-   scheme. Basecoat supplies the component system (btn, field, card, table,
-   badge, alert); everything here drives it through its design tokens so both
-   schemes keep working without a second set of component rules.
+   The design language follows the Echo dashboard: deep blue-black surfaces,
+   one cyan accent, flat fills, hairline rules, and small-cap labels. No
+   gradients, no glows; state is carried by color and border alone. Basecoat
+   supplies the component system (btn, field, card, table, badge, alert);
+   everything here drives it through its design tokens so both schemes keep
+   working without a second set of component rules.
 
    Scheme switching is pure CSS: light values on :root, dark values repeated
    inside a prefers-color-scheme media query. There is no theme-toggle
@@ -16,23 +16,13 @@
    spinners, responsive. */
 
 /* --- fonts ------------------------------------------------------------------
-   IBM Plex, vendored like every other asset: this page must work with no
-   network beyond itself. */
+   Inter (variable, one file covers 100-900) and IBM Plex Mono, vendored like
+   every other asset: this page must work with no network beyond itself. */
 
 @font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal; font-weight: 400; font-display: swap;
-  src: url("vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
-}
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal; font-weight: 600; font-display: swap;
-  src: url("vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
-}
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal; font-weight: 700; font-display: swap;
-  src: url("vendor/fonts/ibm-plex-sans-latin-700-normal.woff2") format("woff2");
+  font-family: "Inter";
+  font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("vendor/fonts/InterVariable.woff2") format("woff2");
 }
 @font-face {
   font-family: "IBM Plex Mono";
@@ -40,110 +30,114 @@
   src: url("vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
 }
 
-/* --- tokens: light scheme ("silver panel") ----------------------------------
-   Brushed warm gray, black silkscreen, amber turned down dark enough to hold
-   WCAG AA when used as text or a filled control. Basecoat components read the
+/* --- tokens: light scheme ("console") ---------------------------------------
+   Cool near-white, blue-gray ink, console blue standing in for the cyan:
+   #00CAFF cannot hold WCAG AA on white as text or a state indicator, so the
+   light scheme runs on #0073BB throughout. Basecoat components read the
    --background/--foreground/... set; the --amp-* set carries Ampere's own
-   vocabulary (LED states, the rail, wells, the true amber backlight). */
+   vocabulary (indicator states, the rail, wells, the accent). */
 
 :root {
   color-scheme: light;
 
   /* Basecoat tokens */
   --radius: 0.375rem;
-  --background: #EDEBE6;
-  --foreground: #26211B;
-  --card: #F7F5F1;
-  --card-foreground: #26211B;
-  --popover: #F7F5F1;
-  --popover-foreground: #26211B;
-  --primary: #A3650B;
+  --background: #F5F7FA;
+  --foreground: #16202E;
+  --card: #FFFFFF;
+  --card-foreground: #16202E;
+  --popover: #FFFFFF;
+  --popover-foreground: #16202E;
+  --primary: #0073BB;
   --primary-foreground: #FFFFFF;
-  --secondary: #DFDBD2;
-  --secondary-foreground: #3A3428;
-  --muted: #E5E1D8;
-  --muted-foreground: #6B645A;
-  --accent: #E4DFD4;
-  --accent-foreground: #26211B;
-  --destructive: #A11D1D;
-  --border: #CFCBC2;
-  --input: #C6C1B8;
-  --ring: #A3650B;
-  --sidebar: #E7E4DE;
-  --sidebar-foreground: #26211B;
-  --sidebar-primary: #A3650B;
+  --secondary: #DDE4EC;
+  --secondary-foreground: #24303F;
+  --muted: #E8ECF1;
+  --muted-foreground: #5B6B7C;
+  --accent: #E1E7EF;
+  --accent-foreground: #16202E;
+  --destructive: #B53535;
+  --border: #D9DFE7;
+  --input: #C7D0DB;
+  --ring: #0073BB;
+  --sidebar: #E9EDF2;
+  --sidebar-foreground: #16202E;
+  --sidebar-primary: #0073BB;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #E4DFD4;
-  --sidebar-accent-foreground: #26211B;
-  --sidebar-border: #CFCBC2;
-  --sidebar-ring: #A3650B;
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --sidebar-accent: #E1E7EF;
+  --sidebar-accent-foreground: #16202E;
+  --sidebar-border: #D9DFE7;
+  --sidebar-ring: #0073BB;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 
   /* Ampere tokens */
-  --amp-accent: #E8A33D;      /* the meter backlight, full strength */
-  --amp-on-accent: #17130F;   /* ink on an amber fill */
-  --amp-ok: #1B7F4C;
+  --amp-accent: #0073BB;      /* the accent, held to AA on white */
+  --amp-on-accent: #FFFFFF;   /* text on an accent fill */
+  --amp-ok: #1A7F46;
   --amp-on-ok: #FFFFFF;
-  --amp-warn: #8A6100;
-  --amp-bad: #A11D1D;
-  --amp-idle: #5B5B5B;
-  --amp-rail: #E7E4DE;
-  --amp-well: #EAE7E0;
-  --amp-field-bg: #FBFAF7;
+  --amp-warn: #9A6400;
+  --amp-bad: #B53535;
+  --amp-idle: #66788A;
+  --amp-rail: #E9EDF2;
+  --amp-well: #EDF1F6;
+  --amp-field-bg: #FBFCFE;
   --amp-sidebar-width: 15rem;
 }
 
-/* --- tokens: dark scheme ("faceplate") --------------------------------------
-   Warm near-black, off-white silkscreen, the amber at full backlight. LED
-   colors brighten so text set in them keeps contrast. */
+/* --- tokens: dark scheme ("dashboard") --------------------------------------
+   Deep blue-black, cool off-white ink, the cyan at full strength with dark
+   text on its fills. Indicator colors brighten so text set in them keeps
+   contrast. */
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --background: #1A1713;
-    --foreground: #E9E4DB;
-    --card: #211D18;
-    --card-foreground: #E9E4DB;
-    --popover: #211D18;
-    --popover-foreground: #E9E4DB;
-    --primary: #E8A33D;
-    --primary-foreground: #17130F;
-    --secondary: #4A443A;
-    --secondary-foreground: #E9E4DB;
-    --muted: #262119;
-    --muted-foreground: #9D9689;
-    --accent: #2C261F;
-    --accent-foreground: #E9E4DB;
-    --destructive: #E0684D;
-    --border: #38322A;
-    --input: #38322A;
-    --ring: #E8A33D;
-    --sidebar: #16130F;
-    --sidebar-foreground: #E9E4DB;
-    --sidebar-primary: #E8A33D;
-    --sidebar-primary-foreground: #17130F;
-    --sidebar-accent: #2C261F;
-    --sidebar-accent-foreground: #E9E4DB;
-    --sidebar-border: #38322A;
-    --sidebar-ring: #E8A33D;
+    --background: #0D1520;
+    --foreground: #E8EDF2;
+    --card: #16202E;
+    --card-foreground: #E8EDF2;
+    --popover: #16202E;
+    --popover-foreground: #E8EDF2;
+    --primary: #00CAFF;
+    --primary-foreground: #0D1520;
+    --secondary: #24303F;
+    --secondary-foreground: #E8EDF2;
+    --muted: #1B2531;
+    --muted-foreground: #8A99AB;
+    --accent: #1C2836;
+    --accent-foreground: #E8EDF2;
+    --destructive: #FF5D5D;
+    --border: #24303F;
+    --input: #24303F;
+    --ring: #00CAFF;
+    --sidebar: #0A111A;
+    --sidebar-foreground: #E8EDF2;
+    --sidebar-primary: #00CAFF;
+    --sidebar-primary-foreground: #0D1520;
+    --sidebar-accent: #16202E;
+    --sidebar-accent-foreground: #E8EDF2;
+    --sidebar-border: #1C2836;
+    --sidebar-ring: #00CAFF;
 
-    --amp-ok: #55B97E;
-    --amp-on-ok: #17130F;
-    --amp-warn: #E8A33D;
-    --amp-bad: #E0684D;
-    --amp-idle: #8B8579;
-    --amp-rail: #16130F;
-    --amp-well: #16130F;
-    --amp-field-bg: #16130F;
+    --amp-accent: #00CAFF;
+    --amp-on-accent: #0D1520;
+    --amp-ok: #2ECC71;
+    --amp-on-ok: #0D1520;
+    --amp-warn: #FFB020;
+    --amp-bad: #FF5D5D;
+    --amp-idle: #6E7E90;
+    --amp-rail: #0A111A;
+    --amp-well: #0A111A;
+    --amp-field-bg: #0A111A;
 
     /* Basecoat bakes a light-scheme gray into its select chevron and check
-       icons; restate them in the warm muted ink so they read on the
-       faceplate. */
-    --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d9689" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
-    --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d968980" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
-    --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d9689" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
+       icons; restate them in the cool muted ink so they read on the dark
+       scheme. */
+    --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%238a99ab" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%238a99ab80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%238a99ab" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
   }
 }
 
@@ -159,7 +153,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 body { font-size: 1rem; line-height: 1.55; -webkit-font-smoothing: antialiased; }
 
-h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; line-height: 1.25; text-wrap: balance; }
+::selection { background: var(--amp-accent); color: var(--amp-on-accent); }
+
+/* Inter sets comfortably a touch tighter at heading sizes. */
+h1, h2, h3 { font-weight: 600; letter-spacing: -.015em; line-height: 1.25; text-wrap: balance; }
 p { text-wrap: pretty; }
 h1 { font-size: 1.45rem; margin: 0 0 .5rem; }
 h2 { font-size: 1.2rem;  margin: 1.5rem 0 .5rem; }
@@ -182,6 +179,10 @@ p:last-child { margin-bottom: 0; }
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+  transition: color .12s ease-out;
+}
+:is(.content, .bare) a:not(.btn):not(.step):hover {
+  color: color-mix(in srgb, var(--primary) 75%, var(--foreground) 25%);
 }
 :is(.content, .bare) a:not(.btn):not(.step):focus-visible {
   outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 2px;
@@ -239,6 +240,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
   cursor: pointer;
 }
 :is(.content, .bare) button:not([class]):hover { background: color-mix(in srgb, var(--primary) 85%, var(--foreground) 5%); }
+:is(.content, .bare) button:not([class]):active { background: color-mix(in srgb, var(--primary) 78%, var(--foreground) 10%); }
 :is(.content, .bare) button:not([class]):disabled { opacity: .5; cursor: not-allowed; }
 :is(.content, .bare) button:not([class]):focus-visible {
   outline: 2px solid var(--ring); outline-offset: 2px;
@@ -250,6 +252,18 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
 .btn, .badge, .card, .input, .select, .textarea, .table-container,
 .field input, .field select, .field textarea {
   --tw-shadow: 0 0 #0000;
+}
+
+/* Press feedback on real buttons: a fast flat color shift plus a small scale.
+   Interruptible transitions on named properties only; the reduced-motion
+   block below disables them wholesale. */
+.btn, :is(.content, .bare) button:not([class]) {
+  transition: background-color .12s ease-out, border-color .12s ease-out,
+              color .12s ease-out, transform .1s ease-out;
+}
+.btn:not(:disabled):active,
+:is(.content, .bare) button:not([class]):not(:disabled):active {
+  transform: scale(.96);
 }
 
 /* Basecoat v3 expects Tailwind utility gaps between stacked fields; there
@@ -272,6 +286,10 @@ select.select, .textarea {
 
 /* Bare tables (Basecoat's .table styles itself; this covers tables without
    the class). */
+/* Inter's proportional digits shift as values change; every table sets
+   equal-width figures so columns of numbers stay aligned. */
+table { font-variant-numeric: tabular-nums; }
+
 table:not(.table) { width: 100%; border-collapse: collapse; font-size: .92rem; }
 table:not(.table) :is(td, th) {
   vertical-align: top; text-align: left;
@@ -283,7 +301,7 @@ table:not(.table) thead th {
   text-transform: uppercase; color: var(--muted-foreground);
 }
 
-/* Native <progress>: flat track, amber value bar, both schemes. Used by the
+/* Native <progress>: flat track, flat accent value bar, both schemes. Used by the
    upload progress bar; Basecoat's .progress is a div pattern and does not
    cover the element. */
 progress {
@@ -354,8 +372,8 @@ aside.side {
 .side nav ul { list-style: none; margin: 0; padding: 0; display: block; }
 .side nav li { margin: 0; padding: 0; }
 
-/* The silkscreen: the small, wide-tracked, uppercase label that hi-fi gear
-   prints beside every control. One voice, reused everywhere a label labels. */
+/* The label voice: small, wide-tracked, uppercase. One voice, reused
+   everywhere a label labels. */
 .silkscreen, .silk, .side .section, .tile .label, .pill {
   font-family: var(--font-sans);
   font-size: .66rem;
@@ -377,6 +395,7 @@ aside.side {
   color: var(--foreground); text-decoration: none;
   border-left: 3px solid transparent;
   font-size: .9rem;
+  transition: background-color .12s ease-out, border-color .12s ease-out;
 }
 .side nav a:hover { background: var(--accent); }
 .side nav a[aria-current="page"] {
@@ -417,7 +436,7 @@ aside.side {
   border-top: 1px solid var(--border);
   padding-top: .7rem; font-size: .85rem;
 }
-.side footer a { color: var(--muted-foreground); text-decoration: none; }
+.side footer a { color: var(--muted-foreground); text-decoration: none; transition: color .12s ease-out; }
 .side footer a:hover { color: var(--foreground); }
 
 /* Standalone pages (sign in, refusals, the phone-scanned verify page) get a
@@ -450,10 +469,9 @@ body.bare {
 .page-head p { color: var(--muted-foreground); margin-bottom: 0; font-size: .92rem; }
 
 /* --- wizard stepper ---------------------------------------------------------
-   A vertical channel strip beside the step panel: one node per step on a
-   connecting wire, like the signal path silkscreened down a mixer's channel.
-   Done nodes are flat green, the current node is flat amber, the wire fills
-   in behind them, so the strip itself shows how far the signal has traveled.
+   A vertical strip beside the step panel: one node per step on a connecting
+   line. Done nodes are flat green, the current node is flat cyan, the line
+   fills in behind them, so the strip itself shows how far setup has come.
    Eight labeled rows read comfortably down a rail where they congested a
    horizontal row. */
 
@@ -474,8 +492,8 @@ nav.steps ol {
 }
 nav.steps li { position: relative; margin: 0; padding: 0; }
 
-/* The wire: two half-height segments per row, meeting behind the solid node.
-   Rows after a done step carry signal. */
+/* The connecting line: two half-height segments per row, meeting behind the
+   solid node. Rows after a done step pick up the done green. */
 nav.steps li::before,
 nav.steps li::after {
   content: "";
@@ -500,6 +518,7 @@ nav.steps li.done + li::before { background: var(--amp-ok); }
   border-radius: var(--radius);
   text-decoration: none;
   color: var(--muted-foreground);
+  transition: background-color .12s ease-out, color .12s ease-out;
 }
 a.step:hover { background: var(--accent); }
 a.step:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -552,8 +571,8 @@ nav.stepnav li:last-child { margin-left: auto; }
 
 /* --- shared components ------------------------------------------------------ */
 
-/* Status readouts are LEDs beside silkscreen text, not filled badges: the dot
-   carries the color, flat, and the label stays legible ink. */
+/* Status readouts are indicator dots beside label text, not filled badges:
+   the dot carries the color, flat, and the label stays legible ink. */
 .pill {
   display: inline-flex; align-items: center; gap: .4rem;
   white-space: nowrap;
@@ -664,6 +683,10 @@ button.linklike {
   text-decoration: underline;
   text-underline-offset: 2px;
   font: inherit;
+  transition: color .12s ease-out;
+}
+button.linklike:hover {
+  color: color-mix(in srgb, var(--primary) 75%, var(--foreground) 25%);
 }
 button.linklike:focus-visible {
   outline: 2px solid var(--ring); outline-offset: 1px;
