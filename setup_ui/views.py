@@ -769,8 +769,13 @@ def wizard_amazon_begin():
 
     url, state, verifier = smapi_rest.begin(client_id)
     _PENDING.clear()
+    # The origin this wizard is being driven from. Amazon must redirect to the
+    # public https hostname, but the admin plane does not serve there, so the
+    # callback page needs to send the operator back to the address they were
+    # actually using.
     _PENDING.update({"state": state, "verifier": verifier, "at": time.time(),
-                     "client_id": client_id, "client_secret": client_secret})
+                     "client_id": client_id, "client_secret": client_secret,
+                     "origin": request.host_url.rstrip("/")})
     return redirect(url)
 
 
@@ -784,29 +789,31 @@ def oauth_callback():
     only this process holds and both of which are good for exactly one attempt.
     """
     if error := request.args.get("error"):
-        return render_template("oauth_done.html", ok=False, detail=(
+        return render_template("oauth_done.html", ok=False,
+                               back=_PENDING.get("origin"), detail=(
             f"{error}: {request.args.get('error_description', '')}"))
 
     state = request.args.get("state", "")
     code = request.args.get("code", "")
     pending = dict(_PENDING)
     _PENDING.clear()
+    back = pending.get("origin")
 
     if not pending or not state or not hmac.compare_digest(state, pending.get("state", "")):
-        return render_template("oauth_done.html", ok=False, detail=(
+        return render_template("oauth_done.html", ok=False, back=back, detail=(
             "That response did not match a consent request from this bridge. "
             "Start again from the wizard."))
     if time.time() - pending.get("at", 0) > 900:
-        return render_template("oauth_done.html", ok=False, detail=(
+        return render_template("oauth_done.html", ok=False, back=back, detail=(
             "The consent request expired. Start again from the wizard."))
 
     try:
         smapi_rest.complete(code, pending["client_id"], pending["client_secret"],
                             pending["verifier"])
     except smapi_rest.SmapiError as exc:
-        return render_template("oauth_done.html", ok=False,
+        return render_template("oauth_done.html", ok=False, back=back,
                                detail=f"{exc} {exc.body}".strip())
-    return render_template("oauth_done.html", ok=True, detail="")
+    return render_template("oauth_done.html", ok=True, back=back, detail="")
 
 
 @bp.post("/wizard/amazon/disconnect")

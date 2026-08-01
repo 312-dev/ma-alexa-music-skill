@@ -4,7 +4,6 @@
 {% if ok %}
     <h1>Connected</h1>
     <p>This bridge can now manage skills and catalogs on your behalf.</p>
-    <p>Go back to the wizard and carry on. You can close this tab.</p>
   {% else %}
     <h1>Not connected</h1>
     <p>{{ detail }}</p>
@@ -14,5 +13,13 @@
       path.
     </p>
   {% endif %}
-  <p><a href="/setup/wizard" role="button" class="secondary outline">Back to the wizard</a></p>
+  {% if back %}
+  <p><a href="{{ back }}/setup/wizard" role="button" class="secondary outline">Back to the wizard</a></p>
+  {% else %}
+  <p class="quiet">
+    Return to the wizard at the address you use for setup. This public address
+    only exists to receive Amazon's redirect; the setup pages are not served
+    here.
+  </p>
+  {% endif %}
 {% endblock %}
