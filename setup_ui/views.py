@@ -731,6 +731,29 @@ def wizard_subsonic():
                     result=result, **wizard_context())
 
 
+@bp.post("/wizard/alias")
+def wizard_alias():
+    """Save the alias, checking it against the library in the same motion.
+
+    The standalone alias page keeps the exploratory checker for later tuning.
+    Inside the wizard a separate check button was one more thing to decide
+    about, and it linked to a page the configuration gate refuses until setup
+    is done. Saving is the moment the check matters, so saving runs it.
+    """
+    candidate = (request.form.get("alias") or "").strip()
+    result = validate.assess_alias(candidate, subsonic)
+    if result["verdict"] == "empty":
+        return fragment("wizard/_alias.html", result=result, **wizard_context())
+    store.update(alias=candidate)
+    if result["verdict"] == "clear":
+        return step_completed("wizard/_alias.html", result=result,
+                              **wizard_context())
+    # Saved, but the operator should see what it collides with before moving
+    # on. The fragment carries its own way forward, because a fragment swap
+    # cannot re-enable the Continue button outside the step body.
+    return fragment("wizard/_alias.html", result=result, **wizard_context())
+
+
 @bp.get("/wizard/<step_key>")
 def wizard_step(step_key: str):
     if step_key not in wizard_steps.BY_KEY:

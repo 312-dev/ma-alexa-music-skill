@@ -2,20 +2,57 @@
   Alexa resolves what you asked for against your uploaded catalog before it
   decides which provider to route to. Every artist, album, track, playlist and
   genre in your library therefore competes with the alias for that slot, so a
-  word that matches something you own will be interpreted as a request for that
-  music instead.
+  word that matches something you own will be interpreted as a request for
+  that music instead.
 </p>
 <p>
-  Collisions depend on your library and cannot be listed in advance. The
-  <a href="/setup/alias">alias page</a> checks a candidate against your own
-  catalog. It cannot predict misrecognition, so say your shortlist to an Echo
-  before adopting one.
+  Saving checks the name against your library automatically. A clear result
+  cannot rule out misrecognition, so if you pick something unusual, say it to
+  an Echo before settling on it.
 </p>
-<form method="post" action="/setup/alias/save">
-  <label>Alias
-    <input name="alias" value="{{ state.alias }}" placeholder="ampere"
+
+<form method="post" action="/setup/wizard/alias"
+      hx-post="/setup/wizard/alias" hx-target="#step-body">
+  <label>Alias, the word you say after "on"
+    <input name="alias" value="{{ state.alias or 'ampere' }}"
            autocomplete="off" required>
   </label>
   <button type="submit">Save alias</button>
 </form>
-<p><a href="/setup/alias" role="button" class="secondary outline">Check it against my library</a></p>
+
+{% if result and result.verdict != 'empty' %}
+<article>
+  <header>
+    {% if result.verdict == 'clear' %}<span class="pill ok">clear</span>
+    {% elif result.verdict == 'risky' %}<span class="pill warn">risky</span>
+    {% else %}<span class="pill bad">collides</span>{% endif %}
+    <strong class="mono">{{ result.candidate }}</strong>
+  </header>
+  <p>{{ result.summary }}</p>
+
+  {% if result.rows %}
+  <table>
+    <thead><tr><th>Risk</th><th>What</th><th>Name</th><th>Why</th></tr></thead>
+    <tbody>
+    {% for row in result.rows %}
+      <tr>
+        <td>{% if row.risk == 'high' %}<span class="pill bad">high</span>
+            {% else %}<span class="pill warn">medium</span>{% endif %}</td>
+        <td>{{ row.kind }}</td>
+        <td>{{ row.name }}</td>
+        <td class="quiet">{{ row.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if result.verdict != 'clear' %}
+  <footer>
+    <p>It is saved. Change it above, or
+      <a href="/setup/wizard" role="button" class="secondary">Continue with
+        this alias</a></p>
+  </footer>
+  {% endif %}
+</article>
+{% endif %}

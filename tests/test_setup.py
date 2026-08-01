@@ -1024,6 +1024,34 @@ def test_continue_is_disabled_on_an_unfinished_step(ui):
     assert "<button disabled>Continue</button>" in body
 
 
+def test_wizard_alias_step_prefills_the_default(ui, monkeypatch):
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    store.update(endpoint_ok=True)
+    body = ui.get("/setup/wizard/alias").data.decode()
+    assert 'value="ampere"' in body
+    assert "placeholder" not in body
+    # The old separate checker linked into the gated configuration pages.
+    assert "Check it against my library" not in body
+
+
+def test_wizard_alias_save_checks_and_advances_when_clear(ui, monkeypatch):
+    resp = ui.post("/setup/wizard/alias", data={"alias": "ampere"},
+                   headers={"HX-Request": "true"})
+    assert resp.status_code == 204
+    assert resp.headers.get("HX-Refresh") == "true"
+    assert store.load()["alias"] == "ampere"
+
+
+def test_wizard_alias_save_surfaces_a_collision_but_still_saves(ui, monkeypatch):
+    library(monkeypatch, artists=["Jukebox The Ghost"])
+    body = ui.post("/setup/wizard/alias", data={"alias": "jukebox"},
+                   headers={"HX-Request": "true"}).data.decode()
+    assert "Jukebox The Ghost" in body
+    assert "Continue with" in body
+    assert store.load()["alias"] == "jukebox"
+
+
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):
     """Every value the Amazon console asks for is a copy row, not prose."""
     monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
