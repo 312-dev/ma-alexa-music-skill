@@ -403,6 +403,22 @@ body.bare {
 .check p { margin: 0; }
 .check .what { font-weight: 600; }
 
+/* A value to be pasted into someone else's form: readonly well plus a copy
+   button. The input stays selectable so the row still works without any
+   JavaScript. */
+.copyrow { display: flex; gap: .5rem; align-items: stretch; margin: .4rem 0 .9rem; }
+.copyrow input[readonly] {
+  font-family: var(--pico-font-family-monospace);
+  font-size: .82rem;
+  margin: 0;
+}
+.copyrow button {
+  margin: 0; width: auto; flex: none;
+  font-size: .68rem; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: .45rem .9rem;
+}
+
 .mono { font-family: var(--pico-font-family-monospace); word-break: break-all; }
 .big-code {
   font-family: var(--pico-font-family-monospace);

@@ -24,17 +24,44 @@
         with the same Amazon account your Echo devices use. If that account has
         never opened the developer console, Amazon walks you through free
         developer registration first.</li>
-      <li>Click <strong>Create a New Security Profile</strong>. Three fields are
-        required: <strong>Security Profile Name</strong> (shown on the consent
-        screen; "Ampere" works), <strong>Security Profile
-        Description</strong>, and <strong>Consent Privacy Notice URL</strong>
-        (any https page you control; this bridge's address is fine). Click
-        <strong>Save</strong>.</li>
+      <li>Click <strong>Create a New Security Profile</strong> and fill the
+        three required fields, then click <strong>Save</strong>:
+        <p><strong>Security Profile Name</strong> (shown on the consent screen)</p>
+        <div class="copyrow">
+          <input type="text" readonly id="cp-profile-name" value="Ampere"
+                 aria-label="Security Profile Name">
+          <button type="button" class="secondary outline"
+                  data-copy="cp-profile-name">Copy</button>
+        </div>
+        <p><strong>Security Profile Description</strong></p>
+        <div class="copyrow">
+          <input type="text" readonly id="cp-profile-desc"
+                 value="Self-hosted bridge that plays a personal music library on Alexa devices"
+                 aria-label="Security Profile Description">
+          <button type="button" class="secondary outline"
+                  data-copy="cp-profile-desc">Copy</button>
+        </div>
+        <p><strong>Consent Privacy Notice URL</strong> (any page you control;
+          this bridge's address is fine)</p>
+        <div class="copyrow">
+          <input type="text" readonly id="cp-privacy-url"
+                 value="{{ public_base or 'set PUBLIC_BASE first' }}"
+                 aria-label="Consent Privacy Notice URL">
+          <button type="button" class="secondary outline"
+                  data-copy="cp-privacy-url">Copy</button>
+        </div>
+      </li>
       <li>Back in the profile table, hover the <strong>gear icon</strong> in the
         Manage column and choose <strong>Web Settings</strong>.</li>
       <li>Click <strong>Edit</strong> (bottom right) and add this exact value to
         <strong>Allowed Return URLs</strong>, then <strong>Save</strong>:
-        <p class="mono big-code">{{ amazon.redirect_uri or 'set PUBLIC_BASE first' }}</p>
+        <div class="copyrow">
+          <input type="text" readonly id="cp-return-url"
+                 value="{{ amazon.redirect_uri or 'set PUBLIC_BASE first' }}"
+                 aria-label="Allowed Return URL">
+          <button type="button" class="secondary outline"
+                  data-copy="cp-return-url">Copy</button>
+        </div>
       </li>
       <li>Still on Web Settings: copy the <strong>Client ID</strong> (it starts
         with <span class="mono">amzn1.application-oa2-client</span>) and click

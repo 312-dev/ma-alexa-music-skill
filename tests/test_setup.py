@@ -1005,6 +1005,18 @@ def test_continue_is_disabled_on_an_unfinished_step(ui):
     assert "<button disabled>Continue</button>" in body
 
 
+def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):
+    """Every value the Amazon console asks for is a copy row, not prose."""
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    store.update(endpoint_ok=True)
+    body = ui.get("/setup/wizard/amazon").data.decode()
+    assert body.count("data-copy") >= 4
+    assert 'value="Ampere"' in body          # Security Profile Name
+    assert "cp-privacy-url" in body          # Consent Privacy Notice URL
+    assert "cp-return-url" in body           # Allowed Return URL
+    assert "copy.js" in body
+
+
 def test_a_finished_wizard_shows_the_done_page(ui, monkeypatch):
     _all_steps_done(monkeypatch)
     body = ui.get("/setup/wizard").data.decode()
