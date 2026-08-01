@@ -103,14 +103,17 @@ def _guard():
     # from anywhere: its entire purpose is to be opened on a phone that is off
     # the WiFi, to prove the endpoint answers from the public internet. It
     # carries a random short-lived token and reveals nothing.
-    if request.endpoint not in ("setup.verify", "setup.oauth_callback") \
-        and not access.address_allowed(ip):
+    forwarded = request.headers.get("X-Forwarded-For")
+    if request.endpoint not in ("setup.verify", "setup.oauth_callback") and (
+        access.forwarded_untrusted(request.remote_addr, forwarded)
+        or not access.address_allowed(ip)
+    ):
         # Amazon never needs the admin plane, so there is no cost to refusing
         # it everywhere Amazon might be calling from.
         return render_template(
             "blocked.html", ip=ip,
             networks=os.environ.get("SETUP_ALLOW_NETWORKS") or "private",
-            proxied=bool(request.headers.get("X-Forwarded-For")),
+            proxied=bool(forwarded),
             trusted=os.environ.get("TRUSTED_PROXIES") or "",
         ), 403
 

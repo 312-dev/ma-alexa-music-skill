@@ -1378,8 +1378,11 @@ def _authorized() -> bool:
     expected = os.environ.get("ADMIN_TOKEN")
     if not expected or request.headers.get("X-Admin-Token") != expected:
         return False
-    client = access.client_ip(request.remote_addr, request.headers.get("X-Forwarded-For"))
-    return access.address_allowed(client)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if access.forwarded_untrusted(request.remote_addr, forwarded):
+        # A proxy on the same host makes a public request look like loopback.
+        return False
+    return access.address_allowed(access.client_ip(request.remote_addr, forwarded))
 
 
 @app.get("/healthz")

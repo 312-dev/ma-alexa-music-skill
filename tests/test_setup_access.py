@@ -201,3 +201,42 @@ def test_ops_routes_still_work_on_the_lan(path):
     resp = c.get(path, headers={"X-Admin-Token": "test-admin-token"},
                  environ_overrides={"REMOTE_ADDR": LAN})
     assert resp.status_code == 200
+
+
+# --- a same-host reverse proxy must not launder public requests -------------
+#
+# The case that made the source check useless in practice: Caddy, Traefik and
+# cloudflared all dial the bridge on loopback by default, so a request from the
+# internet arrives looking like 127.0.0.1 and passes the private-network rule.
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", "172.17.0.1", "192.168.1.50"])
+def test_a_forwarded_request_from_an_untrusted_peer_is_refused(client, peer):
+    resp = get(client, ip=peer, **{"X-Forwarded-For": PUBLIC})
+    assert resp.status_code == 403
+
+
+def test_even_a_forwarded_lan_client_is_refused_without_trusted_proxies(client):
+    """We cannot tell this from a spoof, so it fails closed."""
+    assert get(client, ip="127.0.0.1", **{"X-Forwarded-For": LAN}).status_code == 403
+
+
+def test_naming_the_proxy_turns_the_header_back_on(client, monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1/32")
+    assert get(client, ip="127.0.0.1", **{"X-Forwarded-For": LAN}).status_code != 403
+    assert get(client, ip="127.0.0.1", **{"X-Forwarded-For": PUBLIC}).status_code == 403
+
+
+def test_direct_access_is_unaffected(client):
+    """No proxy header, so nothing changes for LAN or tailnet users."""
+    assert get(client, ip=LAN).status_code != 403
+    assert get(client, ip=TAILNET).status_code != 403
+
+
+@pytest.mark.parametrize("path", ["/diag", "/captures"])
+def test_ops_routes_also_refuse_a_laundered_request(path):
+    c = app_module.app.test_client()
+    resp = c.get(path, headers={"X-Admin-Token": "test-admin-token",
+                                "X-Forwarded-For": PUBLIC},
+                 environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+    assert resp.status_code == 401

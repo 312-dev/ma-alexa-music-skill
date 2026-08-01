@@ -114,6 +114,34 @@ def client_ip(remote_addr: str | None, forwarded_for: str | None) -> str:
     return peer
 
 
+def forwarded_untrusted(remote_addr: str | None, forwarded_for: str | None) -> bool:
+    """A proxied request whose real client cannot be determined.
+
+    This is the case that made the source-address check useless on the most
+    common deployment there is. A reverse proxy on the same host, which is what
+    Caddy, Traefik and cloudflared all are by default, dials the bridge on
+    loopback. So a request that came from the public internet arrives looking
+    like 127.0.0.1, sails through the private-network rule, and the admin plane
+    is exposed exactly as if there were no check at all.
+
+    Falling back to judging the peer is the wrong direction here. If a request
+    carries X-Forwarded-For and the peer is not a proxy we were told to trust,
+    the honest answer is that we do not know who is asking, and the admin plane
+    is not something to hand out on a guess. Naming the proxy in
+    TRUSTED_PROXIES turns the header back on and the real client gets judged.
+
+    Direct access over the LAN or a tailnet carries no such header and is
+    unaffected.
+    """
+    if not forwarded_for:
+        return False
+    trusted = trusted_proxies()
+    if not trusted:
+        return True
+    address = _ip((remote_addr or "").strip())
+    return address is None or not any(address in net for net in trusted)
+
+
 def address_allowed(ip: str) -> bool:
     networks = allowed_networks()
     if networks is None:
