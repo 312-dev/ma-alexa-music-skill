@@ -12,7 +12,7 @@ ways, and Amazon tells you nothing.
 ## The setup wizard
 
 The bridge serves a web wizard at `/setup` on its own hostname. It exists
-because most of this work needs a browser anyway: `ask configure` opens one for
+because most of this work needs a browser anyway: Amazon's consent screen opens one for
 its OAuth flow, and the alias checker has to query your library live.
 
 The wizard covers the whole path:

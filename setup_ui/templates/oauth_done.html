@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ 'Connected' if ok else 'Not connected' }}</title>
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('setup.static', filename='setup.css') }}">
+</head>
+<body>
+<main class="container">
+  {% if ok %}
+    <h1>Connected</h1>
+    <p>This bridge can now manage skills and catalogs on your behalf.</p>
+    <p>Go back to the wizard and carry on. You can close this tab.</p>
+  {% else %}
+    <h1>Not connected</h1>
+    <p>{{ detail }}</p>
+    <p>
+      The usual cause is the return URL on your security profile not exactly
+      matching the one the wizard showed, including the scheme and any trailing
+      path.
+    </p>
+  {% endif %}
+  <p><a href="/setup/wizard" role="button" class="secondary outline">Back to the wizard</a></p>
+</main>
+</body>
+</html>

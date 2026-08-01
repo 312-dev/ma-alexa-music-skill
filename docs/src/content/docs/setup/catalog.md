@@ -28,7 +28,7 @@ rather than baked into the image.
 ## Running the sync
 
 `catalog_sync.py` walks your library, builds the five documents, uploads each
-one with the ASK CLI, and then rebinds the skill. It needs `ask` on `PATH` and a
+one, and then rebinds the skill. The wizard can do all of it, and so can a
 configured profile.
 
 ```sh
@@ -105,8 +105,8 @@ warning and leaves the skill unbound.
 The cycle is delete-then-set on the enablement:
 
 ```sh
-ask smapi delete-skill-enablement --skill-id <skill-id> --stage development
-ask smapi set-skill-enablement    --skill-id <skill-id> --stage development
+Use the enablement step in the wizard, which does the delete and the set in
+order. `catalog_sync.py` does the same automatically when `SKILL_ID` is set.
 ```
 
 A delete that fails is normal and is not fatal: an enablement that does not

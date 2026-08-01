@@ -17,6 +17,7 @@ import pytest
 
 import app as app_module
 from setup_ui import bp as setup_bp
+import smapi_rest
 from setup_ui import qr, smapi, state as store, validate, views
 
 # The parent wires this up in app.py. Registering once here keeps the suite
@@ -510,7 +511,8 @@ def setup_rules():
     for rule in app_module.app.url_map.iter_rules():
         if not rule.endpoint.startswith("setup."):
             continue
-        if rule.endpoint in ("setup.static", "setup.login", "setup.verify"):
+        if rule.endpoint in ("setup.static", "setup.login", "setup.verify",
+                             "setup.oauth_callback"):
             continue
         yield rule
 
@@ -597,53 +599,121 @@ def fake_cli(monkeypatch, stdout: str = "{}", code: int = 0):
     return calls
 
 
+def fake_rest(monkeypatch, **overrides):
+    """Replace the REST layer. Nothing here may reach Amazon."""
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    created = {"skills": [], "catalogs": [], "associations": []}
+
+    def create_skill(manifest):
+        created["skills"].append(manifest)
+        return "amzn1.ask.skill.abc"
+
+    def create_catalog(title, catalog_type):
+        created["catalogs"].append((title, catalog_type))
+        return f"amzn1.ask.catalog.{len(created['catalogs'])}"
+
+    monkeypatch.setattr(smapi_rest, "create_skill",
+                        overrides.get("create_skill", create_skill))
+    monkeypatch.setattr(smapi_rest, "create_catalog",
+                        overrides.get("create_catalog", create_catalog))
+    monkeypatch.setattr(smapi_rest, "associate_catalog",
+                        lambda s, c: created["associations"].append((s, c)))
+    return created
+
+
 def test_wizard_creates_a_skill_once_the_endpoint_passes(ui, monkeypatch):
-    calls = fake_cli(monkeypatch, '{"skillId": "amzn1.ask.skill.abc"}')
+    created = fake_rest(monkeypatch)
     store.update(endpoint_ok=True, cert_type="Wildcard")
-    body = ui.post("/setup/wizard/skill",
-                   data={"vendor_id": "M1VENDOR", "alias": "ampere"}).data.decode()
+    body = ui.post("/setup/wizard/skill", data={"alias": "ampere"}).data.decode()
     assert "amzn1.ask.skill.abc" in body
     assert store.load()["skill_id"] == "amzn1.ask.skill.abc"
-    assert calls[0][:3] == ["ask", "smapi", "create-skill-for-vendor"]
-    assert all(isinstance(arg, str) for arg in calls[0])
+    assert len(created["skills"]) == 1
 
 
-def test_created_manifest_carries_the_derived_cert_type(ui, monkeypatch, tmp_path):
-    written = {}
+def test_skill_creation_requires_being_connected(ui, monkeypatch):
+    """No CLI to fall back on now, so this has to say so plainly."""
+    monkeypatch.setattr(smapi_rest, "connected", lambda: False)
+    store.update(endpoint_ok=True)
+    assert "Connect to Amazon first" in ui.post(
+        "/setup/wizard/skill", data={"alias": "ampere"}).data.decode()
 
-    def capture_manifest(body, directory):
-        written.update(body)
-        return str(tmp_path / "m.json")
 
-    fake_cli(monkeypatch, '{"skillId": "amzn1.ask.skill.abc"}')
-    monkeypatch.setattr(smapi, "write_manifest", capture_manifest)
+def test_created_manifest_carries_the_derived_cert_type(ui, monkeypatch):
+    created = fake_rest(monkeypatch)
     store.update(endpoint_ok=True, cert_type="Wildcard")
-    ui.post("/setup/wizard/skill", data={"vendor_id": "M1", "alias": "ampere"})
-    endpoint = written["manifest"]["apis"]["music"]["endpoint"]
+    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
+    # _unwrap is what actually reaches Amazon, so assert through it.
+    sent = smapi_rest._unwrap(created["skills"][0])
+    endpoint = sent["apis"]["music"]["endpoint"]
     assert endpoint["sslCertificateType"] == "Wildcard"
 
 
+def test_the_manifest_never_double_wraps(ui, monkeypatch):
+    """smapi.manifest() is already {"manifest": ...}; wrapping again is rejected."""
+    created = fake_rest(monkeypatch)
+    store.update(endpoint_ok=True)
+    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
+    assert "manifest" not in smapi_rest._unwrap(created["skills"][0])
+
+
+def test_the_manifest_points_at_icons_that_exist(ui, monkeypatch):
+    """A manifest naming a missing icon fails the whole update with
+    RESOURCE_NOT_FOUND, which reads as a skill problem rather than a file one."""
+    created = fake_rest(monkeypatch)
+    store.update(endpoint_ok=True)
+    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
+    locale = smapi_rest._unwrap(
+        created["skills"][0])["publishingInformation"]["locales"]["en-US"]
+    shipped = pathlib.Path(__file__).resolve().parent.parent / "icons"
+    for key in ("smallIconUri", "largeIconUri"):
+        name = locale[key].split("/icons/")[-1]
+        assert (shipped / name).is_file(), f"{key} names {name}, which is not shipped"
+
+
 def test_wizard_creates_every_catalog_kind(ui, monkeypatch):
-    calls = fake_cli(monkeypatch, '{"id": "amzn1.ask.catalog.x"}')
-    store.update(skill_id="amzn1.ask.skill.abc", vendor_id="M1VENDOR")
+    created = fake_rest(monkeypatch)
+    store.update(skill_id="amzn1.ask.skill.abc")
     body = ui.post("/setup/wizard/catalogs").data.decode()
     for kind in views.CATALOG_KINDS:
         assert kind in body
-    created = [c for c in calls if c[2] == "create-catalog"]
-    assert len(created) == len(views.CATALOG_KINDS)
+    assert len(created["catalogs"]) == len(views.CATALOG_KINDS)
+
+
+def test_every_catalog_is_associated_with_the_skill(ui, monkeypatch):
+    """Association has to happen before upload or content cannot resolve."""
+    created = fake_rest(monkeypatch)
+    store.update(skill_id="amzn1.ask.skill.abc")
+    ui.post("/setup/wizard/catalogs")
+    assert len(created["associations"]) == len(views.CATALOG_KINDS)
+    assert all(skill == "amzn1.ask.skill.abc" for skill, _ in created["associations"])
 
 
 def test_catalog_creation_needs_a_skill_first(ui, monkeypatch):
-    fake_cli(monkeypatch)
+    fake_rest(monkeypatch)
     assert "Create the skill first" in ui.post("/setup/wizard/catalogs").data.decode()
 
 
 def test_status_refresh_shouts_about_missing_enablement(ui, monkeypatch):
-    fake_cli(monkeypatch, "", code=1)
+    """The nastiest state in the project: healthy everywhere, silent in the room."""
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "enablement_status", lambda skill_id: False)
     store.update(skill_id="amzn1.ask.skill.abc")
     body = ui.post("/setup/status/refresh").data.decode()
     assert "not enabled" in body
-    assert "from Spotify" in body
+    assert "default music provider" in body
+
+
+def test_status_reports_a_healthy_enablement(ui, monkeypatch):
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "enablement_status", lambda skill_id: True)
+    store.update(skill_id="amzn1.ask.skill.abc")
+    assert "Enabled for development" in ui.post("/setup/status/refresh").data.decode()
+
+
+def test_status_says_when_it_is_not_connected(ui, monkeypatch):
+    monkeypatch.setattr(smapi_rest, "connected", lambda: False)
+    store.update(skill_id="amzn1.ask.skill.abc")
+    assert "not connected" in ui.post("/setup/status/refresh").data.decode()
 
 
 def test_subsonic_step_reports_a_failure(ui, monkeypatch):
@@ -697,3 +767,94 @@ def test_no_page_links_a_cdn(ui):
         body = ui.get(path).data.decode()
         assert "unpkg.com" not in body
         assert "cdn.jsdelivr.net" not in body
+
+
+# --- the OAuth callback is open, and has to defend itself -------------------
+
+
+def test_callback_rejects_a_response_it_did_not_ask_for(client):
+    """It is reachable from anywhere, so state is the only thing guarding it."""
+    views._PENDING.clear()
+    body = client.get("/setup/oauth/callback?code=x&state=whatever").data.decode()
+    assert "did not match" in body
+
+
+def test_callback_rejects_a_mismatched_state(client, monkeypatch):
+    views._PENDING.update({"state": "real", "verifier": "v", "at": time.time(),
+                           "client_id": "c", "client_secret": "s"})
+    body = client.get("/setup/oauth/callback?code=x&state=forged").data.decode()
+    assert "did not match" in body
+    views._PENDING.clear()
+
+
+def test_callback_rejects_an_expired_request(client):
+    views._PENDING.update({"state": "s", "verifier": "v", "at": time.time() - 1000,
+                           "client_id": "c", "client_secret": "s"})
+    body = client.get("/setup/oauth/callback?code=x&state=s").data.decode()
+    assert "expired" in body
+    views._PENDING.clear()
+
+
+def test_callback_reports_an_error_from_amazon(client):
+    body = client.get(
+        "/setup/oauth/callback?error=access_denied&error_description=nope"
+    ).data.decode()
+    assert "access_denied" in body
+
+
+def test_a_good_callback_stores_the_token(client, monkeypatch):
+    seen = {}
+
+    def complete(code, client_id, client_secret, verifier):
+        seen.update(code=code, client_id=client_id, verifier=verifier)
+        return {"refresh_token": "r"}
+
+    monkeypatch.setattr(smapi_rest, "complete", complete)
+    views._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
+                           "client_id": "cid", "client_secret": "sec"})
+    body = client.get("/setup/oauth/callback?code=abc&state=s").data.decode()
+    assert "Connected" in body
+    assert seen == {"code": "abc", "client_id": "cid", "verifier": "v"}
+    # Single use: the pending request is consumed even on success.
+    assert not views._PENDING
+
+
+def test_connect_refuses_without_an_https_public_base(ui, monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE", "http://192.168.1.50:5056")
+    body = ui.post("/setup/wizard/amazon/begin",
+                   data={"client_id": "c", "client_secret": "s"}).data.decode()
+    assert "https" in body
+
+
+def test_connect_needs_both_halves(ui):
+    body = ui.post("/setup/wizard/amazon/begin", data={"client_id": "c"}).data.decode()
+    assert "client secret" in body
+
+
+# --- teardown ---------------------------------------------------------------
+
+
+def test_teardown_refuses_without_an_exact_confirmation(ui, monkeypatch):
+    store.update(skill_id="amzn1.ask.skill.abc")
+    deleted = []
+    monkeypatch.setattr(smapi_rest, "delete_skill", lambda s: deleted.append(s))
+    body = ui.post("/setup/wizard/teardown", data={"confirm": "wrong"}).data.decode()
+    assert "Type the skill id" in body
+    assert deleted == []
+    assert store.load()["skill_id"] == "amzn1.ask.skill.abc"
+
+
+def test_teardown_removes_the_skill_and_its_catalogs(ui, monkeypatch):
+    store.update(skill_id="amzn1.ask.skill.abc",
+                 catalogs={"artists": "cat-1", "albums": "cat-2"})
+    removed = {"skills": [], "catalogs": []}
+    monkeypatch.setattr(smapi_rest, "delete_skill",
+                        lambda s: removed["skills"].append(s))
+    monkeypatch.setattr(smapi_rest, "delete_catalog",
+                        lambda c: removed["catalogs"].append(c))
+    body = ui.post("/setup/wizard/teardown",
+                   data={"confirm": "amzn1.ask.skill.abc"}).data.decode()
+    assert "deleted" in body
+    assert removed["skills"] == ["amzn1.ask.skill.abc"]
+    assert sorted(removed["catalogs"]) == ["cat-1", "cat-2"]
+    assert store.load()["skill_id"] == ""

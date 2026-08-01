@@ -9,7 +9,8 @@
     given any.
   </p>
   <p>{{ smapi.enablement.detail }}</p>
-  <p class="mono">ask smapi set-skill-enablement -s &lt;skill-id&gt; -g development</p>
+  <p><a href="/setup/wizard#step-enable" role="button" class="secondary outline">
+      Re-enable in the wizard</a></p>
   <p><small>A catalog upload silently unbinds the skill, so this can appear
     right after a successful sync. Cycling enablement is the fix.</small></p>
 </article>
@@ -56,12 +57,10 @@
   {% if smapi is none %}
     <p class="quiet">Not checked yet. Reading this means running the ASK CLI once
       per catalog, which takes a few seconds, so it is not on the ten-second poll.</p>
-  {% elif not smapi.ask %}
-    <p><span class="pill idle">no ask CLI</span> The ASK CLI is not on PATH.</p>
-  {% elif not smapi.configured %}
-    <p><span class="pill idle">ask not configured</span>
-      Run <span class="mono">ask configure</span>. See the
-      <a href="/setup/wizard">wizard</a>.</p>
+  {% elif not smapi.connected %}
+    <p><span class="pill idle">not connected</span>
+      This bridge is not authorised against your Amazon developer account yet.
+      Connect it in the <a href="/setup/wizard">wizard</a>.</p>
   {% elif not smapi.skill_id %}
     <p><span class="pill idle">no skill yet</span>
       Create one in the <a href="/setup/wizard">wizard</a>.</p>

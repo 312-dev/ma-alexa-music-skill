@@ -9,6 +9,52 @@ With the endpoint validated, the skill can be created. The wizard does this from
 a manifest template; this page explains what goes into it and why, so that the
 result is inspectable rather than magic.
 
+## Connect to Amazon
+
+Skill and catalog operations go through Amazon's Skill Management API, which
+needs your authorisation. **You register your own credentials for this.** There
+is no shared OAuth application, and nothing is hosted by this project, so your
+refresh token is minted against your own client and stays in your own `/data`.
+
+Once, in the developer console:
+
+1. Open `developer.amazon.com`, then **Login with Amazon**, then **Create a New
+   Security Profile**. Any name and description will do.
+2. On the profile, open **Web Settings** and add this exact value to **Allowed
+   Return URLs**, substituting your own origin:
+
+   ```
+   https://music.example.com/setup/oauth/callback
+   ```
+
+   The wizard prints the exact string to paste, so copy it from there rather
+   than from here.
+3. Copy the **Client ID** and **Client Secret** into the wizard and press
+   Connect. Amazon asks you to approve these scopes:
+
+   ```
+   alexa::ask:skills:readwrite
+   alexa::ask:models:readwrite
+   alexa::ask:skills:test
+   alexa::ask:catalogs:read
+   alexa::ask:catalogs:readwrite
+   ```
+
+:::note[Why this step comes after endpoint validation]
+Amazon will only redirect back to an `https` address, so the wizard needs an
+origin that already answers from the public internet. By this point
+`PUBLIC_BASE` has been proven to, which is why the order is what it is.
+:::
+
+:::caution[If the redirect fails]
+Almost always the return URL on the security profile does not exactly match the
+one the wizard showed, including the scheme and the full path. Amazon compares
+it literally.
+:::
+
+Only the refresh token is written to disk. Access tokens last an hour and are
+kept in memory.
+
 ## An HTTPS endpoint, not a Lambda
 
 Amazon's music-skill documentation only shows a Lambda ARN. An HTTPS endpoint
@@ -91,7 +137,7 @@ A created skill is not an enabled skill, and an unenabled skill fails silently
 by falling back to your default music provider.
 
 ```sh
-ask smapi set-skill-enablement --skill-id <skill-id> --stage development
+Use the enablement step in the wizard.
 ```
 
 Stage is `development` throughout. The skill is not certified and is not going

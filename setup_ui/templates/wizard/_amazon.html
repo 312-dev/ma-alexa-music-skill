@@ -1,0 +1,60 @@
+{% if amazon.connected %}
+  <p><span class="pill ok">connected</span>
+    This bridge holds a refresh token for your Amazon developer account.</p>
+  <p class="quiet">Only the refresh token is stored. Access tokens live for an
+    hour and are kept in memory.</p>
+  <form hx-post="/setup/wizard/amazon/disconnect" hx-target="#step-amazon">
+    <button type="submit" class="secondary outline">Disconnect</button>
+  </form>
+{% else %}
+  <p><span class="pill warn">not connected</span></p>
+  <p>
+    Skill and catalog operations go through Amazon's Skill Management API,
+    which needs your authorisation. <strong>You register your own credentials
+    for this.</strong> There is no shared application and nothing is hosted by
+    this project, so your tokens never touch anyone else's service.
+  </p>
+
+  <details>
+    <summary>Create a security profile, once</summary>
+    <ol>
+      <li>Open <span class="mono">developer.amazon.com</span>, then
+        Login with Amazon, then <strong>Create a New Security Profile</strong>.
+        Any name and description will do.</li>
+      <li>On the profile, open <strong>Web Settings</strong> and add this exact
+        value to <strong>Allowed Return URLs</strong>:
+        <p class="mono big-code">{{ amazon.redirect_uri or 'set PUBLIC_BASE first' }}</p>
+      </li>
+      <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong>
+        into the form below.</li>
+    </ol>
+    <p class="quiet">
+      Amazon only redirects back to https, which is why this step comes after
+      endpoint validation: by now that origin is proven to answer.
+    </p>
+    <p class="quiet">Consent will ask for: <span class="mono">{{ amazon.scopes }}</span></p>
+  </details>
+
+  <form method="post" action="/setup/wizard/amazon/begin">
+    <label>Client ID
+      <input name="client_id" required autocomplete="off"
+             placeholder="amzn1.application-oa2-client...">
+    </label>
+    <label>Client Secret
+      <input name="client_secret" type="password" required autocomplete="off">
+    </label>
+    <button type="submit">Connect to Amazon</button>
+  </form>
+
+  {% if amazon.cli_configured %}
+  <p class="quiet">
+    The ASK CLI is also configured on this host and remains a supported
+    alternative, but it cannot be driven from inside the container.
+  </p>
+  {% endif %}
+{% endif %}
+
+{% if result %}
+  <p><span class="pill {{ 'ok' if result.ok else 'bad' }}">
+    {{ 'done' if result.ok else 'failed' }}</span> {{ result.detail }}</p>
+{% endif %}

@@ -3,9 +3,9 @@
 {% block body %}
 <h1>Wizard</h1>
 <p class="quiet">
-  Each step is independent and safe to re-run. The one thing that cannot be
-  automated is <span class="mono">ask configure</span>, which is a browser
-  OAuth flow, and is the reason this is a web page rather than a script.
+  Each step is independent and safe to re-run. Step 2 hands you to Amazon and
+  back, which is a browser OAuth flow and is the reason this is a web page
+  rather than a script. Nothing here needs a terminal or the ASK CLI.
 </p>
 
 <article>
@@ -14,8 +14,8 @@
 </article>
 
 <article>
-  <header><strong>2. ASK CLI</strong></header>
-  <div id="step-ask">{% include "wizard/_ask.html" %}</div>
+  <header><strong>2. Connect to Amazon</strong></header>
+  <div id="step-amazon">{% include "wizard/_amazon.html" %}</div>
 </article>
 
 <article>
@@ -36,6 +36,7 @@
 <article>
   <header><strong>5. Catalogs</strong></header>
   <div id="step-catalogs">{% include "wizard/_catalogs.html" %}</div>
+  <div id="step-upload">{% include "wizard/_upload.html" %}</div>
   <div id="step-ingestion" hx-get="/setup/wizard/ingestion"
        hx-trigger="every 30s" hx-swap="innerHTML"></div>
   <p><a href="/setup/wizard/ingestion" role="button" class="secondary outline"
@@ -46,5 +47,10 @@
 <article>
   <header><strong>6. Enablement</strong></header>
   <div id="step-enable">{% include "wizard/_enable.html" %}</div>
+</article>
+
+<article>
+  <header><strong>Start over</strong></header>
+  <div id="step-teardown">{% include "wizard/_teardown.html" %}</div>
 </article>
 {% endblock %}

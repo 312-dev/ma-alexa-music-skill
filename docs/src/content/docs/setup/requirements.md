@@ -54,16 +54,19 @@ are behind CGNAT or cannot open ports.
 
 ## An Amazon developer account
 
-Free, at the Alexa developer console. You will also want the ASK CLI installed
-and configured (`ask configure`), because catalog upload and enablement cycling
-are CLI operations:
+Free, at the Alexa developer console.
 
-```sh
-npm install -g ask-cli
-ask configure
-```
+You do **not** need the ASK CLI, Node, or a terminal. The bridge talks to
+Amazon's Skill Management API directly, authorised through Login with Amazon in
+your browser.
 
-`ask configure` opens a browser for the OAuth flow, which is one of the reasons
+You will register **your own** Login with Amazon security profile during setup,
+which takes about a minute in the developer console. There is no shared
+application and nothing is hosted by this project, so your credentials and
+tokens stay on your own machine. The wizard walks you through it and shows the
+exact return URL to paste.
+
+This is one of the reasons
 the bridge's setup wizard is a web page rather than a terminal prompt.
 
 :::note

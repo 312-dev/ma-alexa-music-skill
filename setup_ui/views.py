@@ -19,6 +19,8 @@ import time
 from flask import Blueprint, make_response, redirect, render_template, request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+import catalog_sync
+import smapi_rest
 import subsonic
 
 from . import access, qr, smapi, state as store, validate
@@ -75,7 +77,8 @@ def authed() -> bool:
     return hmac.compare_digest(str(value), _fingerprint(expected))
 
 
-_OPEN = {"setup.static", "setup.login", "setup.verify"}
+_OPEN = {"setup.static", "setup.login", "setup.verify",
+         "setup.oauth_callback"}
 
 
 def request_ip() -> str:
@@ -100,7 +103,8 @@ def _guard():
     # from anywhere: its entire purpose is to be opened on a phone that is off
     # the WiFi, to prove the endpoint answers from the public internet. It
     # carries a random short-lived token and reveals nothing.
-    if request.endpoint != "setup.verify" and not access.address_allowed(ip):
+    if request.endpoint not in ("setup.verify", "setup.oauth_callback") \
+        and not access.address_allowed(ip):
         # Amazon never needs the admin plane, so there is no cost to refusing
         # it everywhere Amazon might be calling from.
         return render_template(
@@ -224,25 +228,44 @@ def smapi_snapshot(force: bool = False) -> dict | None:
     current = store.load()
     skill_id = os.environ.get("SKILL_ID", "") or current.get("skill_id", "")
     snapshot = {
-        "ask": smapi.ask_on_path(),
-        "configured": smapi.ask_configured(),
+        "connected": smapi_rest.connected(),
         "skill_id": skill_id,
         "enablement": None,
         "catalogs": [],
         "worst": smapi.classify_ingestion(None),
     }
-    if not (snapshot["ask"] and snapshot["configured"] and skill_id):
+    if not (snapshot["connected"] and skill_id):
         _SMAPI_CACHE.update(at=time.time(), value=snapshot)
         return snapshot
 
-    snapshot["enablement"] = smapi.classify_enablement(smapi.enablement_status(skill_id))
+    try:
+        enabled = smapi_rest.enablement_status(skill_id)
+    except Exception:
+        enabled = False
+    snapshot["enablement"] = {
+        "ok": enabled,
+        "detail": (
+            "Enabled for development."
+            if enabled else
+            "The skill is not enabled, so Alexa answers from your default music "
+            "provider and says so out loud, while this bridge looks healthy "
+            "because it is never asked anything."
+        ),
+    }
 
     rank = {"failed": 0, "none": 1, "waiting": 2, "ok": 3}
     worst = None
+    uploads = current.get("uploads") or {}
     for kind, catalog_id in catalog_ids(current).items():
-        if not catalog_id:
+        upload_id = uploads.get(kind)
+        if not (catalog_id and upload_id):
             continue
-        verdict = smapi.classify_ingestion(smapi.latest_upload(catalog_id))
+        try:
+            state, detail = smapi_rest.ingestion_verdict(
+                smapi_rest.upload_status(catalog_id, upload_id))
+        except Exception as exc:
+            state, detail = "failed", str(exc)[:200]
+        verdict = {"state": "ok" if state == "ready" else state, "detail": detail}
         snapshot["catalogs"].append({"kind": kind, "id": catalog_id, **verdict})
         if worst is None or rank[verdict["state"]] < rank[worst["state"]]:
             worst = verdict
@@ -547,8 +570,14 @@ def wizard_context(**extra) -> dict:
     context = {
         "state": current,
         "public_base": public_base(),
-        "ask": {"on_path": smapi.ask_on_path(), "configured": smapi.ask_configured(),
-                "config_path": str(smapi.CLI_CONFIG)},
+        "amazon": {
+            "connected": smapi_rest.connected(),
+            "redirect_uri": smapi_rest.redirect_uri(),
+            "scopes": smapi_rest.SCOPES,
+            # Kept so anyone who already has the CLI working can carry on.
+            "cli_on_path": smapi.ask_on_path(),
+            "cli_configured": smapi.ask_configured(),
+        },
         "catalog_ids": catalog_ids(current),
         "kinds": CATALOG_KINDS,
         "subsonic_url": os.environ.get("SUBSONIC_URL", "") or current.get("subsonic_url", ""),
@@ -579,9 +608,87 @@ def wizard_subsonic():
     return fragment("wizard/_subsonic.html", result=result, **wizard_context())
 
 
-@bp.get("/wizard/ask")
-def wizard_ask():
-    return fragment("wizard/_ask.html", **wizard_context())
+@bp.get("/wizard/amazon")
+def wizard_amazon():
+    return fragment("wizard/_amazon.html", result=None, **wizard_context())
+
+
+# The verifier and state for an in-flight consent round trip. In memory on
+# purpose: it is valid for one redirect and writing it down would leave the
+# thing that binds the authorization code to this process sitting in /data.
+_PENDING: dict = {}
+
+
+@bp.post("/wizard/amazon/begin")
+def wizard_amazon_begin():
+    client_id = (request.form.get("client_id") or "").strip()
+    client_secret = (request.form.get("client_secret") or "").strip()
+    if not (client_id and client_secret):
+        return fragment("wizard/_amazon.html", result={
+            "ok": False,
+            "detail": "Both the client ID and the client secret are needed.",
+        }, **wizard_context())
+    if not smapi_rest.redirect_uri().startswith("https://"):
+        return fragment("wizard/_amazon.html", result={
+            "ok": False,
+            "detail": "PUBLIC_BASE must be an https origin before connecting, "
+                      "because Amazon will only redirect back to https.",
+        }, **wizard_context())
+
+    url, state, verifier = smapi_rest.begin(client_id)
+    _PENDING.clear()
+    _PENDING.update({"state": state, "verifier": verifier, "at": time.time(),
+                     "client_id": client_id, "client_secret": client_secret})
+    return redirect(url)
+
+
+@bp.get("/oauth/callback")
+def oauth_callback():
+    """Where Amazon sends the operator back.
+
+    Reachable from any address, because the operator's browser is on the public
+    internet and cannot be judged by the LAN rule the rest of setup uses. What
+    protects it instead is the state value and the PKCE verifier, both of which
+    only this process holds and both of which are good for exactly one attempt.
+    """
+    if error := request.args.get("error"):
+        return render_template("oauth_done.html", ok=False, detail=(
+            f"{error}: {request.args.get('error_description', '')}"))
+
+    state = request.args.get("state", "")
+    code = request.args.get("code", "")
+    pending = dict(_PENDING)
+    _PENDING.clear()
+
+    if not pending or not state or not hmac.compare_digest(state, pending.get("state", "")):
+        return render_template("oauth_done.html", ok=False, detail=(
+            "That response did not match a consent request from this bridge. "
+            "Start again from the wizard."))
+    if time.time() - pending.get("at", 0) > 900:
+        return render_template("oauth_done.html", ok=False, detail=(
+            "The consent request expired. Start again from the wizard."))
+
+    try:
+        smapi_rest.complete(code, pending["client_id"], pending["client_secret"],
+                            pending["verifier"])
+    except smapi_rest.SmapiError as exc:
+        return render_template("oauth_done.html", ok=False,
+                               detail=f"{exc} {exc.body}".strip())
+    return render_template("oauth_done.html", ok=True, detail="")
+
+
+@bp.post("/wizard/amazon/disconnect")
+def wizard_amazon_disconnect():
+    smapi_rest.forget_credentials()
+    return fragment("wizard/_amazon.html", result={
+        "ok": True, "detail": "Disconnected. The refresh token was deleted.",
+    }, **wizard_context())
+
+
+def _rest_error(exc: Exception) -> str:
+    if isinstance(exc, smapi_rest.SmapiError):
+        return f"{exc} {exc.body}".strip()
+    return str(exc)[:400]
 
 
 @bp.post("/wizard/skill")
@@ -590,39 +697,33 @@ def wizard_skill():
     if not current.get("endpoint_ok"):
         return fragment("wizard/_skill.html", blocked=True, result=None,
                         **wizard_context())
-
-    vendor_id = (request.form.get("vendor_id") or current.get("vendor_id") or "").strip()
-    alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
-    if not vendor_id:
+    if not smapi_rest.connected():
         return fragment("wizard/_skill.html", blocked=False, result={
-            "ok": False, "detail": "A vendor id is required. Run "
-                                   "ask smapi get-vendor-list to find yours."},
+            "ok": False, "detail": "Connect to Amazon first."},
             **wizard_context())
 
-    body = smapi.manifest(
+    alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
+    manifest = smapi.manifest(
         name=alias_word.title(),
         public_base=public_base(),
         cert_type=current.get("cert_type") or "Trusted",
     )
-    path = smapi.write_manifest(body, os.environ.get("SETUP_STATE_DIR", "/data"))
-    outcome = smapi.create_skill(path, vendor_id)
-    data = outcome.data() or {}
-    skill_id = data.get("skillId") or data.get("skill_id") or ""
-    if outcome.ok and skill_id:
-        store.update(skill_id=skill_id, vendor_id=vendor_id, alias=alias_word)
+    try:
+        skill_id = smapi_rest.create_skill(manifest)
+    except Exception as exc:
+        return fragment("wizard/_skill.html", blocked=False, result={
+            "ok": False, "detail": _rest_error(exc)}, **wizard_context())
+
+    store.update(skill_id=skill_id, alias=alias_word)
     return fragment("wizard/_skill.html", blocked=False, result={
-        "ok": bool(outcome.ok and skill_id),
-        "detail": f"Created {skill_id}" if skill_id else outcome.message,
-        "manifest_path": path,
-    }, **wizard_context())
+        "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
 
 
 @bp.post("/wizard/catalogs")
 def wizard_catalogs():
     current = store.load()
     skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
-    vendor_id = current.get("vendor_id", "")
-    if not (skill_id and vendor_id):
+    if not skill_id:
         return fragment("wizard/_catalogs.html", results=None,
                         **wizard_context(message="Create the skill first."))
 
@@ -633,28 +734,81 @@ def wizard_catalogs():
             results.append({"kind": kind, "ok": True,
                             "detail": f"already {catalogs[kind]}"})
             continue
-        outcome = smapi.create_catalog(f"Ampere {kind}", catalog_type, vendor_id)
-        data = outcome.data() or {}
-        catalog_id = data.get("id") or data.get("catalogId") or ""
-        if outcome.ok and catalog_id:
-            catalogs[kind] = catalog_id
-            smapi.associate_catalog(catalog_id, skill_id)
-            results.append({"kind": kind, "ok": True, "detail": catalog_id})
-        else:
-            results.append({"kind": kind, "ok": False, "detail": outcome.message})
+        try:
+            catalog_id = smapi_rest.create_catalog(f"Ampere {kind}", catalog_type)
+            # Association has to happen before any upload or the content has
+            # nowhere to resolve against.
+            smapi_rest.associate_catalog(skill_id, catalog_id)
+        except Exception as exc:
+            results.append({"kind": kind, "ok": False, "detail": _rest_error(exc)})
+            continue
+        catalogs[kind] = catalog_id
+        results.append({"kind": kind, "ok": True, "detail": catalog_id})
     store.update(catalogs=catalogs)
     return fragment("wizard/_catalogs.html", results=results, **wizard_context())
+
+
+@bp.post("/wizard/upload")
+def wizard_upload():
+    """Build the catalogs from the library and upload them.
+
+    This used to be a paragraph telling the operator to go and run
+    catalog_sync.py themselves, which was the largest remaining gap between
+    what the wizard claimed to do and what it did.
+    """
+    current = store.load()
+    ids = catalog_ids(current)
+    if not any(ids.values()):
+        return fragment("wizard/_upload.html", results=None,
+                        **wizard_context(message="Create the catalogs first."))
+
+    try:
+        collected = catalog_sync.collect()
+    except Exception as exc:
+        return fragment("wizard/_upload.html", results=None,
+                        **wizard_context(message=f"Could not read the library: {exc}"))
+
+    saved = store.load().get("catalog_hashes") or {}
+    results, uploads = [], dict(current.get("uploads") or {})
+    for kind, entities in collected.items():
+        catalog_id = ids.get(kind)
+        if not catalog_id or not entities:
+            continue
+        final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
+        payload = json.dumps({
+            "type": catalog_sync.TYPES[kind], "version": 2.0,
+            "locales": catalog_sync.LOCALES, "entities": final,
+        }).encode()
+        try:
+            upload_id = smapi_rest.upload_catalog(catalog_id, payload)
+        except Exception as exc:
+            results.append({"kind": kind, "ok": False, "detail": _rest_error(exc)})
+            continue
+        saved[kind] = hashes
+        uploads[kind] = upload_id
+        results.append({"kind": kind, "ok": True,
+                        "detail": f"{len(final)} entities, upload {upload_id}"})
+
+    store.update(catalog_hashes=saved, uploads=uploads)
+    return fragment("wizard/_upload.html", results=results, **wizard_context())
 
 
 @bp.get("/wizard/ingestion")
 def wizard_ingestion():
     current = store.load()
+    uploads = current.get("uploads") or {}
     rows = []
     for kind, catalog_id in catalog_ids(current).items():
-        if not catalog_id:
+        upload_id = uploads.get(kind)
+        if not (catalog_id and upload_id):
             continue
+        try:
+            state, detail = smapi_rest.ingestion_verdict(
+                smapi_rest.upload_status(catalog_id, upload_id))
+        except Exception as exc:
+            state, detail = "failed", _rest_error(exc)
         rows.append({"kind": kind, "id": catalog_id,
-                     **smapi.classify_ingestion(smapi.latest_upload(catalog_id))})
+                     "state": state, "detail": detail})
     return fragment("wizard/_ingestion.html", rows=rows, **wizard_context())
 
 
@@ -665,9 +819,57 @@ def wizard_enable():
     if not skill_id:
         return fragment("wizard/_enable.html", result={
             "ok": False, "detail": "No skill id yet."}, **wizard_context())
-    outcomes = smapi.cycle_enablement(skill_id)
-    ok = outcomes[-1].ok
+    try:
+        # Delete first. Uploading a catalog unbinds the skill from the provider
+        # slot without reporting it anywhere, and only a cycle rebinds it.
+        try:
+            smapi_rest.delete_enablement(skill_id)
+        except smapi_rest.SmapiError:
+            pass  # Not enabled is the normal state here, not a failure.
+        smapi_rest.set_enablement(skill_id)
+    except Exception as exc:
+        return fragment("wizard/_enable.html", result={
+            "ok": False, "detail": _rest_error(exc)}, **wizard_context())
     return fragment("wizard/_enable.html", result={
-        "ok": ok,
-        "detail": "Enabled for development." if ok else outcomes[-1].message,
-    }, **wizard_context())
+        "ok": True, "detail": "Enabled for development."}, **wizard_context())
+
+
+@bp.get("/wizard/teardown")
+def wizard_teardown():
+    return fragment("wizard/_teardown.html", results=None, **wizard_context())
+
+
+@bp.post("/wizard/teardown")
+def wizard_teardown_run():
+    """Delete the skill and its catalogs, for a genuine clean slate.
+
+    Guarded by typing the skill id back, because this is not recoverable: the
+    catalogs go with it and the replacement has to be re-uploaded and
+    re-ingested from nothing.
+    """
+    current = store.load()
+    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
+    if (request.form.get("confirm") or "").strip() != skill_id or not skill_id:
+        return fragment("wizard/_teardown.html", results=[{
+            "what": "nothing", "ok": False,
+            "detail": "Type the skill id exactly to confirm.",
+        }], **wizard_context())
+
+    results = []
+    for kind, catalog_id in catalog_ids(current).items():
+        if not catalog_id:
+            continue
+        try:
+            smapi_rest.delete_catalog(catalog_id)
+            results.append({"what": f"catalog {kind}", "ok": True, "detail": catalog_id})
+        except Exception as exc:
+            results.append({"what": f"catalog {kind}", "ok": False,
+                            "detail": _rest_error(exc)})
+    try:
+        smapi_rest.delete_skill(skill_id)
+        results.append({"what": "skill", "ok": True, "detail": skill_id})
+    except Exception as exc:
+        results.append({"what": "skill", "ok": False, "detail": _rest_error(exc)})
+
+    store.update(skill_id="", catalogs={}, uploads={}, catalog_hashes={})
+    return fragment("wizard/_teardown.html", results=results, **wizard_context())

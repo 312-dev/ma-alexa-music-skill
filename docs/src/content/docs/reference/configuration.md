@@ -89,13 +89,15 @@ the container image.
 It also reads the Subsonic variables above. If any catalog id is missing it
 exits with status 2 without uploading anything.
 
-Uploads go through the ASK CLI:
+Uploads go through the Skill Management REST API, authorised by the Login with
+Amazon credentials the wizard stored. The older CLI form still works if you
+have it:
 
 ```sh
 ask smapi upload-catalog -c <catalog-id> -f <file>
 ```
 
-`ASK_CONFIG` points at the ASK CLI configuration the wizard reads, defaulting to
+`ASK_CONFIG` points at an optional ASK CLI configuration, defaulting to
 `~/.ask/cli_config`.
 
 ## Out-of-band queues

@@ -44,8 +44,8 @@ The usual cause is a catalog upload. Uploading a catalog silently unbinds the
 skill. Cycle enablement:
 
 ```sh
-ask smapi delete-skill-enablement --skill-id <skill-id> --stage development
-ask smapi set-skill-enablement    --skill-id <skill-id> --stage development
+Open the wizard and run the enablement step. It deletes the enablement and
+sets it again, which is what rebinds the provider slot.
 ```
 
 If you did not upload a catalog, check that the skill is enabled at all, and
