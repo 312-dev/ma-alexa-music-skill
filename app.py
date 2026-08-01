@@ -34,6 +34,7 @@ from html import escape
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
+import mdns
 import oauth
 import queue_api
 import queuestate
@@ -1577,6 +1578,12 @@ def terms():
 # Off in tests, where Navidrome is mocked and there is nothing to warm from.
 if os.environ.get("PREWARM", "1") == "1":
     _WARM_POOL.submit(prewarm_artists)
+
+# Optional, and a no-op unless MDNS is set. Under gunicorn this runs in the
+# worker rather than the master, which is fine at one worker and is why the
+# module tolerates a registration that fails because something already holds
+# 5353.
+mdns.advertise(int(os.environ.get("PORT", "5056")))
 
 
 if __name__ == "__main__":

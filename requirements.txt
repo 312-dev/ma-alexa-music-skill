@@ -6,3 +6,7 @@ itsdangerous==2.2.0
 # Request signature verification (signature.py). Optional at runtime: the
 # module degrades to an "unavailable" reason if it is not importable.
 cryptography==46.0.3
+
+# Optional. Only used when MDNS is set, to advertise <name>.local on the LAN so
+# the setup UI can be reached by name. Absent, mdns.py is a no-op.
+zeroconf==0.148.0

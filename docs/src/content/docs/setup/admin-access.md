@@ -111,10 +111,47 @@ By address and port, from a machine on an allowed network:
 http://192.168.1.50:5056/setup
 ```
 
-There is no `.local` name. Home Assistant gets `homeassistant.local` from mDNS
-advertised by Avahi on the host, which needs host networking and a daemon this
-image deliberately does not carry. If you want a name, the options in
-increasing order of effort are a `hosts` entry on the machine you set up from,
+Or by name, if you turn on mDNS.
+
+### ampere.local
+
+Set `MDNS=1` and the bridge advertises itself on the local network, so
+`http://ampere.local:5056/setup` works from any machine on the LAN with no DNS
+server, no hosts file and no configuration. This is the same mechanism that
+gives Home Assistant its `homeassistant.local`.
+
+```yaml
+services:
+  ampere:
+    image: ghcr.io/graysoncadams/ampere:latest
+    network_mode: host        # required, see below
+    environment:
+      MDNS: "1"
+      MDNS_NAME: ampere       # so the name is ampere.local
+    env_file: .env
+```
+
+:::caution[It needs host networking, and will refuse without it]
+mDNS is link-local multicast, so the address being advertised has to be one
+your other machines can route to. On Docker's default bridge network the
+container holds a `172.x` address inside a private namespace.
+
+Rather than publish a name that resolves and then times out, which reads as an
+outage rather than as a networking choice, the bridge detects this and refuses
+to advertise, logging what to change. So turning `MDNS` on with bridge
+networking is safe, it simply will not do anything.
+
+Note that `network_mode: host` also means the port mapping no longer applies:
+the bridge listens on `PORT` on the host directly.
+:::
+
+If port 5353 is already held by an Avahi or Bonjour responder on the host, the
+registration fails, that is logged, and the bridge carries on serving music.
+Advertising is never allowed to be load-bearing.
+
+### Without mDNS
+
+In increasing order of effort: a `hosts` entry on the machine you set up from,
 a DNS record on your router or Pi-hole, or a second reverse-proxy virtual host
 bound only to your LAN interface.
 
