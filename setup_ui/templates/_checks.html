@@ -10,6 +10,22 @@
   <div>
     <p class="what">{{ row.name }}</p>
     <p class="quiet">{{ row.detail }}</p>
+    {% if row.diag %}
+    <details class="diag">
+      <summary>Response details</summary>
+      <p class="mono quiet">HTTP {{ row.diag.status }} from {{ row.diag.url }}</p>
+      {% if row.diag.headers %}
+      <table>
+        <tbody>
+        {% for name, value in row.diag.headers %}
+          <tr><td class="mono">{{ name }}</td><td class="mono">{{ value }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if row.diag.body %}<pre><code>{{ row.diag.body }}</code></pre>{% endif %}
+    </details>
+    {% endif %}
   </div>
 </div>
 {% endfor %}

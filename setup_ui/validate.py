@@ -41,8 +41,25 @@ PROBE_DIRECTIVE = {
 }
 
 
-def check(name: str, ok: bool | None, detail: str, note: str = "") -> dict:
-    return {"name": name, "ok": ok, "detail": detail, "note": note}
+def check(name: str, ok: bool | None, detail: str, note: str = "",
+          diag: dict | None = None) -> dict:
+    return {"name": name, "ok": ok, "detail": detail, "note": note,
+            "diag": diag}
+
+
+def _diag(url: str, status: int, headers, body: str = "") -> dict:
+    """What actually came back, for the expandable details on a check row.
+
+    The status line and headers say which layer answered: a Server header of
+    cloudflare on a 403 is a CDN rule, not the bridge, and no amount of
+    prose in the check's summary can substitute for seeing that.
+    """
+    return {
+        "url": url,
+        "status": status,
+        "headers": [(k, v) for k, v in (headers or {}).items()],
+        "body": (body or "")[:600],
+    }
 
 
 # --- address ----------------------------------------------------------------
@@ -170,39 +187,55 @@ def check_tls(base: str) -> dict:
 # --- HTTP over the public path ----------------------------------------------
 
 
-def http_get(url: str, timeout: float = 8.0) -> tuple[int, str]:
+# An honest, named user agent. Python's default one sits on CDN bot
+# blocklists: Cloudflare's free tier answers Python-urllib with 403 while
+# letting curl, browsers and Amazon straight through, which made these checks
+# report an outage that did not exist.
+_UA = "Ampere-endpoint-check/1.0 (+https://github.com/GraysonCAdams/ampere)"
+
+
+def http_get(url: str, timeout: float = 8.0) -> tuple[int, str, dict]:
     """Replaced in tests. Never called against localhost by design."""
-    request = urllib.request.Request(url, method="GET")
+    request = urllib.request.Request(url, method="GET",
+                                     headers={"User-Agent": _UA})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
-            return resp.status, resp.read(4096).decode("utf-8", "replace")
+            return (resp.status, resp.read(4096).decode("utf-8", "replace"),
+                    dict(resp.headers))
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read(4096).decode("utf-8", "replace")
+        return (exc.code, exc.read(4096).decode("utf-8", "replace"),
+                dict(exc.headers or {}))
 
 
-def http_post_json(url: str, body: dict, timeout: float = 12.0) -> tuple[int, str]:
+def http_post_json(url: str, body: dict,
+                   timeout: float = 12.0) -> tuple[int, str, dict]:
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": _UA},
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
-            return resp.status, resp.read(8192).decode("utf-8", "replace")
+            return (resp.status, resp.read(8192).decode("utf-8", "replace"),
+                    dict(resp.headers))
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read(8192).decode("utf-8", "replace")
+        return (exc.code, exc.read(8192).decode("utf-8", "replace"),
+                dict(exc.headers or {}))
 
 
 def check_healthz(base: str) -> dict:
     url = f"{base.rstrip('/')}/healthz"
     try:
-        status, _ = http_get(url)
+        status, body, headers = http_get(url)
     except OSError as exc:
         return check("GET /healthz over the public URL", False, f"{url} failed: {exc}")
+    diag = _diag(url, status, headers, body)
     if status != 200:
-        return check("GET /healthz over the public URL", False, f"{url} answered {status}.")
-    return check("GET /healthz over the public URL", True, f"{url} answered 200.")
+        return check("GET /healthz over the public URL", False,
+                     f"{url} answered {status}.", diag=diag)
+    return check("GET /healthz over the public URL", True,
+                 f"{url} answered 200.", diag=diag)
 
 
 def check_music_post(base: str) -> dict:
@@ -214,21 +247,23 @@ def check_music_post(base: str) -> dict:
     """
     url = f"{base.rstrip('/')}/music"
     try:
-        status, body = http_post_json(url, PROBE_DIRECTIVE)
+        status, body, headers = http_post_json(url, PROBE_DIRECTIVE)
     except OSError as exc:
         return check("POST /music with a real directive", False, f"{url} failed: {exc}")
+    diag = _diag(url, status, headers, body)
     if status != 200:
         return check("POST /music with a real directive", False,
                      f"{url} answered {status}. A 400 here usually means the proxy "
-                     "dropped the request body.")
+                     "dropped the request body.", diag=diag)
     try:
         envelope = json.loads(body)
         namespace = envelope["header"]["namespace"]
     except (ValueError, KeyError, TypeError):
         return check("POST /music with a real directive", False,
-                     "200, but the response was not an Alexa envelope.")
+                     "200, but the response was not an Alexa envelope.", diag=diag)
     return check("POST /music with a real directive", True,
-                 f"200 with a {namespace} envelope. The body survived the proxy.")
+                 f"200 with a {namespace} envelope. The body survived the proxy.",
+                 diag=diag)
 
 
 # --- external proof ---------------------------------------------------------

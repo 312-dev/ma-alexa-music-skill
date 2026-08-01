@@ -45,7 +45,8 @@ def isolated(monkeypatch, tmp_path):
         validate, "peer_cert",
         lambda host, port, timeout=8.0: {"subjectAltName": (("DNS", host),)},
     )
-    monkeypatch.setattr(validate, "http_get", lambda url, timeout=8.0: (200, '{"ok":true}'))
+    monkeypatch.setattr(validate, "http_get",
+                        lambda url, timeout=8.0: (200, '{"ok":true}', {"Server": "test"}))
     monkeypatch.setattr(
         validate, "http_post_json",
         lambda url, body, timeout=12.0: (
@@ -53,6 +54,7 @@ def isolated(monkeypatch, tmp_path):
             json.dumps({"header": {"namespace": "Alexa.Media.Search",
                                    "name": "GetPlayableContent.Response"},
                         "payload": {}}),
+            {"Server": "test"},
         ),
     )
     monkeypatch.setattr(
@@ -263,10 +265,25 @@ def test_cert_type_is_surfaced_on_the_page(ui, monkeypatch):
 
 def test_post_probe_failure_blames_the_proxy(monkeypatch):
     monkeypatch.setattr(validate, "http_post_json",
-                        lambda url, body, timeout=12.0: (400, "no json"))
+                        lambda url, body, timeout=12.0: (400, "no json",
+                                                         {"Server": "cloudflare"}))
     row = validate.check_music_post("https://ampere.example.com")
     assert row["ok"] is False
     assert "dropped the request body" in row["detail"]
+    # The layer that answered is visible, not guessed at.
+    assert ("Server", "cloudflare") in row["diag"]["headers"]
+    assert row["diag"]["status"] == 400
+
+
+def test_check_rows_render_expandable_response_details(ui):
+    body = ui.get("/setup/endpoint").data.decode()
+    assert "Response details" in body
+
+
+def test_the_checker_does_not_use_the_blocklisted_default_agent():
+    """Cloudflare's free tier answers Python-urllib with 403; Amazon and
+    browsers pass. The checks must not report an outage that is not there."""
+    assert "Ampere" in validate._UA
 
 
 def test_endpoint_page_gates_the_wizard(ui, monkeypatch):
