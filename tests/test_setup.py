@@ -360,6 +360,14 @@ def test_page_shows_the_url_as_text_even_with_a_qr(ui):
 # --- alias ------------------------------------------------------------------
 
 
+@pytest.fixture
+def cfg(ui, monkeypatch):
+    """An authed client whose wizard is complete: configuration pages open."""
+    _all_steps_done(monkeypatch)
+    return ui
+
+
+
 def library(monkeypatch, artists=(), albums=(), songs=()):
     monkeypatch.setattr(app_module.subsonic, "search", lambda q, songs_=None, **kw: {
         "artist": [{"id": f"a{i}", "name": n} for i, n in enumerate(artists)],
@@ -407,55 +415,55 @@ def test_alias_flags_a_brand(monkeypatch):
     assert result["rows"][0]["kind"] == "brand"
 
 
-def test_alias_page_explains_why_it_matters(ui):
-    body = ui.get("/setup/alias").data.decode()
+def test_alias_page_explains_why_it_matters(cfg):
+    body = cfg.get("/setup/alias").data.decode()
     assert "before" in body
     assert "catalog" in body
 
 
-def test_alias_page_reports_a_collision(ui, monkeypatch):
+def test_alias_page_reports_a_collision(cfg, monkeypatch):
     library(monkeypatch, artists=["Jukebox The Ghost"])
-    body = ui.post("/setup/alias", data={"candidate": "jukebox"}).data.decode()
+    body = cfg.post("/setup/alias", data={"candidate": "jukebox"}).data.decode()
     assert "Jukebox The Ghost" in body
 
 
 # --- stations ---------------------------------------------------------------
 
 
-def test_stations_page_lists_every_after_content_mode(ui):
-    body = ui.get("/setup/stations").data.decode()
+def test_stations_page_lists_every_after_content_mode(cfg):
+    body = cfg.get("/setup/stations").data.decode()
     for mode in app_module.AFTER_CONTENT_MODES:
         assert f'value="{mode}"' in body
 
 
-def test_stations_page_no_longer_demands_a_restart(ui):
+def test_stations_page_no_longer_demands_a_restart(cfg):
     """Saved values take effect live now; the old caveat must not resurface."""
-    body = ui.get("/setup/stations").data.decode()
+    body = cfg.get("/setup/stations").data.decode()
     assert "restart" not in body
     assert "take effect immediately" in body
 
 
-def test_saved_settings_take_effect_without_a_restart(ui, app):
+def test_saved_settings_take_effect_without_a_restart(cfg, app):
     """The point of the change: the form is a real settings page."""
     import app as bridge
-    ui.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
+    cfg.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
                                      "radio_tracks_per_artist": "4"})
     assert bridge.effective_after_content() == "stop"
     assert bridge.effective_radio_artists() == 5
     assert bridge.effective_radio_tracks_per_artist() == 4
     assert bridge.continuation_mode("ar:a1") == "stop"
 
-    ui.post("/setup/stations", data={"after_content": "radio", "radio_artists": "9",
+    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "9",
                                      "radio_tracks_per_artist": "4"})
     assert bridge.continuation_mode("ar:a1") == "radio"
 
 
-def test_saving_settings_drops_the_stale_pools(ui):
+def test_saving_settings_drops_the_stale_pools(cfg):
     """Cached pools were built under the old numbers."""
     import app as bridge
     bridge._RADIO_CACHE["a1"] = ["a1", "a2"]
     bridge._QUEUE_CACHE["rad:a1"] = [{"id": "t1"}]
-    ui.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
+    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
                                      "radio_tracks_per_artist": "6"})
     assert not bridge._RADIO_CACHE
     assert not bridge._QUEUE_CACHE
@@ -468,33 +476,63 @@ def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch)
     assert bridge.effective_after_content() == "genre"
 
 
-def test_saving_stations_persists(ui):
-    ui.post("/setup/stations", data={"after_content": "radio", "radio_artists": "7",
+def test_saving_stations_persists(cfg):
+    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "7",
                                      "radio_tracks_per_artist": "3"})
     saved = store.load()
     assert saved["after_content"] == "radio"
     assert saved["radio_artists"] == 7
 
 
-def test_saving_stations_refuses_an_unknown_mode(ui):
-    ui.post("/setup/stations", data={"after_content": "teleport",
+def test_saving_stations_refuses_an_unknown_mode(cfg):
+    cfg.post("/setup/stations", data={"after_content": "teleport",
                                      "radio_artists": "7",
                                      "radio_tracks_per_artist": "3"})
     assert store.load()["after_content"] in app_module.AFTER_CONTENT_MODES
 
 
-def test_station_preview_shows_the_artist_pool(ui):
-    body = ui.get("/setup/stations/preview?seed=Gregory").data.decode()
+def test_station_preview_shows_the_artist_pool(cfg):
+    body = cfg.get("/setup/stations/preview?seed=Gregory").data.decode()
     assert "Blind Pilot" in body
     assert "Iron and Wine" in body
 
 
-def test_station_preview_calls_out_a_degraded_pool(ui, monkeypatch):
+def test_station_preview_calls_out_a_degraded_pool(cfg, monkeypatch):
     monkeypatch.setattr(app_module.subsonic, "similar_artists",
                         lambda artist_id, count=20: [])
     app_module._RADIO_CACHE.clear()
-    body = ui.get("/setup/stations/preview?seed=Gregory").data.decode()
+    body = cfg.get("/setup/stations/preview?seed=Gregory").data.decode()
     assert "seed artist alone" in body
+
+
+
+
+def test_configuration_pages_wait_for_the_wizard(ui):
+    for path in ("/setup/alias", "/setup/stations",
+                 "/setup/stations/preview?seed=x"):
+        resp = ui.get(path)
+        assert resp.status_code == 302, path
+        assert resp.headers["Location"].endswith("/setup/wizard"), path
+
+
+def test_saving_stations_waits_for_the_wizard_too(ui):
+    """The gate covers writes, not just page views."""
+    resp = ui.post("/setup/stations", data={"after_content": "stop",
+                                            "radio_artists": "5",
+                                            "radio_tracks_per_artist": "4"})
+    assert resp.status_code == 302
+    assert not store.load().get("after_content")
+
+
+def test_sidebar_locks_configuration_until_setup_is_done(ui, monkeypatch):
+    # The body of the status page may link to configuration wherever it likes;
+    # the gate bounces those clicks. The sidebar is what must read as locked.
+    body = ui.get("/setup/status").data.decode()
+    assert "navlocked" in body
+
+    _all_steps_done(monkeypatch)
+    body = ui.get("/setup/status").data.decode()
+    assert "navlocked" not in body
 
 
 # --- smapi seam -------------------------------------------------------------

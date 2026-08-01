@@ -501,8 +501,23 @@ def verify(token: str):
 # --- alias ------------------------------------------------------------------
 
 
+def _configuration_gate():
+    """Configuration pages open once setup is complete.
+
+    Before that the wizard owns these values: a knob changed here would either
+    be overwritten by a later step or would configure a skill that does not
+    exist yet. The wizard's own endpoints stay open; this gates only the
+    standalone pages.
+    """
+    if not wizard_steps.complete(store.load()):
+        return redirect("/setup/wizard")
+    return None
+
+
 @bp.route("/alias", methods=["GET", "POST"])
 def alias():
+    if (gate := _configuration_gate()) is not None:
+        return gate
     candidate = (request.values.get("candidate") or "").strip()
     result = validate.assess_alias(candidate, subsonic) if candidate else None
     template = "_alias.html" if request.headers.get("HX-Request") else "alias.html"
@@ -544,11 +559,15 @@ def station_context() -> dict:
 
 @bp.get("/stations")
 def stations():
+    if (gate := _configuration_gate()) is not None:
+        return gate
     return render_template("stations.html", stored=None, **station_context())
 
 
 @bp.post("/stations")
 def stations_save():
+    if (gate := _configuration_gate()) is not None:
+        return gate
     import app as bridge
 
     mode = (request.form.get("after_content") or "").strip().lower()
@@ -581,6 +600,8 @@ def stations_preview():
     A station that had quietly degraded to its seed artist alone was found by
     ear, over hours. It is one glance here.
     """
+    if (gate := _configuration_gate()) is not None:
+        return gate
     seed = (request.args.get("seed") or "").strip()
     if not seed:
         return fragment("_pool.html", back="/setup/stations", seed="", error="", pool=None)

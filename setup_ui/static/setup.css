@@ -59,6 +59,7 @@
   --amp-idle: #5b5b5b;
   --amp-rail: #E7E4DE;
   --amp-hairline: #CFCBC2;
+  --amp-well: #EAE7E0;
   /* Silver-faced panel: brushed aluminum, black silkscreen, amber backlight. */
   --pico-background-color: #EDEBE6;
   --pico-color: #26211B;
@@ -99,6 +100,7 @@
     --amp-idle: #8b8579;
     --amp-rail: #16130F;
     --amp-hairline: #38322A;
+    --amp-well: #16130F;
     /* Dark faceplate: warm near-black, not neutral gray. */
     --pico-background-color: #1A1713;
     --pico-color: #E9E4DB;
@@ -255,6 +257,19 @@ aside.side {
 }
 .side nav a:focus-visible {
   outline: 2px solid var(--pico-primary); outline-offset: 1px;
+}
+
+/* Configuration entries before setup is done: present, so the map of the
+   panel is learnable from day one, but visibly not yet operable. */
+.side nav .navlocked {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem;
+  padding: .4rem .6rem; margin: .1rem 0;
+  border-left: 3px solid transparent;
+  color: var(--pico-muted-color);
+  opacity: .55;
+  cursor: not-allowed;
+  font-size: .9rem;
 }
 
 .side .badge {
@@ -415,7 +430,23 @@ ul.links li { margin-bottom: .6rem; }
 ul.links li a { font-weight: 600; }
 ul.links li .quiet { display: block; font-size: .85rem; }
 
-details > summary { margin-bottom: .4rem; }
+/* Disclosure rows are inset wells: a shade removed from the panel so they
+   read as openable objects whether collapsed or open, not as body text that
+   happens to have a chevron. */
+details {
+  background: var(--amp-well);
+  border: 1px solid var(--amp-hairline);
+  border-radius: var(--amp-radius);
+  padding: .65rem .85rem;
+  margin-bottom: .9rem;
+}
+details > summary { margin-bottom: 0; font-weight: 600; }
+details[open] > summary {
+  margin-bottom: .7rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--amp-hairline);
+}
+details > :last-child { margin-bottom: 0; }
 
 main.container { max-width: 56rem; }
 

@@ -42,8 +42,13 @@
     </ul>
     <div class="section">Configure</div>
     <ul>
+      {% if setup_complete %}
       <li>{{ navlink('/setup/alias', 'Alias', ['/setup/alias']) }}</li>
       <li>{{ navlink('/setup/stations', 'Stations', ['/setup/stations']) }}</li>
+      {% else %}
+      <li><span class="navlocked" aria-disabled="true" title="Opens when setup is complete"><span>Alias</span></span></li>
+      <li><span class="navlocked" aria-disabled="true" title="Opens when setup is complete"><span>Stations</span></span></li>
+      {% endif %}
     </ul>
   </nav>
 
