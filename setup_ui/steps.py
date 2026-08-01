@@ -81,8 +81,38 @@ def _alias_done(state: dict) -> bool:
     return bool(state.get("alias"))
 
 
+_SKILL_CHECK = {"at": 0.0, "id": "", "exists": True}
+
+
+def _skill_exists(skill_id: str, max_age: float = 60.0) -> bool:
+    """Does the recorded skill still exist on Amazon.
+
+    A stored id drifts: the skill gets deleted in the developer console, or
+    validation quietly kills it, and the wizard would still call the step
+    done. Cached so the rail does not cost a SMAPI call per render. Only a
+    definitive 404 counts as gone; lookup trouble of any other kind must not
+    un-done a step over a network blip.
+    """
+    now = time.time()
+    if _SKILL_CHECK["id"] == skill_id and now - _SKILL_CHECK["at"] < max_age:
+        return _SKILL_CHECK["exists"]
+    if not smapi_rest.connected():
+        return True
+    exists = True
+    try:
+        smapi_rest.skill_status(skill_id)
+    except smapi_rest.SmapiError as exc:
+        if exc.status == 404:
+            exists = False
+    except Exception:
+        pass
+    _SKILL_CHECK.update(at=now, id=skill_id, exists=exists)
+    return exists
+
+
 def _skill_done(state: dict) -> bool:
-    return bool(state.get("skill_id") or os.environ.get("SKILL_ID"))
+    skill_id = state.get("skill_id") or os.environ.get("SKILL_ID") or ""
+    return bool(skill_id) and _skill_exists(skill_id)
 
 
 def _catalogs_done(state: dict) -> bool:

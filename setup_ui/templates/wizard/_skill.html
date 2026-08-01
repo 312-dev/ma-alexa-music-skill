@@ -12,7 +12,21 @@
        {{ result.detail }}</p>
   {% endif %}
 
-  {% if state.skill_id %}
+  {% if skill_missing %}
+    <article class="loud">
+      <h3>The recorded skill no longer exists</h3>
+      <p>
+        This bridge remembers <span class="mono">{{ state.skill_id }}</span>,
+        but Amazon answers 404 for it: it was deleted outside this wizard, or
+        died in validation. Discard the record to create a fresh skill; your
+        catalogs and uploads survive and re-attach automatically.
+      </p>
+      <form method="post" action="/setup/wizard/skill/forget"
+            hx-post="/setup/wizard/skill/forget" hx-target="#step-body">
+        <button type="submit">Discard the record and set up again</button>
+      </form>
+    </article>
+  {% elif state.skill_id %}
     <p><span class="pill ok">created</span>
       <span class="mono">{{ state.skill_id }}</span></p>
     <p>

@@ -71,6 +71,7 @@ def isolated(monkeypatch, tmp_path):
 
     views._SMAPI_CACHE.update(at=0.0, value=None)
     views._VENDORS.update(at=0.0, value=None)
+    views.wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
     views.TOKENS = validate.Tokens()
     yield
 
@@ -1027,6 +1028,8 @@ def test_login_page_never_contains_the_token(anon, monkeypatch):
 def _all_steps_done(monkeypatch):
     monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: {
+        "manifest": {"lastUpdateRequest": {"status": "SUCCEEDED"}}})
     store.update(endpoint_ok=True, alias="ampere", skill_id="amzn1.ask.skill.a",
                  catalogs={"artists": "c1"}, uploads={"artists": "u1"},
                  enabled=True)
@@ -1235,6 +1238,42 @@ def test_catalog_step_reuses_orphans_and_records_before_association(ui, monkeypa
     resp = ui.post("/setup/wizard/catalogs", headers={"HX-Request": "true"})
     assert resp.status_code == 204                 # every kind associated
     assert store.load()["catalogs"] == saved       # nothing minted twice
+
+
+def test_a_vanished_skill_undoes_the_step_and_offers_repair(ui, monkeypatch):
+    """A recorded id is not proof: the skill can die outside the wizard."""
+    fake_rest(monkeypatch, skill_status=lambda sid: (_ for _ in ()).throw(
+        smapi_rest.SmapiError("GET failed: 404", status=404)))
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    store.update(endpoint_ok=True, alias="ampere",
+                 skill_id="amzn1.ask.skill.gone", enabled=True)
+    body = ui.get("/setup/wizard/skill").data.decode()
+    assert "no longer exists" in body
+    assert "/setup/wizard/skill/forget" in body
+
+    resp = ui.post("/setup/wizard/skill/forget", headers={"HX-Request": "true"})
+    assert resp.status_code == 204
+    assert store.load()["skill_id"] == ""
+    assert store.load()["enabled"] is False
+
+
+def test_a_lookup_blip_does_not_undo_the_skill_step(monkeypatch):
+    """Only a definitive 404 counts as gone; a 500 or timeout must not."""
+    from setup_ui import steps as wizard_steps
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: (_ for _ in ()).throw(
+        smapi_rest.SmapiError("GET failed: 500", status=500)))
+    assert wizard_steps._skill_done({"skill_id": "amzn1.ask.skill.x"}) is True
+
+
+def test_recreating_the_skill_reattaches_recorded_catalogs(ui, monkeypatch):
+    created = fake_rest(monkeypatch)
+    store.update(endpoint_ok=True, alias="ampere",
+                 catalogs={"artists": "cat-1", "albums": "cat-2"})
+    ui.post("/setup/wizard/skill", data={"alias": "ampere"},
+            headers={"HX-Request": "true"})
+    assert ("amzn1.ask.skill.abc", "cat-1") in created["associations"]
+    assert ("amzn1.ask.skill.abc", "cat-2") in created["associations"]
 
 
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):

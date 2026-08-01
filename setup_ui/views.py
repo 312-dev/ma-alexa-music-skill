@@ -780,8 +780,12 @@ def step_context(step_key: str) -> dict:
         "next": rows[index + 1]["key"] if index + 1 < len(rows) else None,
         **wizard_context(),
     }
-    if step_key == "skill" and not state.get("skill_id"):
-        context["existing_skills"] = _existing_music_skills()
+    if step_key == "skill":
+        if state.get("skill_id") and not row["done"]:
+            # Recorded here, missing on Amazon: deleted outside the wizard.
+            context["skill_missing"] = True
+        elif not state.get("skill_id"):
+            context["existing_skills"] = _existing_music_skills()
     return context
 
 
@@ -981,8 +985,32 @@ def wizard_skill():
             existing_skills=_existing_music_skills(), **wizard_context())
 
     store.update(skill_id=skill_id, alias=alias_word, vendor_id=vendor)
+    wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
+    # A recreated skill starts with no catalog associations even though the
+    # catalogs themselves survived on the vendor. Re-binding here keeps the
+    # catalogs step honest about already being done.
+    for catalog_id in (current.get("catalogs") or {}).values():
+        try:
+            smapi_rest.associate_catalog(skill_id, catalog_id)
+        except Exception:
+            pass
     return step_completed("wizard/_skill.html", blocked=False, result={
         "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
+
+
+@bp.post("/wizard/skill/forget")
+def wizard_skill_forget():
+    """Discard the record of a skill Amazon no longer has.
+
+    The record, not the skill, is what gets removed: there is nothing left on
+    Amazon's side to delete. Enablement is cleared with it, because it
+    described the vanished skill.
+    """
+    store.update(skill_id="", enabled=False)
+    wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
+    return step_completed("wizard/_skill.html", blocked=False, result={
+        "ok": True, "detail": "Stale record discarded."},
+        existing_skills=_existing_music_skills(), **wizard_context())
 
 
 @bp.post("/wizard/skill/remove")
