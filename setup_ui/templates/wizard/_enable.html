@@ -3,6 +3,24 @@
      {% else %}<span class="pill bad">failed</span>{% endif %}
      {{ result.detail }}</p>
 {% endif %}
+{% if binding %}
+  <p>
+    {% if binding.known and binding.bound %}
+      <span class="pill ok">bound</span> Amazon reports the skill is enabled on
+      your account, development stage{% if binding.cycled_ago %} (last cycled
+      {{ binding.cycled_ago }}){% endif %}.
+    {% elif binding.known %}
+      <span class="pill warn">not bound</span> Amazon reports no enablement for
+      this skill right now{% if state.enabled %}, even though one was recorded
+      here: a catalog upload has likely unbound it silently. Cycle it
+      again{% endif %}.
+    {% else %}
+      <span class="pill idle">unknown</span> Could not read the current
+      enablement from Amazon{% if binding.cycled_ago %}; it was last cycled
+      here {{ binding.cycled_ago }}{% endif %}.
+    {% endif %}
+  </p>
+{% endif %}
 <p>
   This removes the enablement and sets it again, which is required rather than
   redundant. A catalog upload unbinds the skill from the provider slot without

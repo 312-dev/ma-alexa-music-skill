@@ -794,7 +794,29 @@ def step_context(step_key: str) -> dict:
             context["existing_skills"] = _existing_music_skills()
     if step_key == "upload":
         context["upload_job"] = dict(_UPLOAD)
+    if step_key == "enable":
+        context["binding"] = _binding_now(state)
     return context
+
+
+def _binding_now(state: dict) -> dict:
+    """What Amazon says about the enablement right now.
+
+    The stored enabled flag records that the wizard once cycled it; only the
+    live answer knows whether a later catalog upload silently unbound the
+    skill. When the lookup itself fails, say unknown rather than guessing."""
+    skill_id = state.get("skill_id") or os.environ.get("SKILL_ID", "")
+    out = {"known": False, "bound": False, "cycled_ago": ""}
+    if state.get("enabled_at"):
+        out["cycled_ago"] = ago(state["enabled_at"])
+    if not skill_id or not smapi_rest.connected():
+        return out
+    try:
+        out["bound"] = smapi_rest.enablement_status(skill_id)
+        out["known"] = True
+    except Exception:
+        pass
+    return out
 
 
 @bp.get("/wizard")
@@ -1239,7 +1261,7 @@ def wizard_enable():
     except Exception as exc:
         return fragment("wizard/_enable.html", result={
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
-    store.update(enabled=True)
+    store.update(enabled=True, enabled_at=time.time())
     return step_completed("wizard/_enable.html", result={
         "ok": True, "detail": "Enabled for development."}, **wizard_context())
 

@@ -11,8 +11,10 @@
   {% endif %}
   <p>
     <span class="pill {% if pool.degraded %}bad{% else %}ok{% endif %}">
-      {{ pool.artist_count }} artist(s)</span>
-    {{ pool.track_count }} tracks in the pool for <strong>{{ pool.artist }}</strong>.
+      {{ 'degraded' if pool.degraded else 'pool built' }}</span>
+    {{ pool.artist_count }} {{ 'artist' if pool.artist_count == 1 else 'artists' }},
+    {{ pool.track_count }} {{ 'track' if pool.track_count == 1 else 'tracks' }}
+    in the pool for <strong>{{ pool.artist }}</strong>.
   </p>
   <div class="table-container">
     <table class="table">
