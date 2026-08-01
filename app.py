@@ -113,6 +113,56 @@ AFTER_CONTENT = after_content_setting(os.environ.get("AFTER_CONTENT", "stop"))
 RADIO_ARTISTS = int(os.environ.get("RADIO_ARTISTS", "12"))
 RADIO_TRACKS_PER_ARTIST = int(os.environ.get("RADIO_TRACKS_PER_ARTIST", "12"))
 
+# Values saved on the stations page, taking effect without a restart. The
+# environment values above are the defaults when nothing has been saved. This
+# used to be the other way around, and the settings page had to carry a warning
+# that its own form did nothing until the operator edited the environment and
+# restarted, which is not a settings page.
+_SETTINGS_CACHE: dict = {"path": None, "mtime": None, "value": {}}
+
+
+def _saved_settings() -> dict:
+    """The stations settings file, cached on its mtime.
+
+    Read on the hot path (continuation decisions per queue request), so it must
+    cost a stat rather than a parse when nothing has changed.
+    """
+    path = pathlib.Path(os.environ.get("SETUP_STATE_DIR", "/data")) / "setup-state.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    if _SETTINGS_CACHE["path"] == str(path) and _SETTINGS_CACHE["mtime"] == mtime:
+        return _SETTINGS_CACHE["value"]
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        value = {}
+    _SETTINGS_CACHE.update(path=str(path), mtime=mtime,
+                           value=value if isinstance(value, dict) else {})
+    return _SETTINGS_CACHE["value"]
+
+
+def effective_after_content() -> str:
+    saved = str(_saved_settings().get("after_content") or "").strip().lower()
+    return saved if saved in AFTER_CONTENT_MODES else AFTER_CONTENT
+
+
+def _effective_int(key: str, fallback: int) -> int:
+    try:
+        value = int(_saved_settings().get(key))
+    except (TypeError, ValueError):
+        return fallback
+    return max(1, min(100, value))
+
+
+def effective_radio_artists() -> int:
+    return _effective_int("radio_artists", RADIO_ARTISTS)
+
+
+def effective_radio_tracks_per_artist() -> int:
+    return _effective_int("radio_tracks_per_artist", RADIO_TRACKS_PER_ARTIST)
+
 # seed artist id -> [artist id, ...]. Kept apart from _QUEUE_CACHE because
 # getArtistInfo2 is the expensive half of building a station at ~725ms, and its
 # answer does not go stale when the track cache turns over.
@@ -189,7 +239,7 @@ def similar_artist_ids(seed_id: str) -> list[str]:
 
     ids = [seed_id]
     try:
-        for artist in subsonic.similar_artists(seed_id, RADIO_ARTISTS):
+        for artist in subsonic.similar_artists(seed_id, effective_radio_artists()):
             artist_id = str(artist.get("id"))
             if artist_id not in ids:
                 ids.append(artist_id)
@@ -236,7 +286,8 @@ def radio_pool(seed_id: str, artist_ids: list[str] | None = None) -> list[dict]:
     return [
         track
         for artist_id, tracks in zip(artist_ids, walks)
-        for track in artist_sample(artist_id, tracks, RADIO_TRACKS_PER_ARTIST)
+        for track in artist_sample(artist_id, tracks,
+                                   effective_radio_tracks_per_artist())
     ]
 
 
@@ -424,7 +475,7 @@ def continuation_mode(content_id: str) -> str:
     whatever AFTER_CONTENT says. Everything else obeys the setting, which is
     off unless it has been turned on.
     """
-    return "radio" if content_id.partition(":")[0] == "rad" else AFTER_CONTENT
+    return "radio" if content_id.partition(":")[0] == "rad" else effective_after_content()
 
 
 def seed_song(content_id: str) -> dict | None:

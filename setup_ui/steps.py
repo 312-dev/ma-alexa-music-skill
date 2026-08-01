@@ -9,7 +9,10 @@ the truth about the current state rather than about a past click.
 
 from __future__ import annotations
 
+import json
 import os
+import pathlib
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -29,8 +32,45 @@ def _music_server_done(state: dict) -> bool:
     return bool(os.environ.get("SUBSONIC_URL") or state.get("subsonic_url"))
 
 
+_TRAFFIC = {"at": 0.0, "ok": False}
+
+
+def _amazon_traffic(max_age: float = 7 * 86400) -> bool:
+    """Has Amazon demonstrably reached this service recently.
+
+    Signed inbound captures are stronger evidence of reachability than any
+    check the wizard can run on itself, and a deployment that is already
+    serving Alexa must not be asked to prove it can be reached. Only captures
+    carrying Amazon's signature headers count: local smoke tests write capture
+    files too, and those prove nothing about the public path.
+    """
+    now = time.time()
+    if now - _TRAFFIC["at"] < 60:
+        return _TRAFFIC["ok"]
+
+    found = False
+    capture_dir = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
+    try:
+        entries = [e for e in os.scandir(capture_dir) if e.name.endswith(".json")]
+        entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+        for entry in entries[:8]:
+            if now - entry.stat().st_mtime > max_age:
+                break
+            try:
+                headers = json.loads(pathlib.Path(entry.path).read_text()).get("headers") or {}
+            except (OSError, ValueError, AttributeError):
+                continue
+            if any(k.lower().startswith("signature") for k in headers):
+                found = True
+                break
+    except OSError:
+        pass
+    _TRAFFIC.update(at=now, ok=found)
+    return found
+
+
 def _endpoint_done(state: dict) -> bool:
-    return bool(state.get("endpoint_ok"))
+    return bool(state.get("endpoint_ok")) or _amazon_traffic()
 
 
 def _amazon_done(_state: dict) -> bool:

@@ -270,6 +270,7 @@ body.bare {
 }
 
 .loud {
+  display: block;
   border-left: .3rem solid var(--amp-bad);
   padding: .8rem 1rem;
   background: var(--pico-card-sectioning-background-color);
@@ -308,7 +309,10 @@ nav.steps .num {
   display: inline-grid; place-items: center;
   width: 1.25rem; height: 1.25rem; border-radius: 50%;
   background: var(--pico-muted-border-color);
-  color: var(--pico-background-color);
+  /* The theme's own text colour is the only pairing that has contrast against
+     the muted circle in both modes; the background colour was invisible in
+     dark. */
+  color: var(--pico-color);
   font-size: .7rem; font-weight: 700;
 }
 nav.steps li.done a { color: var(--pico-color); }
@@ -323,7 +327,7 @@ nav.steps li.current .num {
   font-size: .7rem;
 }
 nav.steps li.current .num::after { content: none; }
-nav.steps .locked { opacity: .5; cursor: default; }
+nav.steps .locked { opacity: .65; cursor: default; }
 
 nav.stepnav ul {
   display: flex; justify-content: space-between; align-items: center;

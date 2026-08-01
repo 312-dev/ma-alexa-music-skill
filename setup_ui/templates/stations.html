@@ -45,18 +45,17 @@
 </form>
 
 <article>
-  <header><strong>Currently in effect</strong></header>
+  <header><strong>In effect now</strong></header>
   <table>
     <tbody>
-      <tr><th>AFTER_CONTENT</th><td class="mono">{{ live.after_content }}</td></tr>
-      <tr><th>RADIO_ARTISTS</th><td class="mono">{{ live.radio_artists }}</td></tr>
-      <tr><th>RADIO_TRACKS_PER_ARTIST</th><td class="mono">{{ live.radio_tracks_per_artist }}</td></tr>
+      <tr><th>After content</th><td class="mono">{{ live.after_content }}</td></tr>
+      <tr><th>Station artists</th><td class="mono">{{ live.radio_artists }}</td></tr>
+      <tr><th>Tracks per artist</th><td class="mono">{{ live.radio_tracks_per_artist }}</td></tr>
     </tbody>
   </table>
-  <footer><small class="loud">
-    The bridge reads these from the environment at startup. Saved values are
-    recorded here but do not take effect until you put them in the environment
-    and restart, so the two tables can disagree until you do.
+  <footer><small class="quiet">
+    Saved values take effect immediately for newly built queues. The
+    environment variables serve as defaults when nothing has been saved here.
   </small></footer>
 </article>
 

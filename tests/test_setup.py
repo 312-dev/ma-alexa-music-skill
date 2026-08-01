@@ -428,8 +428,44 @@ def test_stations_page_lists_every_after_content_mode(ui):
         assert f'value="{mode}"' in body
 
 
-def test_stations_page_says_a_restart_is_needed(ui):
-    assert "restart" in ui.get("/setup/stations").data.decode()
+def test_stations_page_no_longer_demands_a_restart(ui):
+    """Saved values take effect live now; the old caveat must not resurface."""
+    body = ui.get("/setup/stations").data.decode()
+    assert "restart" not in body
+    assert "take effect immediately" in body
+
+
+def test_saved_settings_take_effect_without_a_restart(ui, app):
+    """The point of the change: the form is a real settings page."""
+    import app as bridge
+    ui.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
+                                     "radio_tracks_per_artist": "4"})
+    assert bridge.effective_after_content() == "stop"
+    assert bridge.effective_radio_artists() == 5
+    assert bridge.effective_radio_tracks_per_artist() == 4
+    assert bridge.continuation_mode("ar:a1") == "stop"
+
+    ui.post("/setup/stations", data={"after_content": "radio", "radio_artists": "9",
+                                     "radio_tracks_per_artist": "4"})
+    assert bridge.continuation_mode("ar:a1") == "radio"
+
+
+def test_saving_settings_drops_the_stale_pools(ui):
+    """Cached pools were built under the old numbers."""
+    import app as bridge
+    bridge._RADIO_CACHE["a1"] = ["a1", "a2"]
+    bridge._QUEUE_CACHE["rad:a1"] = [{"id": "t1"}]
+    ui.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
+                                     "radio_tracks_per_artist": "6"})
+    assert not bridge._RADIO_CACHE
+    assert not bridge._QUEUE_CACHE
+
+
+def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch):
+    import app as bridge
+    monkeypatch.setattr(bridge, "AFTER_CONTENT", "genre")
+    # No saved value in this test's store, so the module constant wins.
+    assert bridge.effective_after_content() == "genre"
 
 
 def test_saving_stations_persists(ui):
@@ -994,3 +1030,49 @@ def test_without_htmx_a_completed_step_still_renders(ui, monkeypatch):
                    data={"url": "http://nav.test", "user": "x", "password": "y"})
     assert resp.status_code == 200
     assert b"connected" in resp.data
+
+
+# --- the endpoint step accepts live traffic as proof ------------------------
+
+
+@pytest.fixture
+def captures_dir(tmp_path, monkeypatch):
+    """A capture directory of this test's own.
+
+    The suite-wide CAPTURE_DIR accumulates files from other tests, some of
+    which carry signature headers, so evidence tests must not share it.
+    """
+    from setup_ui import steps
+    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "captures"))
+    (tmp_path / "captures").mkdir()
+    steps._TRAFFIC.update(at=0.0, ok=False)  # bypass the 60s cache
+    yield tmp_path / "captures"
+    steps._TRAFFIC.update(at=0.0, ok=False)
+
+
+def _capture(directory, name: str, headers: dict):
+    (directory / name).write_text(json.dumps({"headers": headers, "body": {}}))
+
+
+def test_signed_amazon_traffic_satisfies_the_endpoint_step(captures_dir):
+    from setup_ui import steps
+    _capture(captures_dir, "sig.json",
+             {"Signature-256": "x", "SignatureCertChainUrl": "y"})
+    assert steps._endpoint_done({}) is True
+
+
+def test_an_unsigned_capture_proves_nothing(captures_dir):
+    """Local smoke tests write captures too, and must not unlock the step."""
+    from setup_ui import steps
+    _capture(captures_dir, "nosig.json", {"User-Agent": "curl"})
+    assert steps._endpoint_done({}) is False
+
+
+def test_no_captures_at_all_is_not_proof(captures_dir):
+    from setup_ui import steps
+    assert steps._endpoint_done({}) is False
+
+
+def test_the_stored_flag_still_counts(captures_dir):
+    from setup_ui import steps
+    assert steps._endpoint_done({"endpoint_ok": True}) is True

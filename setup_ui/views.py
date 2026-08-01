@@ -529,9 +529,9 @@ def station_context() -> dict:
     return {
         "modes": bridge.AFTER_CONTENT_MODES,
         "live": {
-            "after_content": bridge.AFTER_CONTENT,
-            "radio_artists": bridge.RADIO_ARTISTS,
-            "radio_tracks_per_artist": bridge.RADIO_TRACKS_PER_ARTIST,
+            "after_content": bridge.effective_after_content(),
+            "radio_artists": bridge.effective_radio_artists(),
+            "radio_tracks_per_artist": bridge.effective_radio_tracks_per_artist(),
         },
         "saved": {
             "after_content": current.get("after_content") or bridge.AFTER_CONTENT,
@@ -567,6 +567,10 @@ def stations_save():
         radio_tracks_per_artist=positive("radio_tracks_per_artist",
                                          bridge.RADIO_TRACKS_PER_ARTIST),
     )
+    # Pools already cached were built under the old numbers and would pin a
+    # station to its old shape until the cache turned over on its own.
+    bridge._RADIO_CACHE.clear()
+    bridge._QUEUE_CACHE.clear()
     return render_template("stations.html", stored=True, **station_context())
 
 
