@@ -72,6 +72,8 @@ def isolated(monkeypatch, tmp_path):
     views._SMAPI_CACHE.update(at=0.0, value=None)
     views._VENDORS.update(at=0.0, value=None)
     views.wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
+    views._UPLOAD.update(running=False, phase="", results=None, message="",
+                         done_at=0.0)
     views.TOKENS = validate.Tokens()
     yield
 
@@ -1274,6 +1276,53 @@ def test_recreating_the_skill_reattaches_recorded_catalogs(ui, monkeypatch):
             headers={"HX-Request": "true"})
     assert ("amzn1.ask.skill.abc", "cat-1") in created["associations"]
     assert ("amzn1.ask.skill.abc", "cat-2") in created["associations"]
+
+
+def test_upload_runs_as_a_job_and_reports_progress(ui, monkeypatch):
+    """A minutes-long build cannot live inside one request."""
+    ran = {}
+
+    class Immediate:
+        def __init__(self, target, daemon=None):
+            ran["target"] = target
+        def start(self):
+            ran["target"]()
+
+    monkeypatch.setattr(views.threading, "Thread", Immediate)
+    monkeypatch.setattr(views.catalog_sync, "collect",
+                        lambda: {"artists": [{"id": "a1"}]})
+    monkeypatch.setattr(views.catalog_sync, "apply_timestamps",
+                        lambda kind, entities, saved: (entities, "hash"))
+    monkeypatch.setattr(smapi_rest, "upload_catalog",
+                        lambda catalog_id, payload: "up-1")
+    store.update(endpoint_ok=True, skill_id="amzn1.ask.skill.a",
+                 catalogs={"artists": "cat-1"})
+
+    body = ui.post("/setup/wizard/upload",
+                   headers={"HX-Request": "true"}).data.decode()
+    assert store.load()["uploads"]["artists"] == "up-1"
+    assert "Reload" in body                    # the job already finished here
+
+    # The finished poll answers with a full-page refresh, so the rail and
+    # the ingestion panel re-derive together.
+    resp = ui.get("/setup/wizard/upload/progress",
+                  headers={"HX-Request": "true"})
+    assert resp.status_code == 204
+    assert resp.headers.get("HX-Refresh") == "true"
+
+
+def test_upload_page_shows_the_running_phase(ui, monkeypatch):
+    views._UPLOAD.update(running=True, phase="uploading tracks")
+    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
+    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
+    monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: {
+        "manifest": {"lastUpdateRequest": {"status": "SUCCEEDED"}}})
+    store.update(endpoint_ok=True, alias="ampere",
+                 skill_id="amzn1.ask.skill.a", catalogs={"artists": "c1"})
+    body = ui.get("/setup/wizard/upload").data.decode()
+    assert "uploading tracks" in body
+    # No second start button while the job is running.
+    assert "Build and upload the catalogs</button>" not in body
 
 
 def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):

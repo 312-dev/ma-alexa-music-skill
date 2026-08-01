@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import socket
+import threading
 import time
 
 from flask import Blueprint, make_response, redirect, render_template, request
@@ -786,6 +787,8 @@ def step_context(step_key: str) -> dict:
             context["skill_missing"] = True
         elif not state.get("skill_id"):
             context["existing_skills"] = _existing_music_skills()
+    if step_key == "upload":
+        context["upload_job"] = dict(_UPLOAD)
     return context
 
 
@@ -1077,50 +1080,78 @@ def wizard_catalogs():
 
 @bp.post("/wizard/upload")
 def wizard_upload():
-    """Build the catalogs from the library and upload them.
+    """Start the build-and-upload job and answer immediately.
 
-    This used to be a paragraph telling the operator to go and run
-    catalog_sync.py themselves, which was the largest remaining gap between
-    what the wizard claimed to do and what it did.
+    Reading a whole library and pushing five catalogs takes minutes on a real
+    collection. Inside one request that was a button that appeared to do
+    nothing; as a job, the page can ask after its phase every two seconds.
     """
     current = store.load()
-    ids = catalog_ids(current)
-    if not any(ids.values()):
-        return fragment("wizard/_upload.html", results=None,
+    if not any(catalog_ids(current).values()):
+        return fragment("wizard/_upload.html", upload_job=dict(_UPLOAD),
                         **wizard_context(message="Create the catalogs first."))
+    with _UPLOAD_LOCK:
+        if not _UPLOAD["running"]:
+            _UPLOAD.update(running=True, phase="starting", results=None,
+                           message="", done_at=0.0)
+            threading.Thread(target=_run_upload, daemon=True).start()
+    return fragment("wizard/_upload_progress.html", job=dict(_UPLOAD),
+                    back="/setup/wizard/upload")
 
+
+def _run_upload() -> None:
     try:
+        current = store.load()
+        ids = catalog_ids(current)
+        _UPLOAD["phase"] = "reading the library"
         collected = catalog_sync.collect()
+        saved = store.load().get("catalog_hashes") or {}
+        results, uploads = [], dict(current.get("uploads") or {})
+        for kind, entities in collected.items():
+            catalog_id = ids.get(kind)
+            if not catalog_id or not entities:
+                continue
+            _UPLOAD["phase"] = f"uploading {kind}"
+            final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
+            payload = json.dumps({
+                "type": catalog_sync.TYPES[kind], "version": 2.0,
+                "locales": catalog_sync.LOCALES, "entities": final,
+            }).encode()
+            try:
+                upload_id = smapi_rest.upload_catalog(catalog_id, payload)
+            except Exception as exc:
+                results.append({"kind": kind, "ok": False,
+                                "detail": _rest_error(exc)})
+                continue
+            saved[kind] = hashes
+            uploads[kind] = upload_id
+            results.append({"kind": kind, "ok": True,
+                            "detail": f"{len(final)} entities, upload {upload_id}"})
+        store.update(catalog_hashes=saved, uploads=uploads)
+        _UPLOAD["results"] = results
     except Exception as exc:
-        return fragment("wizard/_upload.html", results=None,
-                        **wizard_context(message=f"Could not read the library: {exc}"))
+        _UPLOAD["message"] = f"Could not read the library: {exc}"
+    finally:
+        _UPLOAD["running"] = False
+        _UPLOAD["done_at"] = time.time()
 
-    saved = store.load().get("catalog_hashes") or {}
-    results, uploads = [], dict(current.get("uploads") or {})
-    for kind, entities in collected.items():
-        catalog_id = ids.get(kind)
-        if not catalog_id or not entities:
-            continue
-        final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
-        payload = json.dumps({
-            "type": catalog_sync.TYPES[kind], "version": 2.0,
-            "locales": catalog_sync.LOCALES, "entities": final,
-        }).encode()
-        try:
-            upload_id = smapi_rest.upload_catalog(catalog_id, payload)
-        except Exception as exc:
-            results.append({"kind": kind, "ok": False, "detail": _rest_error(exc)})
-            continue
-        saved[kind] = hashes
-        uploads[kind] = upload_id
-        results.append({"kind": kind, "ok": True,
-                        "detail": f"{len(final)} entities, upload {upload_id}"})
 
-    store.update(catalog_hashes=saved, uploads=uploads)
-    if results and all(row["ok"] for row in results):
-        return step_completed("wizard/_upload.html", results=results,
-                              **wizard_context())
-    return fragment("wizard/_upload.html", results=results, **wizard_context())
+_UPLOAD = {"running": False, "phase": "", "results": None, "message": "",
+           "done_at": 0.0}
+_UPLOAD_LOCK = threading.Lock()
+
+
+@bp.get("/wizard/upload/progress")
+def wizard_upload_progress():
+    job = dict(_UPLOAD)
+    if not job["running"] and request.headers.get("HX-Request"):
+        # Finished since the last poll: reload the page so the rail, the
+        # Continue button and the ingestion panel all re-derive at once.
+        response = make_response("", 204)
+        response.headers["HX-Refresh"] = "true"
+        return response
+    return fragment("wizard/_upload_progress.html", job=job,
+                    back="/setup/wizard/upload")
 
 
 @bp.get("/wizard/ingestion")

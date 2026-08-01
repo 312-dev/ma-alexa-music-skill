@@ -150,6 +150,11 @@
    breakpoint; kept at 16px rather than smaller because the goal is removing
    the inflation, not cramming. */
 
+/* Chrome on Android inflates text it judges too small unless told not to,
+   and it judges per element, so the stepper's numbered circles came out at
+   assorted sizes and staggered out of line. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
 :root, :host { --pico-font-size: 100%; }
 @media (min-width: 576px)  { :root, :host { --pico-font-size: 100%; } }
 @media (min-width: 768px)  { :root, :host { --pico-font-size: 100%; } }
@@ -182,6 +187,32 @@ thead th {
   font-size: .66rem; font-weight: 600; letter-spacing: .12em;
   text-transform: uppercase; color: var(--pico-muted-color);
 }
+
+/* A pressed control shows that it is working. htmx marks the requesting
+   element with .htmx-request for the flight of the request; the label yields
+   to a spinner and pointer events stop, so a slow operation cannot be
+   double-submitted or mistaken for a dead button. With reduced motion the
+   ring simply holds still, which still reads as busy. */
+form.htmx-request button[type="submit"],
+button.htmx-request,
+a[role="button"].htmx-request {
+  pointer-events: none;
+  opacity: .75;
+  color: transparent;
+  position: relative;
+}
+form.htmx-request button[type="submit"]::after,
+button.htmx-request::after,
+a[role="button"].htmx-request::after {
+  content: "";
+  position: absolute; inset: 0; margin: auto;
+  width: 1rem; height: 1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--amp-ink) 30%, transparent);
+  border-top-color: var(--amp-ink);
+  animation: amp-spin .7s linear infinite;
+}
+@keyframes amp-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

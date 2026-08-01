@@ -1,0 +1,22 @@
+{% if job.running %}
+<div hx-get="/setup/wizard/upload/progress" hx-trigger="every 2s"
+     hx-swap="outerHTML">
+  <p><span class="pill warn">working</span> {{ job.phase }}.</p>
+  <p class="quiet">
+    This reads the whole library and can take a few minutes on a large
+    collection. Leave the page open; it reports each catalog as it goes and
+    reloads itself when everything is sent.
+  </p>
+</div>
+{% else %}
+<div>
+  {% if job.message %}
+  <p><span class="pill bad">failed</span> {{ job.message }}</p>
+  {% elif job.results %}
+  <p><span class="pill ok">finished</span> Reload to see the results and
+    ingestion status.</p>
+  {% endif %}
+  <p><a href="/setup/wizard/upload" role="button"
+        class="secondary outline">Reload</a></p>
+</div>
+{% endif %}
