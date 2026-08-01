@@ -93,6 +93,27 @@ def _template_defaults() -> dict:
     return {"container_hint": socket.gethostname() or "ampere"}
 
 
+def secure_cookie() -> bool:
+    """Whether the session cookie may carry the Secure flag.
+
+    Derived from this connection, not from PUBLIC_BASE. The admin plane is
+    deliberately reached over a LAN or a tailnet rather than the public origin,
+    and that is usually plain http. A Secure cookie on a plain http response is
+    discarded by the browser without a word, so signing in appeared to do
+    nothing at all: the redirect fired, the cookie evaporated on the way, and
+    the next request arrived unauthenticated and rendered the form again.
+
+    X-Forwarded-Proto is honoured only from a trusted proxy, for the same
+    reason X-Forwarded-For is: otherwise the client decides its own answer.
+    """
+    if request.is_secure:
+        return True
+    if access.peer_is_trusted(request.remote_addr):
+        proto = request.headers.get("X-Forwarded-Proto", "")
+        return proto.split(",")[0].strip().lower() == "https"
+    return False
+
+
 def request_ip() -> str:
     return access.client_ip(
         request.remote_addr, request.headers.get("X-Forwarded-For")
@@ -334,7 +355,7 @@ def login():
         _COOKIE,
         _serializer().dumps(_fingerprint(_admin_token())),
         max_age=_SESSION_MAX_AGE, httponly=True, samesite="Lax",
-        secure=public_base().startswith("https://"),
+        secure=secure_cookie(),
     )
     return response
 

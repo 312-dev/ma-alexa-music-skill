@@ -142,6 +142,15 @@ def forwarded_untrusted(remote_addr: str | None, forwarded_for: str | None) -> b
     return address is None or not any(address in net for net in trusted)
 
 
+def peer_is_trusted(remote_addr: str | None) -> bool:
+    """Is the immediate peer a proxy we were told to trust."""
+    trusted = trusted_proxies()
+    if not trusted:
+        return False
+    address = _ip((remote_addr or "").strip())
+    return address is not None and any(address in net for net in trusted)
+
+
 def address_allowed(ip: str) -> bool:
     networks = allowed_networks()
     if networks is None:

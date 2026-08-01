@@ -240,3 +240,59 @@ def test_ops_routes_also_refuse_a_laundered_request(path):
                                 "X-Forwarded-For": PUBLIC},
                  environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
     assert resp.status_code == 401
+
+
+# --- the session cookie has to survive the connection it was set on ---------
+#
+# The admin plane is reached over a LAN or a tailnet, which is plain http. A
+# Secure cookie on a plain http response is discarded by the browser silently,
+# so sign-in looked like it did nothing: the redirect fired, the cookie went
+# nowhere, and the next request rendered the form again.
+
+
+def _login(client, base_url, **headers):
+    return client.post("/setup/login", data={"token": "test-admin-token",
+                                             "target": "/setup"},
+                       base_url=base_url,
+                       environ_overrides={"REMOTE_ADDR": LAN},
+                       headers=headers)
+
+
+def test_cookie_is_not_secure_over_plain_http(client):
+    resp = _login(client, "http://100.85.183.28:5056")
+    assert resp.status_code == 302
+    assert "Secure" not in resp.headers["Set-Cookie"]
+
+
+def test_cookie_is_secure_over_https(client):
+    resp = _login(client, "https://music.example.com")
+    assert "Secure" in resp.headers["Set-Cookie"]
+
+
+def test_forwarded_proto_is_ignored_from_an_untrusted_peer(client):
+    """Otherwise the client decides whether its own cookie is Secure."""
+    resp = _login(client, "http://192.168.1.50:5056",
+                  **{"X-Forwarded-Proto": "https"})
+    assert "Secure" not in resp.headers["Set-Cookie"]
+
+
+def test_forwarded_proto_is_honoured_from_a_trusted_proxy(client, monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXIES", "192.168.1.0/24")
+    resp = _login(client, "http://192.168.1.50:5056",
+                  **{"X-Forwarded-Proto": "https"})
+    assert "Secure" in resp.headers["Set-Cookie"]
+
+
+def test_the_cookie_still_carries_httponly_and_samesite(client):
+    header = _login(client, "http://100.85.183.28:5056").headers["Set-Cookie"]
+    assert "HttpOnly" in header and "SameSite=Lax" in header
+
+
+def test_signing_in_over_http_actually_authenticates(client):
+    """The end-to-end version of the bug: follow the redirect and stay in."""
+    base = "http://100.85.183.28:5056"
+    _login(client, base)
+    page = client.get("/setup", base_url=base,
+                      environ_overrides={"REMOTE_ADDR": LAN})
+    assert page.status_code == 200
+    assert b"Sign in" not in page.data
