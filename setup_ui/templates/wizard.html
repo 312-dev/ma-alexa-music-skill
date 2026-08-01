@@ -8,9 +8,9 @@
     <li class="{{ 'done' if row.done else '' }} {{ 'current' if row.index == step.index else '' }}">
       {% if row.reachable or row.done %}
         <a href="/setup/wizard/{{ row.key }}">
-          <span class="num">{{ row.number }}</span>{{ row.title }}</a>
+          <span class="num">{{ row.number }}</span><span class="label">{{ row.title }}</span></a>
       {% else %}
-        <span class="locked"><span class="num">{{ row.number }}</span>{{ row.title }}</span>
+        <span class="locked"><span class="num">{{ row.number }}</span><span class="label">{{ row.title }}</span></span>
       {% endif %}
     </li>
     {% endfor %}

@@ -1,8 +1,8 @@
 /* Ampere admin styles, layered on Pico.
 
-   Organisation: tokens, density, the application shell, shared components,
+   Organization: tokens, density, the application shell, shared components,
    then the wizard stepper. Pico stays underneath for form controls, tables
-   and both colour schemes; everything here goes through its variables so
+   and both color schemes; everything here goes through its variables so
    light and dark keep working without a second set of rules. */
 
 /* --- tokens ---------------------------------------------------------------- */
@@ -73,11 +73,11 @@ td, th { vertical-align: top; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 
-/* Pico redefines --pico-color inside every <a> to the link colour, so a rule
+/* Pico redefines --pico-color inside every <a> to the link color, so a rule
    saying color: var(--pico-color) turns amber on exactly the links it was
-   meant to neutralise. Capturing the body's ink here substitutes the value at
+   meant to neutralize. Capturing the body's ink here substitutes the value at
    body level, before any link overrides the token, and children inherit the
-   resolved colour. */
+   resolved color. */
 body { --amp-ink: var(--pico-color); }
 
 /* --- application shell ------------------------------------------------------
@@ -184,7 +184,7 @@ main.content {
 }
 
 /* Standalone pages (sign in, refusals, the phone-scanned verify page) get a
-   centred card instead of the shell: they are entered without a session, so
+   centered card instead of the shell: they are entered without a session, so
    navigation would be a row of links to the same login form. */
 body.bare {
   display: grid; place-items: start center;
@@ -228,7 +228,7 @@ body.bare {
 .pill.bad  { background: var(--amp-bad); }
 .pill.idle { background: var(--amp-idle); }
 
-/* Health tiles: the state of the whole system in one glance, colour-coded on
+/* Health tiles: the state of the whole system in one glance, color-coded on
    the left edge so the row can be swept without reading. */
 .tiles {
   display: grid;
@@ -297,44 +297,83 @@ details > summary { margin-bottom: .4rem; }
 
 main.container { max-width: 56rem; }
 
-/* --- wizard stepper --------------------------------------------------------- */
+/* --- wizard stepper ---------------------------------------------------------
+   A track stepper: equal columns, one circle per step on a connecting line,
+   label underneath. Eight titled pills can never share a row inside a 52rem
+   column, and wrapped pills read as a cloud rather than a sequence; fixed
+   columns keep the order legible no matter how long the titles are. */
 
-nav.steps { margin-bottom: 1.25rem; }
+nav.steps { margin-bottom: 1.6rem; }
 nav.steps ol {
-  display: flex; flex-wrap: wrap; gap: .35rem .5rem;
+  display: flex;
   list-style: none; margin: 0; padding: 0;
 }
-nav.steps li { margin: 0; padding: 0; }
+nav.steps li {
+  flex: 1; min-width: 0; position: relative;
+  margin: 0; padding: 0;
+}
+/* Each step draws the track segment back to the one before it, stopping short
+   of both circles. Segments after a done step fill in, so the line itself
+   shows how far the run has progressed. */
+nav.steps li + li::before {
+  content: "";
+  position: absolute;
+  top: .8rem;
+  left: calc(-50% + 1.1rem);
+  right: calc(50% + 1.1rem);
+  height: 2px;
+  background: var(--pico-muted-border-color);
+}
+nav.steps li.done + li::before { background: var(--amp-ok); }
 nav.steps a, nav.steps .locked {
-  display: inline-flex; align-items: center; gap: .45rem;
-  padding: .3rem .6rem; border-radius: 1rem;
-  font-size: .82rem; text-decoration: none;
-  border: 1px solid var(--pico-muted-border-color);
+  display: flex; flex-direction: column; align-items: center; gap: .35rem;
+  padding: 0 .25rem;
+  font-size: .74rem; line-height: 1.25; text-align: center;
+  text-decoration: none;
   color: var(--pico-muted-color);
 }
+nav.steps a:hover .label { color: var(--amp-ink); }
 nav.steps .num {
-  display: inline-grid; place-items: center;
-  width: 1.25rem; height: 1.25rem; border-radius: 50%;
-  background: var(--pico-muted-border-color);
-  /* The theme's own text colour is the only pairing that has contrast against
-     the muted circle in both modes; the background colour was invisible in
+  display: grid; place-items: center; flex: none;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--pico-background-color);
+  border: 2px solid var(--pico-muted-border-color);
+  /* The theme's own text color is the only pairing that has contrast against
+     the muted circle in both modes; the background color was invisible in
      dark. */
   color: var(--pico-color);
-  font-size: .7rem; font-weight: 700;
+  font-size: .72rem; font-weight: 700;
 }
 nav.steps li.done a { color: var(--amp-ink); }
-nav.steps li.done .num { background: var(--amp-ok); color: #fff; font-size: 0; }
-nav.steps li.done .num::after { content: "\2713"; font-size: .75rem; }
-nav.steps li.current a {
-  border-color: var(--pico-primary); color: var(--pico-primary);
-  font-weight: 600;
+nav.steps li.done .num {
+  background: var(--amp-ok); border-color: var(--amp-ok);
+  color: #fff; font-size: 0;
 }
+nav.steps li.done .num::after { content: "\2713"; font-size: .78rem; }
+nav.steps li.current a { color: var(--pico-primary); font-weight: 600; }
 nav.steps li.current .num {
-  background: var(--pico-primary); color: var(--pico-primary-inverse);
-  font-size: .7rem;
+  background: var(--pico-primary); border-color: var(--pico-primary);
+  color: var(--pico-primary-inverse); font-size: .72rem;
 }
 nav.steps li.current .num::after { content: none; }
-nav.steps .locked { opacity: .65; cursor: default; }
+nav.steps .locked { opacity: .6; cursor: default; }
+
+/* Narrow screens: circles and track only. The page heading directly below
+   already names the current step and its position, so labels add nothing at
+   this width except collisions. Hidden accessibly rather than removed, so the
+   list still reads in full to a screen reader. */
+@media (max-width: 640px) {
+  nav.steps .label {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  nav.steps .num { width: 1.4rem; height: 1.4rem; }
+  nav.steps li + li::before {
+    top: .7rem;
+    left: calc(-50% + .95rem);
+    right: calc(50% + .95rem);
+  }
+}
 
 nav.stepnav ul {
   display: flex; justify-content: space-between; align-items: center;
