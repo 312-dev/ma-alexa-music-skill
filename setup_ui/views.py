@@ -1188,7 +1188,8 @@ def wizard_upload_progress():
             '<script>if (window.ampGuard) {'
             ' removeEventListener("beforeunload", window.ampGuard);'
             ' removeEventListener("pagehide", window.ampStop);'
-            ' window.ampGuard = null; window.ampStop = null; }'
+            ' document.body.removeEventListener("htmx:afterSwap", window.ampSync);'
+            ' window.ampGuard = null; window.ampStop = null; window.ampSync = null; }'
             ' location.reload();</script>', 200)
     return fragment("wizard/_upload_progress.html", job=job,
                     back="/setup/wizard/upload")

@@ -20,7 +20,18 @@
       };
       addEventListener("beforeunload", window.ampGuard);
       addEventListener("pagehide", window.ampStop);
+      // Every poll swaps the progress element, which restarts its stripe
+      // animation at phase zero. Handing each new instance the page clock's
+      // phase keeps the march continuous across swaps.
+      window.ampSync = function () {
+        document.querySelectorAll("progress").forEach(function (p) {
+          p.style.setProperty(
+            "--stripe-delay", (-(performance.now() / 1000 % 0.8)) + "s");
+        });
+      };
+      document.body.addEventListener("htmx:afterSwap", window.ampSync);
     }
+    window.ampSync();
   </script>
 </div>
 {% else %}
@@ -36,7 +47,8 @@
     if (window.ampGuard) {
       removeEventListener("beforeunload", window.ampGuard);
       removeEventListener("pagehide", window.ampStop);
-      window.ampGuard = null; window.ampStop = null;
+      document.body.removeEventListener("htmx:afterSwap", window.ampSync);
+      window.ampGuard = null; window.ampStop = null; window.ampSync = null;
     }
   </script>
 </div>

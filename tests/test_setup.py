@@ -1335,6 +1335,16 @@ def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
     assert store.load().get("uploads") in (None, {})
 
 
+def test_continue_is_disabled_while_an_upload_runs(ui, monkeypatch):
+    # Even a step that already counts as done must not hand out Continue
+    # while a fresh run is in flight; leaving the page would stop it.
+    _all_steps_done(monkeypatch)
+    views._UPLOAD.update(running=True, phase="reading the library")
+    body = ui.get("/setup/wizard/upload").data.decode()
+    assert '<button class="btn" disabled>Continue</button>' in body
+    assert '>Continue</a>' not in body
+
+
 def test_upload_step_is_not_done_until_ingestion_succeeds(ui, monkeypatch):
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
     monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {

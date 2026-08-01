@@ -26,13 +26,16 @@
       <div id="step-body">{% include step_template %}</div>
     </article>
 
+    {% set busy = upload_job and upload_job.running %}
     <nav class="stepnav">
       <ul>
         <li>{% if previous %}
           <a href="/setup/wizard/{{ previous }}" class="btn" data-variant="outline">Back</a>
         {% endif %}</li>
         <li>
-          {% if step.done and next %}
+          {% if busy %}
+            <button class="btn" disabled>Continue</button>
+          {% elif step.done and next %}
             <a href="/setup/wizard/{{ next }}" class="btn">Continue</a>
           {% elif step.done %}
             <a href="/setup/wizard" class="btn">Finish</a>

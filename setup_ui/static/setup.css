@@ -338,7 +338,11 @@ progress::-webkit-progress-value {
     color-mix(in srgb, var(--amp-on-accent) 22%, transparent) 75%, transparent 75%,
     transparent);
   background-size: 1rem 1rem;
+  /* Each poll swaps the element, restarting the animation at phase zero.
+     --stripe-delay carries the page clock's phase into every new instance
+     so the march reads as one continuous motion. */
   animation: amp-stripes .8s linear infinite;
+  animation-delay: var(--stripe-delay, 0s);
 }
 progress::-moz-progress-bar {
   background-color: var(--amp-accent);
@@ -350,6 +354,7 @@ progress::-moz-progress-bar {
     transparent);
   background-size: 1rem 1rem;
   animation: amp-stripes .8s linear infinite;
+  animation-delay: var(--stripe-delay, 0s);
 }
 @keyframes amp-stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
 
@@ -357,6 +362,14 @@ progress::-moz-progress-bar {
    button; the empty panel's margins collapse into one even gap. */
 #ingestion { margin-top: .9rem; }
 #ingestion + p { margin-top: .9rem; }
+
+/* Step bodies stack tables, forms and prose; give the block elements even
+   breathing room instead of letting them touch. */
+.content .table-container { margin-block: .9rem; }
+.content .table-container:first-child { margin-top: 0; }
+.content form { margin-block: .9rem; }
+.content form:first-child { margin-top: 0; }
+.content form:last-child { margin-bottom: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
