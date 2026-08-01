@@ -1,14 +1,19 @@
-/* Ampere admin styles, layered on Pico.
+/* Ampere admin styles, layered on Basecoat.
 
    The design language comes from the product's own world: analog audio gear.
    Silkscreened small-cap labels, hairline rules, LED indicators, and an amber
    backlight, on a dark faceplate or a silver-faced panel depending on the
-   scheme. Pico stays underneath for form controls and tables; everything here
-   goes through its variables so both schemes keep working without a second
-   set of rules.
+   scheme. Basecoat supplies the component system (btn, field, card, table,
+   badge, alert); everything here drives it through its design tokens so both
+   schemes keep working without a second set of component rules.
 
-   Organization: fonts, tokens, density, the application shell, shared
-   components, then the wizard stepper. */
+   Scheme switching is pure CSS: light values on :root, dark values repeated
+   inside a prefers-color-scheme media query. There is no theme-toggle
+   JavaScript and Basecoat's html.dark refinements are intentionally unused.
+
+   Organization: fonts, tokens (light), tokens (dark), base and element gaps,
+   application shell, sidebar, wizard stepper, shared components, htmx
+   spinners, responsive. */
 
 /* --- fonts ------------------------------------------------------------------
    IBM Plex, vendored like every other asset: this page must work with no
@@ -35,195 +40,270 @@
   src: url("vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
 }
 
-/* --- tokens ----------------------------------------------------------------- */
+/* --- tokens: light scheme ("silver panel") ----------------------------------
+   Brushed warm gray, black silkscreen, amber turned down dark enough to hold
+   WCAG AA when used as text or a filled control. Basecoat components read the
+   --background/--foreground/... set; the --amp-* set carries Ampere's own
+   vocabulary (LED states, the rail, wells, the true amber backlight). */
 
 :root {
-  --amp-accent: #E8A33D;   /* the meter backlight */
-  --amp-needle: #D8542F;
+  color-scheme: light;
+
+  /* Basecoat tokens */
+  --radius: 0.375rem;
+  --background: #EDEBE6;
+  --foreground: #26211B;
+  --card: #F7F5F1;
+  --card-foreground: #26211B;
+  --popover: #F7F5F1;
+  --popover-foreground: #26211B;
+  --primary: #A3650B;
+  --primary-foreground: #FFFFFF;
+  --secondary: #DFDBD2;
+  --secondary-foreground: #3A3428;
+  --muted: #E5E1D8;
+  --muted-foreground: #6B645A;
+  --accent: #E4DFD4;
+  --accent-foreground: #26211B;
+  --destructive: #A11D1D;
+  --border: #CFCBC2;
+  --input: #C6C1B8;
+  --ring: #A3650B;
+  --sidebar: #E7E4DE;
+  --sidebar-foreground: #26211B;
+  --sidebar-primary: #A3650B;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #E4DFD4;
+  --sidebar-accent-foreground: #26211B;
+  --sidebar-border: #CFCBC2;
+  --sidebar-ring: #A3650B;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Ampere tokens */
+  --amp-accent: #E8A33D;      /* the meter backlight, full strength */
+  --amp-on-accent: #17130F;   /* ink on an amber fill */
+  --amp-ok: #1B7F4C;
+  --amp-on-ok: #FFFFFF;
+  --amp-warn: #8A6100;
+  --amp-bad: #A11D1D;
+  --amp-idle: #5B5B5B;
+  --amp-rail: #E7E4DE;
+  --amp-well: #EAE7E0;
+  --amp-field-bg: #FBFAF7;
   --amp-sidebar-width: 15rem;
-  --amp-radius: 6px;
-  --pico-font-family-sans-serif: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --pico-font-family-monospace: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
-  --pico-font-family: var(--pico-font-family-sans-serif);
-  --pico-border-radius: var(--amp-radius);
 }
 
-/* State colors are LEDs: brighter in the dark scheme, inked in the light one,
-   so text set in them keeps contrast in both. Pico scopes its palette under
-   :root:not([data-theme=...]), so overrides must match that specificity or
-   they silently lose. */
-:root:not([data-theme=dark]) {
-  --amp-ok: #1b7f4c;
-  --amp-warn: #8a6100;
-  --amp-bad: #a11d1d;
-  --amp-idle: #5b5b5b;
-  --amp-rail: #E7E4DE;
-  --amp-hairline: #CFCBC2;
-  --amp-well: #EAE7E0;
-  /* Silver-faced panel: brushed aluminum, black silkscreen, amber backlight. */
-  --pico-background-color: #EDEBE6;
-  --pico-color: #26211B;
-  --pico-card-background-color: #F7F5F1;
-  --pico-card-sectioning-background-color: #EFEDE8;
-  --pico-muted-color: #6b645a;
-  --pico-muted-border-color: #CFCBC2;
-  --pico-primary: #a3650b;
-  --pico-primary-hover: #8d5809;
-  --pico-primary-focus: rgba(232, 163, 61, .3);
-  --pico-primary-underline: rgba(163, 101, 11, .5);
-  --pico-primary-background: #a3650b;
-  --pico-primary-border: #a3650b;
-  --pico-primary-hover-background: #8d5809;
-  --pico-primary-hover-border: #8d5809;
-  --pico-primary-inverse: #fff;
-  /* Pico's stock secondary is a slate blue from no part of this palette;
-     warm graphite belongs on the panel. */
-  --pico-secondary: #57503F;
-  --pico-secondary-hover: #453F32;
-  --pico-secondary-background: #57503F;
-  --pico-secondary-border: #57503F;
-  --pico-secondary-hover-background: #453F32;
-  --pico-secondary-hover-border: #453F32;
-  --pico-secondary-inverse: #fff;
-  --pico-secondary-focus: rgba(87, 80, 63, .25);
-  /* Pico's form wells are slate blue; the panel is warm. */
-  --pico-form-element-background-color: #FBFAF7;
-  --pico-form-element-border-color: #C6C1B8;
-  --pico-form-element-active-border-color: #a3650b;
-  --pico-form-element-focus-color: rgba(232, 163, 61, .35);
-}
+/* --- tokens: dark scheme ("faceplate") --------------------------------------
+   Warm near-black, off-white silkscreen, the amber at full backlight. LED
+   colors brighten so text set in them keeps contrast. */
+
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme=light]) {
-    --amp-ok: #55b97e;
+  :root {
+    color-scheme: dark;
+
+    --background: #1A1713;
+    --foreground: #E9E4DB;
+    --card: #211D18;
+    --card-foreground: #E9E4DB;
+    --popover: #211D18;
+    --popover-foreground: #E9E4DB;
+    --primary: #E8A33D;
+    --primary-foreground: #17130F;
+    --secondary: #4A443A;
+    --secondary-foreground: #E9E4DB;
+    --muted: #262119;
+    --muted-foreground: #9D9689;
+    --accent: #2C261F;
+    --accent-foreground: #E9E4DB;
+    --destructive: #E0684D;
+    --border: #38322A;
+    --input: #38322A;
+    --ring: #E8A33D;
+    --sidebar: #16130F;
+    --sidebar-foreground: #E9E4DB;
+    --sidebar-primary: #E8A33D;
+    --sidebar-primary-foreground: #17130F;
+    --sidebar-accent: #2C261F;
+    --sidebar-accent-foreground: #E9E4DB;
+    --sidebar-border: #38322A;
+    --sidebar-ring: #E8A33D;
+
+    --amp-ok: #55B97E;
+    --amp-on-ok: #17130F;
     --amp-warn: #E8A33D;
-    --amp-bad: #e0684d;
-    --amp-idle: #8b8579;
+    --amp-bad: #E0684D;
+    --amp-idle: #8B8579;
     --amp-rail: #16130F;
-    --amp-hairline: #38322A;
     --amp-well: #16130F;
-    /* Dark faceplate: warm near-black, not neutral gray. */
-    --pico-background-color: #1A1713;
-    --pico-color: #E9E4DB;
-    --pico-card-background-color: #211D18;
-    --pico-card-sectioning-background-color: #262119;
-    --pico-muted-color: #9d9689;
-    --pico-muted-border-color: #38322A;
-    --pico-code-background-color: #16130F;
-    --pico-primary: #E8A33D;
-    --pico-primary-hover: #f2b45a;
-    --pico-primary-focus: rgba(232, 163, 61, .25);
-    --pico-primary-underline: rgba(232, 163, 61, .5);
-    --pico-primary-background: #E8A33D;
-    --pico-primary-border: #E8A33D;
-    --pico-primary-hover-background: #f2b45a;
-    --pico-primary-hover-border: #f2b45a;
-    --pico-primary-inverse: #17130F;
-    --pico-secondary: #A99F8E;
-    --pico-secondary-hover: #BFB6A5;
-    --pico-secondary-background: #4A443A;
-    --pico-secondary-border: #4A443A;
-    --pico-secondary-hover-background: #57503F;
-    --pico-secondary-hover-border: #57503F;
-    --pico-secondary-inverse: #E9E4DB;
-    --pico-secondary-focus: rgba(169, 159, 142, .2);
-    --pico-form-element-background-color: #16130F;
-    --pico-form-element-border-color: #38322A;
-    --pico-form-element-active-border-color: #E8A33D;
-    --pico-form-element-focus-color: rgba(232, 163, 61, .3);
-    --pico-form-element-placeholder-color: #7d7669;
+    --amp-field-bg: #16130F;
+
+    /* Basecoat bakes a light-scheme gray into its select chevron and check
+       icons; restate them in the warm muted ink so they read on the
+       faceplate. */
+    --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d9689" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d968980" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+    --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%239d9689" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
   }
 }
 
-/* The silkscreen: the small, wide-tracked, uppercase label that hi-fi gear
-   prints beside every control. One class, reused everywhere a label labels. */
-.silk, .side .section, .tile .label, .pill {
-  font-family: var(--pico-font-family-sans-serif);
-  font-size: .66rem;
-  font-weight: 600;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-
-/* --- density ----------------------------------------------------------------
-   Pico ramps the root font size with the viewport, up to 131.25% on a wide
-   monitor. That suits a landing page, not a settings screen. Pinned at every
-   breakpoint; kept at 16px rather than smaller because the goal is removing
-   the inflation, not cramming. */
+/* --- base and element gaps --------------------------------------------------
+   Basecoat ships Tailwind's preflight, which zeroes headings, lists, and
+   margins; the rules here give the prose parts of an admin page their shape
+   back, and cover elements Basecoat has no component for. */
 
 /* Chrome on Android inflates text it judges too small unless told not to,
    and it judges per element, so the stepper's numbered circles came out at
    assorted sizes and staggered out of line. */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
-:root, :host { --pico-font-size: 100%; }
-@media (min-width: 576px)  { :root, :host { --pico-font-size: 100%; } }
-@media (min-width: 768px)  { :root, :host { --pico-font-size: 100%; } }
-@media (min-width: 1024px) { :root, :host { --pico-font-size: 100%; } }
-@media (min-width: 1280px) { :root, :host { --pico-font-size: 100%; } }
-@media (min-width: 1536px) { :root, :host { --pico-font-size: 100%; } }
+body { font-size: 1rem; line-height: 1.55; -webkit-font-smoothing: antialiased; }
 
-h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
-h1 { --pico-font-size: 1.45rem; --pico-typography-spacing-top: 0; }
-h2 { --pico-font-size: 1.2rem;  --pico-typography-spacing-top: 1.5rem; }
-h3 { --pico-font-size: 1.05rem; --pico-typography-spacing-top: 1.25rem; }
+h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; line-height: 1.25; text-wrap: balance; }
+p { text-wrap: pretty; }
+h1 { font-size: 1.45rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.2rem;  margin: 1.5rem 0 .5rem; }
+h3 { font-size: 1.05rem; margin: 1.25rem 0 .4rem; }
+:is(h1, h2, h3):first-child { margin-top: 0; }
 
-article {
-  --pico-block-spacing-vertical: .9rem;
+p { margin: 0 0 .8rem; }
+p:last-child { margin-bottom: 0; }
+
+.content :is(ul, ol):not([class]) {
+  margin: 0 0 .8rem; padding-left: 1.4rem;
+}
+/* :where() keeps these at class-level specificity so component lists
+   (nav.steps ol, nav.stepnav ul) can opt out with a plain element rule. */
+.content :where(ul:not([class])) { list-style: disc; }
+.content :where(ol:not([class])) { list-style: decimal; }
+.content :is(ul, ol):not([class]) li { margin-bottom: .25rem; }
+
+:is(.content, .bare) a:not(.btn):not(.step) {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+:is(.content, .bare) a:not(.btn):not(.step):focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 2px;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: .85em;
+  background: var(--amp-well);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: .1em .35em;
+}
+pre { margin: 0 0 .8rem; overflow-x: auto; }
+pre code { display: block; padding: .6rem .8rem; font-size: .82rem; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
+
+/* Step bodies and detail pages arrive as a bare <article>: a bordered panel
+   section, flat, hairline-ruled. */
+.content article {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid var(--amp-hairline);
-  border-radius: var(--amp-radius);
-  box-shadow: none;
-}
-article > header { --pico-block-spacing-vertical: .6rem; }
-:where(input, select, textarea) { --pico-form-element-spacing-vertical: .55rem; }
-button, [role="button"] {
-  --pico-form-element-spacing-vertical: .55rem;
-  font-weight: 600;
 }
 
-table { font-size: .92rem; }
-td, th { vertical-align: top; }
-thead th {
+/* Bare form controls outside a Basecoat .field still have to look like
+   controls; same geometry as .input, minus the class. */
+:is(.content, .bare) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not([class]) {
+  width: 100%;
+  height: 2.25rem;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--amp-field-bg);
+  color: var(--foreground);
+  padding: .25rem .65rem;
+  font-size: .875rem;
+  font-family: inherit;
+}
+:is(.content, .bare) textarea:not([class]) { height: auto; min-height: 4.5rem; padding: .5rem .65rem; }
+:is(.content, .bare) :is(input, select, textarea):not([class]):focus-visible {
+  outline: 2px solid var(--ring); outline-offset: -1px;
+}
+
+:is(.content, .bare) button:not([class]) {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 2.25rem; padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit; font-size: .875rem; font-weight: 500;
+  cursor: pointer;
+}
+:is(.content, .bare) button:not([class]):hover { background: color-mix(in srgb, var(--primary) 85%, var(--foreground) 5%); }
+:is(.content, .bare) button:not([class]):disabled { opacity: .5; cursor: not-allowed; }
+:is(.content, .bare) button:not([class]):focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 2px;
+}
+
+/* Basecoat forms give every control a whisper of drop shadow; the panel is
+   flat. Zeroing the shadow variable keeps the focus rings, which ride the
+   same property. */
+.btn, .badge, .card, .input, .select, .textarea, .table-container,
+.field input, .field select, .field textarea {
+  --tw-shadow: 0 0 #0000;
+}
+
+/* Basecoat v3 expects Tailwind utility gaps between stacked fields; there
+   are no utilities here, so space siblings inside a plain form directly. */
+form .field + .field,
+form .field + button[type="submit"],
+form .field + .btn,
+form .field + fieldset,
+form fieldset + .field { margin-top: .9rem; }
+form > button[type="submit"]:not(:first-child),
+form > .btn:not(:first-child) { margin-top: .9rem; }
+
+/* Give Basecoat fields the recessed well background the panel design uses
+   instead of transparent controls. */
+.field :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea),
+.input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select.select, .textarea {
+  background-color: var(--amp-field-bg);
+}
+
+/* Bare tables (Basecoat's .table styles itself; this covers tables without
+   the class). */
+table:not(.table) { width: 100%; border-collapse: collapse; font-size: .92rem; }
+table:not(.table) :is(td, th) {
+  vertical-align: top; text-align: left;
+  padding: .5rem .6rem;
+  border-bottom: 1px solid var(--border);
+}
+table:not(.table) thead th {
   font-size: .66rem; font-weight: 600; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--pico-muted-color);
+  text-transform: uppercase; color: var(--muted-foreground);
 }
 
-/* A pressed control shows that it is working. htmx marks the requesting
-   element with .htmx-request for the flight of the request; the label yields
-   to a spinner and pointer events stop, so a slow operation cannot be
-   double-submitted or mistaken for a dead button. With reduced motion the
-   ring simply holds still, which still reads as busy. */
-form.htmx-request button[type="submit"],
-button.htmx-request,
-a[role="button"].htmx-request {
-  pointer-events: none;
-  opacity: .75;
-  color: transparent;
-  position: relative;
+/* Native <progress>: flat track, amber value bar, both schemes. Used by the
+   upload progress bar; Basecoat's .progress is a div pattern and does not
+   cover the element. */
+progress {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%; height: .5rem;
+  border: none; border-radius: 2px;
+  background: var(--amp-well);
+  overflow: hidden;
+  color: var(--amp-accent); /* value bar for engines that honor color */
 }
-form.htmx-request button[type="submit"]::after,
-button.htmx-request::after,
-a[role="button"].htmx-request::after {
-  content: "";
-  position: absolute; inset: 0; margin: auto;
-  width: 1rem; height: 1rem;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--amp-ink) 30%, transparent);
-  border-top-color: var(--amp-ink);
-  animation: amp-spin .7s linear infinite;
-}
-@keyframes amp-spin { to { transform: rotate(360deg); } }
+progress::-webkit-progress-bar { background: var(--amp-well); border-radius: 2px; }
+progress::-webkit-progress-value { background: var(--amp-accent); }
+progress::-moz-progress-bar { background: var(--amp-accent); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
+  html { scroll-behavior: auto; }
 }
-
-/* Pico redefines --pico-color inside every <a> to the link color, so a rule
-   saying color: var(--pico-color) turns amber on exactly the links it was
-   meant to neutralize. Capturing the body's ink here substitutes the value at
-   body level, before any link overrides the token, and children inherit the
-   resolved color. */
-body { --amp-ink: var(--pico-color); }
 
 /* --- application shell ------------------------------------------------------
    Sidebar plus content, the standard shape for an admin surface. The rail is
@@ -239,14 +319,24 @@ body.shell {
 
 .skip {
   position: absolute; left: -9999px; top: 0;
-  background: var(--pico-primary); color: var(--pico-primary-inverse);
-  padding: .4rem .8rem; border-radius: 0 0 var(--amp-radius) 0; z-index: 10;
+  background: var(--primary); color: var(--primary-foreground);
+  padding: .4rem .8rem; border-radius: 0 0 var(--radius) 0; z-index: 10;
 }
 .skip:focus { left: 0; }
 
+main.content {
+  padding: 1.6rem 2rem 3rem;
+  max-width: 60rem;
+  width: 100%;
+  min-width: 0;
+  justify-self: start;
+}
+
+/* --- sidebar ---------------------------------------------------------------- */
+
 aside.side {
   background: var(--amp-rail);
-  border-right: 1px solid var(--amp-hairline);
+  border-right: 1px solid var(--border);
   padding: 1.1rem .9rem;
   display: flex; flex-direction: column; gap: .8rem;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
@@ -256,18 +346,26 @@ aside.side {
   display: flex; align-items: center; gap: .5rem;
   font-weight: 700; font-size: 1.02rem; letter-spacing: .01em;
   padding: 0 .4rem .8rem;
-  border-bottom: 1px solid var(--amp-hairline);
+  border-bottom: 1px solid var(--border);
 }
-.side .brand .mark, .bare .brand .mark, .brand .mark {
-  width: 1.7rem; height: 1.7rem; flex: none; color: var(--amp-ink);
-}
+.brand .mark { width: 1.7rem; height: 1.7rem; flex: none; }
 
 .side nav { flex: 1; }
 .side nav ul { list-style: none; margin: 0; padding: 0; display: block; }
 .side nav li { margin: 0; padding: 0; }
 
+/* The silkscreen: the small, wide-tracked, uppercase label that hi-fi gear
+   prints beside every control. One voice, reused everywhere a label labels. */
+.silkscreen, .silk, .side .section, .tile .label, .pill {
+  font-family: var(--font-sans);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
 .side .section {
-  color: var(--pico-muted-color);
+  color: var(--muted-foreground);
   padding: 1rem .4rem .35rem;
 }
 
@@ -275,19 +373,19 @@ aside.side {
   display: flex; align-items: center; justify-content: space-between;
   gap: .5rem;
   padding: .4rem .6rem; margin: .1rem 0;
-  border-radius: var(--amp-radius);
-  color: var(--amp-ink); text-decoration: none;
+  border-radius: var(--radius);
+  color: var(--foreground); text-decoration: none;
   border-left: 3px solid transparent;
   font-size: .9rem;
 }
-.side nav a:hover { background: var(--pico-primary-focus); }
+.side nav a:hover { background: var(--accent); }
 .side nav a[aria-current="page"] {
   border-left-color: var(--amp-accent);
-  background: var(--pico-primary-focus);
+  background: var(--accent);
   font-weight: 600;
 }
 .side nav a:focus-visible {
-  outline: 2px solid var(--pico-primary); outline-offset: 1px;
+  outline: 2px solid var(--ring); outline-offset: 1px;
 }
 
 /* Configuration entries before setup is done: present, so the map of the
@@ -297,53 +395,30 @@ aside.side {
   gap: .5rem;
   padding: .4rem .6rem; margin: .1rem 0;
   border-left: 3px solid transparent;
-  color: var(--pico-muted-color);
+  color: var(--muted-foreground);
   opacity: .55;
   cursor: not-allowed;
   font-size: .9rem;
 }
 
+/* The step-count chip beside the Setup entry. Scoped to the rail so it never
+   collides with Basecoat's .badge component. */
 .side .badge {
-  font-family: var(--pico-font-family-monospace);
-  font-size: .68rem; font-weight: 400;
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: .68rem; font-weight: 400; line-height: 1.3;
   padding: .1rem .45rem; border-radius: 3px;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--amp-hairline);
-  color: var(--pico-muted-color);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
 }
 
 .side footer {
-  border-top: 1px solid var(--amp-hairline);
+  border-top: 1px solid var(--border);
   padding-top: .7rem; font-size: .85rem;
 }
-.side footer a { color: var(--pico-muted-color); text-decoration: none; }
-.side footer a:hover { color: var(--amp-ink); }
-
-main.content {
-  padding: 1.6rem 2rem 3rem;
-  max-width: 52rem;
-  width: 100%;
-  min-width: 0;
-  justify-self: start;
-}
-
-/* Small screens: the rail becomes a top bar. No JavaScript hamburger, because
-   every page here has to work without JavaScript. */
-@media (max-width: 900px) {
-  body.shell { grid-template-columns: 1fr; }
-  aside.side {
-    position: static; height: auto;
-    border-right: none; border-bottom: 1px solid var(--amp-hairline);
-    padding: .7rem .9rem; gap: .4rem;
-  }
-  .side .brand { border-bottom: none; padding-bottom: 0; }
-  .side nav ul { display: flex; flex-wrap: wrap; gap: .1rem .3rem; }
-  .side .section { display: none; }
-  .side nav a { border-left: none; border-bottom: 3px solid transparent; border-radius: var(--amp-radius) var(--amp-radius) 0 0; }
-  .side nav a[aria-current="page"] { border-bottom-color: var(--amp-accent); }
-  .side footer { border-top: none; padding-top: 0; }
-  main.content { padding: 1.1rem 1rem 2.5rem; }
-}
+.side footer a { color: var(--muted-foreground); text-decoration: none; }
+.side footer a:hover { color: var(--foreground); }
 
 /* Standalone pages (sign in, refusals, the phone-scanned verify page) get a
    centered card instead of the shell: they are entered without a session, so
@@ -351,14 +426,15 @@ main.content {
 body.bare {
   display: grid; place-items: start center;
   min-height: 100vh; margin: 0; padding: 3.5rem 1rem;
-  background: var(--pico-background-color);
+  background: var(--background);
 }
 .bare .card {
+  display: block;
   width: 100%; max-width: 27rem;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--amp-hairline);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-top: 3px solid var(--amp-accent);
-  border-radius: var(--amp-radius);
+  border-radius: var(--radius);
   padding: 1.6rem 1.7rem;
 }
 .bare .card .brand {
@@ -371,17 +447,117 @@ body.bare {
 
 .page-head { margin-bottom: 1.25rem; }
 .page-head h1 { margin-bottom: .15rem; }
-.page-head p { color: var(--pico-muted-color); margin-bottom: 0; font-size: .92rem; }
+.page-head p { color: var(--muted-foreground); margin-bottom: 0; font-size: .92rem; }
+
+/* --- wizard stepper ---------------------------------------------------------
+   A vertical channel strip beside the step panel: one node per step on a
+   connecting wire, like the signal path silkscreened down a mixer's channel.
+   Done nodes are flat green, the current node is flat amber, the wire fills
+   in behind them, so the strip itself shows how far the signal has traveled.
+   Eight labeled rows read comfortably down a rail where they congested a
+   horizontal row. */
+
+.wizard {
+  display: grid;
+  grid-template-columns: 12.5rem 1fr;
+  gap: 1.75rem;
+  align-items: start;
+}
+.step-panel { min-width: 0; }
+
+nav.steps {
+  position: sticky; top: 1.25rem;
+}
+nav.steps ol {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+}
+nav.steps li { position: relative; margin: 0; padding: 0; }
+
+/* The wire: two half-height segments per row, meeting behind the solid node.
+   Rows after a done step carry signal. */
+nav.steps li::before,
+nav.steps li::after {
+  content: "";
+  position: absolute;
+  left: calc(1.225rem - 1px);
+  width: 2px;
+  background: var(--border);
+}
+nav.steps li::before { top: 0; height: 1.2rem; }
+nav.steps li::after { top: 1.2rem; bottom: 0; }
+nav.steps li:first-child::before { content: none; }
+nav.steps li:last-child::after { content: none; }
+nav.steps li.done::before,
+nav.steps li.done::after,
+nav.steps li.done + li::before { background: var(--amp-ok); }
+
+.step {
+  position: relative;
+  display: flex; align-items: center; gap: .65rem;
+  padding: .35rem;
+  min-width: 0;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--muted-foreground);
+}
+a.step:hover { background: var(--accent); }
+a.step:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+.step-num {
+  /* The wire segments are positioned pseudos on the li and would paint over
+     this node; lifting it keeps the digits clear of the line. */
+  position: relative; z-index: 1;
+  display: grid; place-items: center; flex: none;
+  width: 1.75rem; height: 1.75rem;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: .8rem; line-height: 1;
+}
+
+.step-label {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .85rem; line-height: 1.3;
+}
+
+nav.steps li.done .step { color: var(--foreground); }
+nav.steps li.done .step-num {
+  background: var(--amp-ok); border-color: var(--amp-ok);
+  color: var(--amp-on-ok);
+}
+nav.steps li.current .step { color: var(--foreground); }
+nav.steps li.current .step-label { font-weight: 600; }
+nav.steps li.current .step-num {
+  background: var(--amp-accent); border-color: var(--amp-accent);
+  color: var(--amp-on-accent);
+  font-weight: 700;
+}
+.step.locked { cursor: default; }
+.step.locked .step-num { opacity: .55; }
+.step.locked .step-label { opacity: .7; }
+
+/* Bottom back/continue row under a step. Continue stays on the right even on
+   the first step, where there is no Back to balance it. */
+nav.stepnav ul {
+  display: flex; justify-content: space-between; align-items: center;
+  list-style: none; margin: 1rem 0 0; padding: 0;
+  width: 100%;
+}
+nav.stepnav li { margin: 0; }
+nav.stepnav li:last-child { margin-left: auto; }
 
 /* --- shared components ------------------------------------------------------ */
 
 /* Status readouts are LEDs beside silkscreen text, not filled badges: the dot
-   carries the color, the label stays legible ink, and a lit LED gets the one
-   glow this design allows itself. */
+   carries the color, flat, and the label stays legible ink. */
 .pill {
   display: inline-flex; align-items: center; gap: .4rem;
   white-space: nowrap;
-  color: var(--amp-ink);
+  color: var(--foreground);
 }
 .pill::before {
   content: "";
@@ -389,11 +565,11 @@ body.bare {
   background: var(--amp-idle);
   flex: none;
 }
-.pill.ok::before   { background: var(--amp-ok);   box-shadow: 0 0 .35rem var(--amp-ok); }
-.pill.warn::before { background: var(--amp-warn); box-shadow: 0 0 .35rem var(--amp-warn); }
-.pill.bad::before  { background: var(--amp-bad);  box-shadow: 0 0 .35rem var(--amp-bad); }
-.pill.idle::before { background: var(--amp-idle); box-shadow: none; }
-.pill.idle { color: var(--pico-muted-color); }
+.pill.ok::before   { background: var(--amp-ok); }
+.pill.warn::before { background: var(--amp-warn); }
+.pill.bad::before  { background: var(--amp-bad); }
+.pill.idle::before { background: var(--amp-idle); }
+.pill.idle { color: var(--muted-foreground); }
 
 /* Health tiles: the state of the whole system in one glance, color-coded on
    the left edge so the row can be swept without reading. */
@@ -404,47 +580,75 @@ body.bare {
   margin-bottom: 1.1rem;
 }
 .tile {
-  border: 1px solid var(--amp-hairline);
+  border: 1px solid var(--border);
   border-left: 3px solid var(--amp-idle);
-  border-radius: var(--amp-radius);
-  background: var(--pico-card-background-color);
+  border-radius: var(--radius);
+  background: var(--card);
   padding: .65rem .8rem;
   margin: 0;
-  box-shadow: none;
 }
 .tile.ok   { border-left-color: var(--amp-ok); }
 .tile.warn { border-left-color: var(--amp-warn); }
 .tile.bad  { border-left-color: var(--amp-bad); }
 .tile .label {
-  color: var(--pico-muted-color);
+  color: var(--muted-foreground);
   margin-bottom: .35rem;
 }
-.tile .value { font-size: .85rem; margin: 0; }
+.tile .value { font-size: .85rem; margin: 0; font-variant-numeric: tabular-nums; }
 .tile .value .pill { margin-right: .3rem; }
 
+/* One endpoint check per row, hairline-ruled. */
 .check {
   display: flex;
   gap: .8rem;
   align-items: flex-start;
   padding: .7rem 0;
-  border-bottom: 1px solid var(--amp-hairline);
+  border-bottom: 1px solid var(--border);
 }
 .check:last-of-type { border-bottom: none; }
 .check > div { min-width: 0; }
 .check p { margin: 0; }
 .check .what { font-weight: 600; }
 
+/* Disclosure rows are inset wells: a shade removed from the panel so they
+   read as openable objects whether collapsed or open, not as body text that
+   happens to have a chevron. */
+.well, .content details:not([class]) {
+  background: var(--amp-well);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .65rem .85rem;
+  margin-bottom: .9rem;
+}
+:is(.well, .content details:not([class])) > summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+:is(.well, .content details:not([class])) > summary:focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 2px;
+}
+:is(.well, .content details:not([class]))[open] > summary {
+  margin-bottom: .7rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--border);
+}
+:is(.well, .content details:not([class])) > :last-child { margin-bottom: 0; }
+
 /* A value to be pasted into someone else's form: readonly well plus a copy
-   button. The input stays selectable so the row still works without any
-   JavaScript. */
+   button (copy.js, data-copy). The input stays selectable so the row still
+   works without any JavaScript. */
 .copyrow { display: flex; gap: .5rem; align-items: stretch; margin: .4rem 0 .9rem; }
-.copyrow input[readonly] {
-  font-family: var(--pico-font-family-monospace);
+.copyrow input {
+  flex: 1; min-width: 0; margin: 0;
+  height: auto;
+  font-family: var(--font-mono);
   font-size: .82rem;
-  margin: 0;
+  background: var(--amp-well);
 }
 .copyrow button {
-  margin: 0; width: auto; flex: none;
+  flex: none; margin: 0; width: auto;
+  height: auto;
   font-size: .68rem; font-weight: 600;
   letter-spacing: .1em; text-transform: uppercase;
   padding: .45rem .9rem;
@@ -456,151 +660,123 @@ body.bare {
 button.linklike {
   all: unset;
   cursor: pointer;
-  color: var(--pico-primary);
+  color: var(--primary);
   text-decoration: underline;
+  text-underline-offset: 2px;
   font: inherit;
 }
 button.linklike:focus-visible {
-  outline: 2px solid var(--pico-primary); outline-offset: 1px;
+  outline: 2px solid var(--ring); outline-offset: 1px;
 }
 
-.mono { font-family: var(--pico-font-family-monospace); word-break: break-all; }
+.quiet { color: var(--muted-foreground); }
+.mono { font-family: var(--font-mono); word-break: break-all; }
+
 .big-code {
-  font-family: var(--pico-font-family-monospace);
+  font-family: var(--font-mono);
   font-size: .95rem;
   word-break: break-all;
-  background: var(--pico-code-background-color);
-  border: 1px solid var(--amp-hairline);
-  padding: .4rem .6rem; border-radius: var(--amp-radius);
+  background: var(--amp-well);
+  border: 1px solid var(--border);
+  padding: .4rem .6rem; border-radius: var(--radius);
 }
 
+/* A hard failure that must not be skimmed past: inked red edge, no siren. */
 .loud {
   display: block;
   border-left: .25rem solid var(--amp-bad);
   padding: .8rem 1rem;
-  background: var(--pico-card-sectioning-background-color);
+  background: var(--muted);
 }
 article.loud h3 { color: var(--amp-bad); margin-top: 0; }
-.quiet { color: var(--pico-muted-color); }
 
 .qr { display: block; margin: 1rem 0; background: #fff; padding: 12px; width: fit-content; border-radius: 8px; }
 .qr svg { max-width: 260px; height: auto; display: block; }
 
-ul.links { list-style: none; padding: 0; }
+ul.links { list-style: none; margin: 0 0 .8rem; padding: 0; }
 ul.links li { margin-bottom: .6rem; }
 ul.links li a { font-weight: 600; }
 ul.links li .quiet { display: block; font-size: .85rem; }
 
-/* Disclosure rows are inset wells: a shade removed from the panel so they
-   read as openable objects whether collapsed or open, not as body text that
-   happens to have a chevron. */
-details {
-  background: var(--amp-well);
-  border: 1px solid var(--amp-hairline);
-  border-radius: var(--amp-radius);
-  padding: .65rem .85rem;
-  margin-bottom: .9rem;
-}
-details > summary { margin-bottom: 0; font-weight: 600; }
-details[open] > summary {
-  margin-bottom: .7rem;
-  padding-bottom: .6rem;
-  border-bottom: 1px solid var(--amp-hairline);
-}
-details > :last-child { margin-bottom: 0; }
+/* --- htmx spinners ----------------------------------------------------------
+   A pressed control shows that it is working. htmx marks the requesting
+   element with .htmx-request for the flight of the request; the label yields
+   to a spinning ring and pointer events stop, so a slow operation cannot be
+   double-submitted or mistaken for a dead button. With reduced motion the
+   ring simply holds still, which still reads as busy. */
 
-main.container { max-width: 56rem; }
-
-/* --- wizard stepper ---------------------------------------------------------
-   The signal chain: one LED node per step on a connecting wire, label
-   underneath. Done nodes are lit green, the current node is backlit amber,
-   and the wire fills in behind them, so the chain itself shows how far the
-   signal has traveled. Eight titled pills can never share a row inside a
-   52rem column; fixed columns keep the order legible no matter how long the
-   titles are. */
-
-nav.steps { margin-bottom: 1.6rem; }
-nav.steps ol {
-  display: flex;
-  list-style: none; margin: 0; padding: 0;
+form.htmx-request button[type="submit"],
+button.htmx-request,
+a.btn.htmx-request,
+.btn.htmx-request {
+  pointer-events: none;
+  opacity: .75;
+  color: transparent;
+  position: relative;
 }
-nav.steps li {
-  flex: 1; min-width: 0; position: relative;
-  margin: 0; padding: 0;
-}
-/* Each step draws the wire segment back to the one before it, stopping short
-   of both nodes. Segments after a done step carry signal. */
-nav.steps li + li::before {
+form.htmx-request button[type="submit"]::after,
+button.htmx-request::after,
+a.btn.htmx-request::after,
+.btn.htmx-request::after {
   content: "";
-  position: absolute;
-  top: .8rem;
-  left: calc(-50% + 1.1rem);
-  right: calc(50% + 1.1rem);
-  height: 2px;
-  background: var(--amp-hairline);
+  position: absolute; inset: 0; margin: auto;
+  width: 1rem; height: 1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--foreground) 30%, transparent);
+  border-top-color: var(--foreground);
+  animation: amp-spin .7s linear infinite;
 }
-nav.steps li.done + li::before { background: var(--amp-ok); }
-nav.steps a, nav.steps .locked {
-  display: flex; flex-direction: column; align-items: center; gap: .35rem;
-  padding: 0 .25rem;
-  font-size: .72rem; line-height: 1.25; text-align: center;
-  text-decoration: none;
-  color: var(--pico-muted-color);
-}
-nav.steps a:hover .label { color: var(--amp-ink); }
-/* Cap the label to less than a column's width so two-word titles wrap into
-   their own lane instead of spilling sideways into the neighbors' text. */
-nav.steps .label { max-width: 4.5rem; }
-nav.steps .num {
-  display: grid; place-items: center; flex: none;
-  width: 1.6rem; height: 1.6rem; border-radius: 50%;
-  background: var(--pico-background-color);
-  border: 2px solid var(--amp-hairline);
-  /* The theme's own text color is the only pairing that has contrast against
-     the muted circle in both modes; the background color was invisible in
-     dark. */
-  color: var(--pico-color);
-  font-size: .72rem; font-weight: 700;
-}
-nav.steps li.done a { color: var(--amp-ink); }
-nav.steps li.done .num {
-  background: var(--amp-ok); border-color: var(--amp-ok);
-  color: #fff; font-size: 0;
-  box-shadow: 0 0 .45rem color-mix(in srgb, var(--amp-ok) 55%, transparent);
-}
-nav.steps li.done .num::after { content: "\2713"; font-size: .78rem; }
-nav.steps li.current a { color: var(--pico-primary); font-weight: 600; }
-nav.steps li.current .num {
-  background: var(--amp-accent); border-color: var(--amp-accent);
-  color: #17130F; font-size: .72rem;
-  box-shadow: 0 0 .5rem color-mix(in srgb, var(--amp-accent) 60%, transparent);
-}
-nav.steps li.current .num::after { content: none; }
-nav.steps .locked { opacity: .6; cursor: default; }
+@keyframes amp-spin { to { transform: rotate(360deg); } }
 
-/* Narrow screens: nodes and wire only. The page heading directly below
-   already names the current step and its position, so labels add nothing at
-   this width except collisions. Hidden accessibly rather than removed, so the
-   list still reads in full to a screen reader. */
-@media (max-width: 640px) {
-  nav.steps .label {
+/* --- responsive -------------------------------------------------------------
+   Small screens: the rail becomes a top bar (no JavaScript hamburger, because
+   every page here has to work without JavaScript), and the stepper collapses
+   to a single row of numbered nodes. Eight 1.6rem nodes with .35rem gaps run
+   about 250px, so the row holds one line on a 320px phone with no wrapping. */
+
+@media (max-width: 900px) {
+  body.shell { grid-template-columns: 1fr; }
+  aside.side {
+    position: static; height: auto;
+    border-right: none; border-bottom: 1px solid var(--border);
+    padding: .7rem .9rem; gap: .4rem;
+  }
+  .side .brand { border-bottom: none; padding-bottom: 0; }
+  .side nav ul { display: flex; flex-wrap: wrap; gap: .1rem .3rem; }
+  .side .section { display: none; }
+  .side nav a {
+    border-left: none; border-bottom: 3px solid transparent;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .side nav a[aria-current="page"] { border-bottom-color: var(--amp-accent); }
+  .side nav .navlocked { border-left: none; }
+  .side footer { border-top: none; padding-top: 0; }
+  main.content { padding: 1.1rem 1rem 2.5rem; }
+
+  /* Stepper: nodes only. The page heading directly below already names the
+     current step and its position, so labels add nothing at this width
+     except collisions. Hidden accessibly rather than removed, so the list
+     still reads in full to a screen reader. */
+  .wizard { display: block; }
+  nav.steps { position: static; margin-bottom: 1.2rem; }
+  nav.steps ol {
+    flex-direction: row; align-items: center;
+    gap: .35rem;
+  }
+  nav.steps li { display: flex; }
+  nav.steps li::before,
+  nav.steps li::after { content: none; }
+  .step { padding: .1rem; gap: 0; }
+  /* Nodes are visually 1.6rem; extend the tap target without widening the
+     row (2px sideways stays clear of the .35rem gap to the neighbor). */
+  a.step::after {
+    content: "";
+    position: absolute;
+    inset: -9px -2px;
+  }
+  .step-num { width: 1.6rem; height: 1.6rem; font-size: .72rem; }
+  .step-label {
     position: absolute; width: 1px; height: 1px;
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
-  nav.steps .num { width: 1.4rem; height: 1.4rem; }
-  nav.steps li + li::before {
-    top: .7rem;
-    left: calc(-50% + .95rem);
-    right: calc(50% + .95rem);
-  }
 }
-
-nav.stepnav ul {
-  display: flex; justify-content: space-between; align-items: center;
-  list-style: none; margin: 1rem 0 0; padding: 0;
-  width: 100%;
-}
-nav.stepnav li { margin: 0; }
-/* Keeps Continue on the right even on the first step, where there is no Back
-   to balance it. */
-nav.stepnav li:last-child { margin-left: auto; }

@@ -5,26 +5,29 @@
 </p>
 {% if state.skill_id %}
   <form hx-post="/setup/wizard/teardown" hx-target="#step-teardown">
-    <label>Type <span class="mono">{{ state.skill_id }}</span> to confirm
-      <input name="confirm" required autocomplete="off" placeholder="{{ state.skill_id }}">
-    </label>
-    <button type="submit" class="contrast">Delete the skill and its catalogs</button>
+    <div role="group" class="field">
+      <label for="f-confirm">Type <span class="mono">{{ state.skill_id }}</span> to confirm</label>
+      <input id="f-confirm" name="confirm" required autocomplete="off" placeholder="{{ state.skill_id }}">
+    </div>
+    <button type="submit" class="btn" data-variant="destructive">Delete the skill and its catalogs</button>
   </form>
 {% else %}
   <p><span class="pill idle">nothing to remove</span> No skill is recorded here.</p>
 {% endif %}
 {% if results %}
-  <table>
-    <thead><tr><th>What</th><th></th><th>Detail</th></tr></thead>
-    <tbody>
-      {% for row in results %}
-      <tr>
-        <td>{{ row.what }}</td>
-        <td><span class="pill {{ 'ok' if row.ok else 'bad' }}">
-          {{ 'deleted' if row.ok else 'failed' }}</span></td>
-        <td class="mono">{{ row.detail }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table class="table">
+      <thead><tr><th>What</th><th></th><th>Detail</th></tr></thead>
+      <tbody>
+        {% for row in results %}
+        <tr>
+          <td>{{ row.what }}</td>
+          <td><span class="pill {{ 'ok' if row.ok else 'bad' }}">
+            {{ 'deleted' if row.ok else 'failed' }}</span></td>
+          <td class="mono">{{ row.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 {% endif %}

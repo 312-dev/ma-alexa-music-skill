@@ -9,19 +9,21 @@
 {% endif %}
 {% set results = results or (upload_job.results if upload_job else none) %}
 {% if results %}
-  <table>
-    <thead><tr><th>Catalog</th><th></th><th>Result</th></tr></thead>
-    <tbody>
-      {% for row in results %}
-      <tr>
-        <td>{{ row.kind }}</td>
-        <td><span class="pill {{ 'ok' if row.ok else 'bad' }}">
-          {{ 'sent' if row.ok else 'failed' }}</span></td>
-        <td class="mono">{{ row.detail }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table class="table">
+      <thead><tr><th>Catalog</th><th></th><th>Result</th></tr></thead>
+      <tbody>
+        {% for row in results %}
+        <tr>
+          <td>{{ row.kind }}</td>
+          <td><span class="pill {{ 'ok' if row.ok else 'bad' }}">
+            {{ 'sent' if row.ok else 'failed' }}</span></td>
+          <td class="mono">{{ row.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   <p class="quiet">
     Uploading unbinds the skill from the provider slot without reporting it.
     Run the enable step below afterwards, or Alexa will answer from your
@@ -32,11 +34,11 @@
   {% with job = upload_job %}{% include "wizard/_upload_progress.html" %}{% endwith %}
 {% else %}
 <form hx-post="/setup/wizard/upload" hx-target="#step-body">
-  <button type="submit">Build and upload the catalogs</button>
+  <button type="submit" class="btn">Build and upload the catalogs</button>
 </form>
 {% endif %}
 
 <div id="ingestion" hx-get="/setup/wizard/ingestion" hx-trigger="load, every 30s"
      hx-swap="innerHTML"></div>
-<p><a href="/setup/wizard/ingestion" role="button" class="secondary outline"
+<p><a href="/setup/wizard/ingestion" class="btn" data-variant="outline"
       hx-get="/setup/wizard/ingestion" hx-target="#ingestion">Check ingestion</a></p>

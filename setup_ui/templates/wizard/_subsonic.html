@@ -7,14 +7,20 @@
 {% endif %}
 <form method="post" action="/setup/wizard/subsonic"
       hx-post="/setup/wizard/subsonic" hx-target="#step-body">
-  <label>Server URL
-    <input type="url" name="url" value="{{ subsonic_url }}"
-           placeholder="http://192.168.1.10:4533" required></label>
-  <label>Username
-    <input type="text" name="user" value="{{ subsonic_user }}" required></label>
-  <label>Password
-    <input type="password" name="password" autocomplete="off" required></label>
-  <button type="submit">Test the connection</button>
+  <div role="group" class="field">
+    <label for="f-url">Server URL</label>
+    <input id="f-url" type="url" name="url" value="{{ subsonic_url }}"
+           placeholder="http://192.168.1.10:4533" required>
+  </div>
+  <div role="group" class="field">
+    <label for="f-user">Username</label>
+    <input id="f-user" type="text" name="user" value="{{ subsonic_user }}" required>
+  </div>
+  <div role="group" class="field">
+    <label for="f-password">Password</label>
+    <input id="f-password" type="password" name="password" autocomplete="off" required>
+  </div>
+  <button type="submit" class="btn">Test the connection</button>
 </form>
 <small class="quiet">
   The password is used only for this test and is not stored. The service

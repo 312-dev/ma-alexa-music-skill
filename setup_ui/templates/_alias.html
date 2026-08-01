@@ -9,27 +9,29 @@
   <p>{{ result.summary }}</p>
 
   {% if result.rows %}
-  <table>
-    <thead><tr><th>Risk</th><th>What</th><th>Name</th><th>Why</th></tr></thead>
-    <tbody>
-    {% for row in result.rows %}
-      <tr>
-        <td>{% if row.risk == 'high' %}<span class="pill bad">high</span>
-            {% else %}<span class="pill warn">medium</span>{% endif %}</td>
-        <td>{{ row.kind }}</td>
-        <td>{{ row.name }}</td>
-        <td class="quiet">{{ row.reason }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table class="table">
+      <thead><tr><th>Risk</th><th>What</th><th>Name</th><th>Why</th></tr></thead>
+      <tbody>
+      {% for row in result.rows %}
+        <tr>
+          <td>{% if row.risk == 'high' %}<span class="pill bad">high</span>
+              {% else %}<span class="pill warn">medium</span>{% endif %}</td>
+          <td>{{ row.kind }}</td>
+          <td>{{ row.name }}</td>
+          <td class="quiet">{{ row.reason }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 
   <footer>
     <form method="post" action="/setup/alias/save"
           hx-post="/setup/alias/save" hx-target="#alias-result">
       <input type="hidden" name="candidate" value="{{ result.candidate }}">
-      <button type="submit" class="secondary">Use this alias</button>
+      <button type="submit" class="btn" data-variant="secondary">Use this alias</button>
     </form>
     {% if saved %}<small class="quiet">Currently saved: <span class="mono">{{ saved }}</span></small>{% endif %}
   </footer>

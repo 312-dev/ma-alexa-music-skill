@@ -12,7 +12,7 @@
 </p>
 <form method="post" action="/setup/wizard/enable"
       hx-post="/setup/wizard/enable" hx-target="#step-body">
-  <button type="submit" {% if not state.skill_id %}disabled{% endif %}>
+  <button type="submit" class="btn" {% if not state.skill_id %}disabled{% endif %}>
     Cycle enablement, stage development</button>
 </form>
 {% if not state.skill_id %}

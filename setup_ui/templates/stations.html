@@ -10,38 +10,38 @@
 {% if stored %}<p class="pill ok">saved</p>{% endif %}
 
 <form method="post" action="/setup/stations">
-  <label>
-    After the requested content runs out
-    <select name="after_content">
+  <div role="group" class="field">
+    <label for="f-after-content">After the requested content runs out</label>
+    <select class="select" name="after_content" id="f-after-content">
       {% for mode in modes %}
         <option value="{{ mode }}" {% if mode == saved.after_content %}selected{% endif %}>{{ mode }}</option>
       {% endfor %}
     </select>
-    <small class="quiet">
+    <p class="quiet">
       Anything but <span class="mono">stop</span> extends the queue past its
       last track rather than replacing it, seeded from the request itself. It
       never pre-empts what was asked for.
-    </small>
-  </label>
+    </p>
+  </div>
 
-  <label>
-    RADIO_ARTISTS
-    <input type="number" name="radio_artists" min="1" max="100"
+  <div role="group" class="field">
+    <label for="f-radio-artists">RADIO_ARTISTS</label>
+    <input id="f-radio-artists" type="number" name="radio_artists" min="1" max="100"
            value="{{ saved.radio_artists }}">
-    <small class="quiet">How many similar artists a station draws on.</small>
-  </label>
+    <p class="quiet">How many similar artists a station draws on.</p>
+  </div>
 
-  <label>
-    RADIO_TRACKS_PER_ARTIST
-    <input type="number" name="radio_tracks_per_artist" min="1" max="100"
+  <div role="group" class="field">
+    <label for="f-radio-tracks">RADIO_TRACKS_PER_ARTIST</label>
+    <input id="f-radio-tracks" type="number" name="radio_tracks_per_artist" min="1" max="100"
            value="{{ saved.radio_tracks_per_artist }}">
-    <small class="quiet">
+    <p class="quiet">
       Per-artist cap. Uncapped, a seed artist with two hundred tracks next to
-      neighbours with ten gives a station that is mostly the seed artist again.
-    </small>
-  </label>
+      neighbors with ten gives a station that is mostly the seed artist again.
+    </p>
+  </div>
 
-  <button type="submit">Save</button>
+  <button type="submit" class="btn">Save</button>
 </form>
 
 <article>
@@ -67,11 +67,11 @@
   </p>
   <form method="get" action="/setup/stations/preview"
         hx-get="/setup/stations/preview" hx-target="#pool">
-    <label>
-      Seed artist
-      <input type="text" name="seed" placeholder="Gregory Alan Isakov">
-    </label>
-    <button type="submit" class="secondary">Build the pool</button>
+    <div role="group" class="field">
+      <label for="f-seed">Seed artist</label>
+      <input id="f-seed" type="text" name="seed" placeholder="Gregory Alan Isakov">
+    </div>
+    <button type="submit" class="btn" data-variant="secondary">Build the pool</button>
   </form>
   <div id="pool"></div>
 </article>

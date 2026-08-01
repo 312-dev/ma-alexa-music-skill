@@ -13,11 +13,12 @@
 
 <form method="post" action="/setup/wizard/alias"
       hx-post="/setup/wizard/alias" hx-target="#step-body">
-  <label>Alias, the word you say after "on"
-    <input name="alias" value="{{ state.alias or 'ampere' }}"
+  <div role="group" class="field">
+    <label for="f-alias">Alias, the word you say after "on"</label>
+    <input id="f-alias" name="alias" value="{{ state.alias or 'ampere' }}"
            autocomplete="off" required>
-  </label>
-  <button type="submit">Save alias</button>
+  </div>
+  <button type="submit" class="btn">Save alias</button>
 </form>
 
 {% if result and result.verdict != 'empty' %}
@@ -31,26 +32,28 @@
   <p>{{ result.summary }}</p>
 
   {% if result.rows %}
-  <table>
-    <thead><tr><th>Risk</th><th>What</th><th>Name</th><th>Why</th></tr></thead>
-    <tbody>
-    {% for row in result.rows %}
-      <tr>
-        <td>{% if row.risk == 'high' %}<span class="pill bad">high</span>
-            {% else %}<span class="pill warn">medium</span>{% endif %}</td>
-        <td>{{ row.kind }}</td>
-        <td>{{ row.name }}</td>
-        <td class="quiet">{{ row.reason }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table class="table">
+      <thead><tr><th>Risk</th><th>What</th><th>Name</th><th>Why</th></tr></thead>
+      <tbody>
+      {% for row in result.rows %}
+        <tr>
+          <td>{% if row.risk == 'high' %}<span class="pill bad">high</span>
+              {% else %}<span class="pill warn">medium</span>{% endif %}</td>
+          <td>{{ row.kind }}</td>
+          <td>{{ row.name }}</td>
+          <td class="quiet">{{ row.reason }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 
   {% if result.verdict != 'clear' %}
   <footer>
     <p>It is saved. Change it above, or
-      <a href="/setup/wizard" role="button" class="secondary">Continue with
+      <a href="/setup/wizard" class="btn" data-variant="secondary">Continue with
         this alias</a></p>
   </footer>
   {% endif %}

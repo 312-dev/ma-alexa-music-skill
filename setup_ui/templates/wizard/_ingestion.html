@@ -1,20 +1,22 @@
 {% if rows %}
-<table>
-  <thead><tr><th>Catalog</th><th></th><th>ER_INGESTION</th><th>SLU_MODELING</th><th>Top level</th></tr></thead>
-  <tbody>
-  {% for row in rows %}
-    <tr>
-      <td>{{ row.kind }}</td>
-      <td>{% if row.voice_ready %}<span class="pill ok">voice works</span>
-          {% elif row.state == 'failed' %}<span class="pill bad">failed</span>
-          {% else %}<span class="pill warn">waiting</span>{% endif %}</td>
-      <td>{{ row.er or '-' }}</td>
-      <td>{{ row.slu or '-' }}</td>
-      <td>{{ row.top or '-' }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="table-container">
+  <table class="table">
+    <thead><tr><th>Catalog</th><th></th><th>ER_INGESTION</th><th>SLU_MODELING</th><th>Top level</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.kind }}</td>
+        <td>{% if row.voice_ready %}<span class="pill ok">voice works</span>
+            {% elif row.state == 'failed' %}<span class="pill bad">failed</span>
+            {% else %}<span class="pill warn">waiting</span>{% endif %}</td>
+        <td>{{ row.er or '-' }}</td>
+        <td>{{ row.slu or '-' }}</td>
+        <td>{{ row.top or '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 <small class="quiet">
   Only <span class="mono">ER_INGESTION: SUCCEEDED</span> matters.
   <span class="mono">SLU_MODELING</span> sits at PENDING for weeks without

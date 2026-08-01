@@ -2,47 +2,49 @@
 {% block title %}Ampere setup: step {{ step.number }}{% endblock %}
 {% block body %}
 
-<nav aria-label="Progress" class="steps">
-  <ol>
-    {% for row in rows %}
-    <li class="{{ 'done' if row.done else '' }} {{ 'current' if row.index == step.index else '' }}">
-      {% if row.reachable or row.done %}
-        <a href="/setup/wizard/{{ row.key }}">
-          <span class="num">{{ row.number }}</span><span class="label">{{ row.title }}</span></a>
-      {% else %}
-        <span class="locked"><span class="num">{{ row.number }}</span><span class="label">{{ row.title }}</span></span>
-      {% endif %}
-    </li>
-    {% endfor %}
-  </ol>
-</nav>
+<div class="wizard">
+  <nav aria-label="Progress" class="steps">
+    <ol>
+      {% for row in rows %}
+      <li class="{{ 'done' if row.done else '' }}{{ ' current' if row.index == step.index else '' }}">
+        {% if row.reachable or row.done %}
+        <a class="step" href="/setup/wizard/{{ row.key }}"><span class="step-num">{{ row.number }}</span><span class="step-label">{{ row.title }}</span></a>
+        {% else %}
+        <span class="step locked"><span class="step-num">{{ row.number }}</span><span class="step-label">{{ row.title }}</span></span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </nav>
+  <div class="step-panel">
+    <div class="page-head">
+      <h1>{{ step.title }}</h1>
+      <p>Step {{ step.number }} of {{ rows|length }}. {{ step.blurb }}</p>
+    </div>
 
-<div class="page-head">
-  <h1>{{ step.title }}</h1>
-  <p>Step {{ step.number }} of {{ rows|length }}. {{ step.blurb }}</p>
+    <article>
+      <div id="step-body">{% include step_template %}</div>
+    </article>
+
+    <nav class="stepnav">
+      <ul>
+        <li>{% if previous %}
+          <a href="/setup/wizard/{{ previous }}" class="btn" data-variant="outline">Back</a>
+        {% endif %}</li>
+        <li>
+          {% if step.done and next %}
+            <a href="/setup/wizard/{{ next }}" class="btn">Continue</a>
+          {% elif step.done %}
+            <a href="/setup/wizard" class="btn">Finish</a>
+          {% else %}
+            <button class="btn" disabled>Continue</button>
+          {% endif %}
+        </li>
+      </ul>
+    </nav>
+    {% if not step.done %}
+    <p class="quiet">Complete this step to continue. You can go back at any time.</p>
+    {% endif %}
+  </div>
 </div>
-
-<article>
-  <div id="step-body">{% include step_template %}</div>
-</article>
-
-<nav class="stepnav">
-  <ul>
-    <li>{% if previous %}
-      <a href="/setup/wizard/{{ previous }}" role="button" class="secondary outline">Back</a>
-    {% endif %}</li>
-    <li>
-      {% if step.done and next %}
-        <a href="/setup/wizard/{{ next }}" role="button">Continue</a>
-      {% elif step.done %}
-        <a href="/setup/wizard" role="button">Finish</a>
-      {% else %}
-        <button disabled>Continue</button>
-      {% endif %}
-    </li>
-  </ul>
-</nav>
-{% if not step.done %}
-<p class="quiet">Complete this step to continue. You can go back at any time.</p>
-{% endif %}
 {% endblock %}

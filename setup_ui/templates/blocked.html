@@ -16,8 +16,8 @@
     address rather than the public hostname.</p>
 
   {% if proxied and not trusted %}
-  <article>
-    <header><strong>This request came through a reverse proxy</strong></header>
+  <article class="loud">
+    <h3>This request came through a reverse proxy</h3>
     <p>
       It carried an <code>X-Forwarded-For</code> header but
       <code>TRUSTED_PROXIES</code> is not set, so the header was ignored and

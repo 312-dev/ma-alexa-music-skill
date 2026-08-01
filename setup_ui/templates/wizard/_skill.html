@@ -4,7 +4,7 @@
     skill created against an endpoint Amazon cannot reach fails with no error
     on either side. Fix that first.
   </p>
-  <p><a href="/setup/endpoint" role="button">Back to the endpoint checks</a></p>
+  <p><a href="/setup/endpoint" class="btn">Back to the endpoint checks</a></p>
 {% else %}
   {% if result %}
     <p>{% if result.ok %}<span class="pill ok">done</span>
@@ -23,7 +23,7 @@
       </p>
       <form method="post" action="/setup/wizard/skill/forget"
             hx-post="/setup/wizard/skill/forget" hx-target="#step-body">
-        <button type="submit">Discard the record and set up again</button>
+        <button type="submit" class="btn">Discard the record and set up again</button>
       </form>
     </article>
   {% elif state.skill_id %}
@@ -60,7 +60,7 @@
           <input type="checkbox" name="confirm" value="yes" required>
           Delete this skill from my Amazon account
         </label>
-        <button type="submit" class="secondary">Delete skill</button>
+        <button type="submit" class="btn" data-variant="destructive">Delete skill</button>
       </form>
       {% endfor %}
       <p class="quiet">
@@ -81,22 +81,25 @@
     <form method="post" action="/setup/wizard/skill"
           hx-post="/setup/wizard/skill" hx-target="#step-body">
       {% if vendor and vendor.options|length > 1 %}
-      <label>Vendor
-        <select name="vendor_id" id="sk-vendor">
+      <div role="group" class="field">
+        <label for="sk-vendor">Vendor</label>
+        <select class="select" name="vendor_id" id="sk-vendor">
           {% for id, name in vendor.options %}
           <option value="{{ id }}"
                   {% if (state.vendor_id or vendor.detected) == id %}selected{% endif %}>
             {{ name }} ({{ id }})</option>
           {% endfor %}
         </select>
-      </label>
+      </div>
       <p class="quiet"><small>Your developer account holds more than one
         vendor, so the choice is yours to make.</small></p>
       {% else %}
-      <label>Vendor id
+      <div role="group" class="field">
+        <label for="sk-vendor">Vendor id</label>
         <input type="text" name="vendor_id" id="sk-vendor"
                value="{{ state.vendor_id or (vendor.detected if vendor else '') }}"
-               required></label>
+               required>
+      </div>
       {% if vendor and vendor.detected %}
       <p class="quiet"><small>Read from your developer account.
         <button type="button" class="linklike" data-reset="sk-vendor"
@@ -109,16 +112,18 @@
            target="_blank" rel="noopener">My IDs page</a>.</small></p>
       {% endif %}
       {% endif %}
-      <label>Alias
+      <div role="group" class="field">
+        <label for="sk-alias">Alias</label>
         <input type="text" name="alias" id="sk-alias"
-               value="{{ state.alias or 'ampere' }}" required></label>
+               value="{{ state.alias or 'ampere' }}" required>
+      </div>
       {% if state.alias %}
       <p class="quiet"><small>
         <button type="button" class="linklike" data-reset="sk-alias"
                 data-reset-value="{{ state.alias }}">Reset to the saved
           alias</button></small></p>
       {% endif %}
-      <button type="submit">Create the skill</button>
+      <button type="submit" class="btn">Create the skill</button>
     </form>
   {% endif %}
 {% endif %}

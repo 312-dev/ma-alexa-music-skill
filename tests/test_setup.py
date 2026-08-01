@@ -855,7 +855,7 @@ def test_subsonic_step_reports_a_failure(ui, monkeypatch):
 def test_partials_come_back_wrapped_in_the_layout_without_htmx(ui):
     body = ui.post("/setup/status/refresh").data.decode()
     assert "<html" in body
-    assert "pico.min.css" in body
+    assert "vendor/basecoat/basecoat.css" in body
 
 
 def test_partials_stay_bare_for_htmx(ui):
@@ -879,7 +879,7 @@ def test_endpoint_page_renders_the_qr_inline(ui):
 
 
 def test_vendored_assets_are_served_locally(ui):
-    for asset in ("vendor/pico.min.css", "vendor/htmx.min.js", "setup.css"):
+    for asset in ("vendor/basecoat/basecoat.css", "vendor/htmx.min.js", "setup.css"):
         assert ui.get(f"/setup/static/{asset}").status_code == 200
 
 
@@ -1064,7 +1064,7 @@ def test_each_step_offers_back_and_continue(ui, monkeypatch):
 
 def test_continue_is_disabled_on_an_unfinished_step(ui):
     body = ui.get("/setup/wizard/server").data.decode()
-    assert "<button disabled>Continue</button>" in body
+    assert '<button class="btn" disabled>Continue</button>' in body
 
 
 def test_wizard_alias_step_prefills_the_default(ui, monkeypatch):
@@ -1146,7 +1146,7 @@ def test_a_created_skill_replaces_the_form_and_refuses_duplicates(ui, monkeypatc
                  skill_id="amzn1.ask.skill.already")
     body = ui.get("/setup/wizard/skill").data.decode()
     # The step title still says Create the skill; the button must be gone.
-    assert '<button type="submit">Create the skill</button>' not in body
+    assert '<button type="submit" class="btn">Create the skill</button>' not in body
     assert "amzn1.ask.skill.already" in body
 
     resp = ui.post("/setup/wizard/skill", data={"alias": "ampere"},

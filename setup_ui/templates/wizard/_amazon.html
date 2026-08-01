@@ -4,7 +4,7 @@
   <p class="quiet">Only the refresh token is stored. Access tokens live for an
     hour and are kept in memory.</p>
   <form hx-post="/setup/wizard/amazon/disconnect" hx-target="#step-body">
-    <button type="submit" class="secondary outline">Disconnect</button>
+    <button type="submit" class="btn" data-variant="outline">Disconnect</button>
   </form>
 {% else %}
   <p><span class="pill warn">not connected</span></p>
@@ -15,7 +15,7 @@
     this project, so your tokens never touch anyone else's service.
   </p>
 
-  <details>
+  <details class="well">
     <summary>Create a security profile, once</summary>
     <ol>
       <li>Sign in to the
@@ -28,26 +28,26 @@
         three required fields, then click <strong>Save</strong>:
         <p><strong>Security Profile Name</strong> (shown on the consent screen)</p>
         <div class="copyrow">
-          <input type="text" readonly id="cp-profile-name" value="Ampere"
+          <input class="input" type="text" readonly id="cp-profile-name" value="Ampere"
                  aria-label="Security Profile Name">
-          <button type="button" class="secondary outline"
+          <button type="button" class="btn" data-variant="outline"
                   data-copy="cp-profile-name">Copy</button>
         </div>
         <p><strong>Security Profile Description</strong></p>
         <div class="copyrow">
-          <input type="text" readonly id="cp-profile-desc"
+          <input class="input" type="text" readonly id="cp-profile-desc"
                  value="Self-hosted bridge that plays a personal music library on Alexa devices"
                  aria-label="Security Profile Description">
-          <button type="button" class="secondary outline"
+          <button type="button" class="btn" data-variant="outline"
                   data-copy="cp-profile-desc">Copy</button>
         </div>
         <p><strong>Consent Privacy Notice URL</strong> (any page you control;
           this bridge's address is fine)</p>
         <div class="copyrow">
-          <input type="text" readonly id="cp-privacy-url"
+          <input class="input" type="text" readonly id="cp-privacy-url"
                  value="{{ public_base or 'set PUBLIC_BASE first' }}"
                  aria-label="Consent Privacy Notice URL">
-          <button type="button" class="secondary outline"
+          <button type="button" class="btn" data-variant="outline"
                   data-copy="cp-privacy-url">Copy</button>
         </div>
       </li>
@@ -56,10 +56,10 @@
       <li>Click <strong>Edit</strong> (bottom right) and add this exact value to
         <strong>Allowed Return URLs</strong>, then <strong>Save</strong>:
         <div class="copyrow">
-          <input type="text" readonly id="cp-return-url"
+          <input class="input" type="text" readonly id="cp-return-url"
                  value="{{ amazon.redirect_uri or 'set PUBLIC_BASE first' }}"
                  aria-label="Allowed Return URL">
-          <button type="button" class="secondary outline"
+          <button type="button" class="btn" data-variant="outline"
                   data-copy="cp-return-url">Copy</button>
         </div>
       </li>
@@ -76,14 +76,16 @@
   </details>
 
   <form method="post" action="/setup/wizard/amazon/begin">
-    <label>Client ID
-      <input name="client_id" required autocomplete="off"
+    <div role="group" class="field">
+      <label for="f-client-id">Client ID</label>
+      <input id="f-client-id" name="client_id" required autocomplete="off"
              placeholder="amzn1.application-oa2-client...">
-    </label>
-    <label>Client Secret
-      <input name="client_secret" type="password" required autocomplete="off">
-    </label>
-    <button type="submit">Connect to Amazon</button>
+    </div>
+    <div role="group" class="field">
+      <label for="f-client-secret">Client Secret</label>
+      <input id="f-client-secret" name="client_secret" type="password" required autocomplete="off">
+    </div>
+    <button type="submit" class="btn">Connect to Amazon</button>
   </form>
 
   {% if amazon.cli_configured %}

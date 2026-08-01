@@ -1,36 +1,40 @@
 {% if message %}<p class="loud">{{ message }}</p>{% endif %}
 {% if results %}
-<table>
-  <thead><tr><th>Kind</th><th></th><th>Catalog</th></tr></thead>
-  <tbody>
-  {% for row in results %}
-    <tr>
-      <td>{{ row.kind }}</td>
-      <td>{% if row.ok %}<span class="pill ok">ok</span>
-          {% else %}<span class="pill bad">failed</span>{% endif %}</td>
-      <td class="mono">{{ row.detail }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="table-container">
+  <table class="table">
+    <thead><tr><th>Kind</th><th></th><th>Catalog</th></tr></thead>
+    <tbody>
+    {% for row in results %}
+      <tr>
+        <td>{{ row.kind }}</td>
+        <td>{% if row.ok %}<span class="pill ok">ok</span>
+            {% else %}<span class="pill bad">failed</span>{% endif %}</td>
+        <td class="mono">{{ row.detail }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 
-<table>
-  <thead><tr><th>Kind</th><th>Type</th><th>Catalog id</th></tr></thead>
-  <tbody>
-  {% for kind, catalog_type in kinds.items() %}
-    <tr>
-      <td>{{ kind }}</td>
-      <td class="mono">{{ catalog_type }}</td>
-      <td class="mono">{{ catalog_ids[kind] or 'not created' }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="table-container">
+  <table class="table">
+    <thead><tr><th>Kind</th><th>Type</th><th>Catalog id</th></tr></thead>
+    <tbody>
+    {% for kind, catalog_type in kinds.items() %}
+      <tr>
+        <td>{{ kind }}</td>
+        <td class="mono">{{ catalog_type }}</td>
+        <td class="mono">{{ catalog_ids[kind] or 'not created' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 
 <form method="post" action="/setup/wizard/catalogs"
       hx-post="/setup/wizard/catalogs" hx-target="#step-body">
-  <button type="submit">Create any missing catalogs</button>
+  <button type="submit" class="btn">Create any missing catalogs</button>
 </form>
 <small class="quiet">
   Uploading is <span class="mono">catalog_sync.py</span>, which diffs against

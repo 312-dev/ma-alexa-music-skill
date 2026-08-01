@@ -26,12 +26,12 @@
 
 <form method="post" action="/setup/alias"
       hx-post="/setup/alias" hx-target="#alias-result">
-  <label>
-    Candidate alias
-    <input type="text" name="candidate" value="{{ candidate }}"
+  <div role="group" class="field">
+    <label for="f-candidate">Candidate alias</label>
+    <input id="f-candidate" type="text" name="candidate" value="{{ candidate }}"
            placeholder="ampere" autofocus>
-  </label>
-  <button type="submit">Check it against my library</button>
+  </div>
+  <button type="submit" class="btn">Check it against my library</button>
 </form>
 
 <div id="alias-result">

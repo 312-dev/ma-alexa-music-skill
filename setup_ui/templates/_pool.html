@@ -14,14 +14,16 @@
       {{ pool.artist_count }} artist(s)</span>
     {{ pool.track_count }} tracks in the pool for <strong>{{ pool.artist }}</strong>.
   </p>
-  <table>
-    <thead><tr><th>Artist</th><th>Tracks</th></tr></thead>
-    <tbody>
-      {% for name, count in pool.rows %}
-        <tr><td>{{ name }}</td><td>{{ count }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table class="table">
+      <thead><tr><th>Artist</th><th>Tracks</th></tr></thead>
+      <tbody>
+        {% for name, count in pool.rows %}
+          <tr><td>{{ name }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 {% elif seed %}
   <p class="quiet">Nothing to show.</p>
 {% endif %}

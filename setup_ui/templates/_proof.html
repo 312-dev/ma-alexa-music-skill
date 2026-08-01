@@ -1,20 +1,20 @@
 {% if not proof.token %}
   <form method="post" action="/setup/endpoint/proof"
         hx-post="/setup/endpoint/proof" hx-target="#proof">
-    <button type="submit">Make a verification link</button>
+    <button type="submit" class="btn">Make a verification link</button>
   </form>
 {% elif proof.status == 'seen' %}
   <p><span class="pill ok">confirmed</span>
     The link was opened from outside this network. The public path works.</p>
   <form method="post" action="/setup/endpoint/proof"
         hx-post="/setup/endpoint/proof" hx-target="#proof">
-    <button type="submit" class="secondary outline">Make another</button>
+    <button type="submit" class="btn" data-variant="outline">Make another</button>
   </form>
 {% elif proof.status in ('expired', 'unknown') %}
   <p><span class="pill bad">expired</span> That link is no longer valid.</p>
   <form method="post" action="/setup/endpoint/proof"
         hx-post="/setup/endpoint/proof" hx-target="#proof">
-    <button type="submit">Make a new one</button>
+    <button type="submit" class="btn">Make a new one</button>
   </form>
 {% else %}
   <div hx-get="/setup/endpoint/proof?token={{ proof.token }}"

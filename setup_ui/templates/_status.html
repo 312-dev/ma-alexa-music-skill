@@ -45,7 +45,7 @@
     it receives, which are none.
   </p>
   <p>{{ smapi.enablement.detail }}</p>
-  <p><a href="/setup/wizard/enable" role="button" class="secondary outline">
+  <p><a href="/setup/wizard/enable" class="btn" data-variant="outline">
       Re-enable in the wizard</a></p>
   <p><small>A catalog upload silently unbinds the skill, so this can appear
     right after a successful sync. Cycling enablement is the fix.</small></p>
@@ -66,7 +66,7 @@
       {% endif %}
     </p>
     {% if requests|length > 1 %}
-    <details>
+    <details class="well">
       <summary>Earlier</summary>
       <table>
         <tbody>
@@ -109,24 +109,26 @@
     </p>
     <p>{{ smapi.worst.detail }}</p>
     {% if smapi.catalogs %}
-    <table>
-      <thead><tr><th>Catalog</th><th>ER_INGESTION</th><th>SLU_MODELING</th><th>Top level</th></tr></thead>
-      <tbody>
-      {% for row in smapi.catalogs %}
-        <tr>
-          <td>{{ row.kind }}</td>
-          <td>{{ row.er or '-' }}</td>
-          <td>{{ row.slu or '-' }}</td>
-          <td>{{ row.top or '-' }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th>Catalog</th><th>ER_INGESTION</th><th>SLU_MODELING</th><th>Top level</th></tr></thead>
+        <tbody>
+        {% for row in smapi.catalogs %}
+          <tr>
+            <td>{{ row.kind }}</td>
+            <td>{{ row.er or '-' }}</td>
+            <td>{{ row.slu or '-' }}</td>
+            <td>{{ row.top or '-' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% endif %}
   {% endif %}
   <form hx-post="/setup/status/refresh" hx-target="#live" method="post"
         action="/setup/status/refresh">
-    <button type="submit" class="secondary">Check ingestion now</button>
+    <button type="submit" class="btn" data-variant="secondary">Check ingestion now</button>
   </form>
   <footer>
     <small>
