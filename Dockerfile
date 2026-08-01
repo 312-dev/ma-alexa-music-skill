@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py subsonic.py oauth.py queuestate.py signature.py queue_api.py \
-     mdns.py smapi_rest.py catalog_sync.py ./
+     mdns.py smapi_rest.py catalog_sync.py logring.py ./
 COPY setup_ui/ setup_ui/
 
 # Baked into the image rather than left on a volume. Amazon refetches these on
