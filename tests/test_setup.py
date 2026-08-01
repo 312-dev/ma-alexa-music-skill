@@ -1335,6 +1335,35 @@ def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
     assert store.load().get("uploads") in (None, {})
 
 
+def test_ingestion_table_reports_real_step_statuses(ui, monkeypatch):
+    # The panel must show what Amazon actually said, not placeholders: the
+    # per-step statuses, and an honest "no report yet" before any exist.
+    _all_steps_done(monkeypatch)
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "status": "IN_PROGRESS",
+        "ingestionSteps": [
+            {"name": "ER_INGESTION", "status": "IN_PROGRESS"},
+            {"name": "SLU_MODELING", "status": "PENDING"},
+        ]})
+    body = ui.get("/setup/wizard/ingestion").data.decode()
+    assert "ingesting" in body
+    assert "IN_PROGRESS" in body
+    assert "PENDING" in body
+
+    monkeypatch.setattr(smapi_rest, "upload_status",
+                        lambda c, u: {"ingestionSteps": []})
+    body = ui.get("/setup/wizard/ingestion").data.decode()
+    assert "queued" in body
+    assert "no report yet" in body
+
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "status": "IN_PROGRESS",
+        "ingestionSteps": [{"name": "ER_INGESTION", "status": "SUCCEEDED"}]})
+    body = ui.get("/setup/wizard/ingestion").data.decode()
+    assert "voice ready" in body
+    assert "SUCCEEDED" in body
+
+
 def test_continue_is_disabled_while_an_upload_runs(ui, monkeypatch):
     # Even a step that already counts as done must not hand out Continue
     # while a fresh run is in flight; leaving the page would stop it.

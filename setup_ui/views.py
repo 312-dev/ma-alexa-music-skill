@@ -1204,13 +1204,20 @@ def wizard_ingestion():
         upload_id = uploads.get(kind)
         if not (catalog_id and upload_id):
             continue
+        er = slu = top = ""
         try:
-            state, detail = smapi_rest.ingestion_verdict(
-                smapi_rest.upload_status(catalog_id, upload_id))
+            status = smapi_rest.upload_status(catalog_id, upload_id)
+            state, detail = smapi_rest.ingestion_verdict(status)
+            steps = {}
+            for step in (status.get("ingestionSteps") or []):
+                name = step.get("name") or step.get("stepName") or ""
+                steps[name] = step.get("status", "")
+            er, slu = steps.get("ER_INGESTION", ""), steps.get("SLU_MODELING", "")
+            top = status.get("status", "")
         except Exception as exc:
             state, detail = "failed", _rest_error(exc)
-        rows.append({"kind": kind, "id": catalog_id,
-                     "state": state, "detail": detail})
+        rows.append({"kind": kind, "id": catalog_id, "state": state,
+                     "detail": detail, "er": er, "slu": slu, "top": top})
     return fragment("wizard/_ingestion.html", rows=rows, **wizard_context())
 
 

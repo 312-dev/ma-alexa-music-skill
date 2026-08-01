@@ -6,19 +6,23 @@
     {% for row in rows %}
       <tr>
         <td>{{ row.kind }}</td>
-        <td>{% if row.voice_ready %}<span class="pill ok">voice works</span>
-            {% elif row.state == 'failed' %}<span class="pill bad">failed</span>
-            {% else %}<span class="pill warn">waiting</span>{% endif %}</td>
-        <td>{{ row.er or '-' }}</td>
-        <td>{{ row.slu or '-' }}</td>
-        <td>{{ row.top or '-' }}</td>
+        <td>{% if row.state == 'ready' %}<span class="pill ok" title="{{ row.detail }}">voice ready</span>
+            {% elif row.state == 'failed' %}<span class="pill bad" title="{{ row.detail }}">failed</span>
+            {% elif row.er %}<span class="pill warn" title="{{ row.detail }}">ingesting</span>
+            {% else %}<span class="pill idle" title="{{ row.detail }}">queued</span>{% endif %}</td>
+        <td class="mono">{{ row.er or 'no report yet' }}</td>
+        <td class="mono">{{ row.slu or 'no report yet' }}</td>
+        <td class="mono">{{ row.top or 'no report yet' }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
 <small class="quiet">
-  Only <span class="mono">ER_INGESTION: SUCCEEDED</span> matters.
+  Only <span class="mono">ER_INGESTION: SUCCEEDED</span> matters; it flips the
+  row to voice ready and unlocks the next step.
+  <span class="mono">no report yet</span> means Amazon has not reported the
+  step for this upload at all yet, which is normal in the first minutes.
   <span class="mono">SLU_MODELING</span> sits at PENDING for weeks without
   blocking anything, and because the top-level status is the minimum across
   every step, it is pinned at IN_PROGRESS for exactly as long.
