@@ -24,6 +24,11 @@
     default music service while every diagnostic here looks healthy.
   </p>
 {% endif %}
-<form hx-post="/setup/wizard/upload" hx-target="#step-upload">
+<form hx-post="/setup/wizard/upload" hx-target="#step-body">
   <button type="submit">Build and upload the catalogs</button>
 </form>
+
+<div id="ingestion" hx-get="/setup/wizard/ingestion" hx-trigger="load, every 30s"
+     hx-swap="innerHTML"></div>
+<p><a href="/setup/wizard/ingestion" role="button" class="secondary outline"
+      hx-get="/setup/wizard/ingestion" hx-target="#ingestion">Check ingestion</a></p>

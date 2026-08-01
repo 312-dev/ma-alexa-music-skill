@@ -956,3 +956,41 @@ def test_completion_is_derived_not_stored(ui, monkeypatch):
     assert ui.get("/setup").status_code == 200
     store.update(skill_id="")
     assert ui.get("/setup").status_code == 302
+
+
+# --- completing a step reloads the page, failing keeps the error inline -----
+
+
+def test_a_completed_step_asks_the_browser_to_refresh(ui, monkeypatch):
+    """A fragment swap cannot update the rail or unlock Continue."""
+    monkeypatch.setattr(validate, "subsonic_ping",
+                        lambda url, user, password, timeout=8.0: {"ok": True,
+                                                                  "detail": "ok"})
+    resp = ui.post("/setup/wizard/subsonic",
+                   data={"url": "http://nav.test", "user": "x", "password": "y"},
+                   headers={"HX-Request": "true"})
+    assert resp.status_code == 204
+    assert resp.headers.get("HX-Refresh") == "true"
+
+
+def test_a_failed_step_keeps_the_error_next_to_the_form(ui, monkeypatch):
+    monkeypatch.setattr(validate, "subsonic_ping",
+                        lambda url, user, password, timeout=8.0: {
+                            "ok": False, "detail": "Wrong username"})
+    resp = ui.post("/setup/wizard/subsonic",
+                   data={"url": "http://nav.test", "user": "x", "password": "y"},
+                   headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "Wrong username" in resp.data.decode()
+    assert "HX-Refresh" not in resp.headers
+
+
+def test_without_htmx_a_completed_step_still_renders(ui, monkeypatch):
+    """The no-JavaScript path gets a page, not an empty 204."""
+    monkeypatch.setattr(validate, "subsonic_ping",
+                        lambda url, user, password, timeout=8.0: {"ok": True,
+                                                                  "detail": "ok"})
+    resp = ui.post("/setup/wizard/subsonic",
+                   data={"url": "http://nav.test", "user": "x", "password": "y"})
+    assert resp.status_code == 200
+    assert b"connected" in resp.data

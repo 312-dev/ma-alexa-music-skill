@@ -36,7 +36,7 @@
       mentioned in Amazon's music-skill documentation.
     </p>
     <form method="post" action="/setup/wizard/skill"
-          hx-post="/setup/wizard/skill" hx-target="#step-skill">
+          hx-post="/setup/wizard/skill" hx-target="#step-body">
       <label>Vendor id
         <input type="text" name="vendor_id" value="{{ state.vendor_id }}"
                placeholder="M1ABCDEFGHIJKL" required></label>

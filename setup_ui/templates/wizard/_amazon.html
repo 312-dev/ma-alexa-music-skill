@@ -3,7 +3,7 @@
     This bridge holds a refresh token for your Amazon developer account.</p>
   <p class="quiet">Only the refresh token is stored. Access tokens live for an
     hour and are kept in memory.</p>
-  <form hx-post="/setup/wizard/amazon/disconnect" hx-target="#step-amazon">
+  <form hx-post="/setup/wizard/amazon/disconnect" hx-target="#step-body">
     <button type="submit" class="secondary outline">Disconnect</button>
   </form>
 {% else %}

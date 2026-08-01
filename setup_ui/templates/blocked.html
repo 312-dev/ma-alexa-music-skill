@@ -1,14 +1,7 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ampere setup is not reachable from here</title>
-<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
-</head>
-<body>
-<main class="container">
-  <h1>Not from this address</h1>
+{% extends "bare.html" %}
+{% block title %}Ampere setup is not reachable from here{% endblock %}
+{% block body %}
+<h1>Not from this address</h1>
   <p>
     Setup answered <code>{{ ip }}</code>, which is not in
     <code>{{ networks }}</code>.
@@ -45,6 +38,4 @@
     that can create Amazon skills on the public internet behind one shared
     secret.
   </small></p>
-</main>
-</body>
-</html>
+{% endblock %}

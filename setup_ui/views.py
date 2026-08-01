@@ -91,11 +91,15 @@ def _template_defaults() -> dict:
     than a placeholder they have to go and resolve first.
     """
     try:
-        finished = wizard_steps.complete(store.load())
+        rows = wizard_steps.progress(store.load())
+        done = sum(1 for r in rows if r["done"])
+        total = len(rows)
     except Exception:
-        finished = False
+        done, total = 0, len(wizard_steps.STEPS)
     return {"container_hint": socket.gethostname() or "ampere",
-            "setup_complete": finished}
+            "setup_complete": done == total,
+            "steps_done": done,
+            "steps_total": total}
 
 
 def secure_cookie() -> bool:
@@ -644,6 +648,21 @@ def wizard_context(**extra) -> dict:
     return context
 
 
+def step_completed(template: str, **context):
+    """Answer a step form whose work succeeded.
+
+    A fragment swap updates the step body but not the rail or the Continue
+    button, so a step that just completed still looks locked. HX-Refresh tells
+    the browser to reload the page instead, which re-derives everything.
+    Failures keep the fragment swap so the error lands inline next to the form.
+    """
+    if request.headers.get("HX-Request"):
+        response = make_response("", 204)
+        response.headers["HX-Refresh"] = "true"
+        return response
+    return fragment(template, **context)
+
+
 def step_context(step_key: str) -> dict:
     state = store.load()
     rows = wizard_steps.progress(state)
@@ -681,6 +700,8 @@ def wizard_subsonic():
         # environment like every other secret, and keeping a copy in /data
         # would create a second place for it to leak from.
         store.update(subsonic_url=url, subsonic_user=user)
+        return step_completed("wizard/_subsonic.html", result=result,
+                              **wizard_context())
     return fragment("wizard/_subsonic.html", back="/setup/wizard/server",
                     result=result, **wizard_context())
 
@@ -801,7 +822,7 @@ def wizard_skill():
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
 
     store.update(skill_id=skill_id, alias=alias_word)
-    return fragment("wizard/_skill.html", blocked=False, result={
+    return step_completed("wizard/_skill.html", blocked=False, result={
         "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
 
 
@@ -831,6 +852,9 @@ def wizard_catalogs():
         catalogs[kind] = catalog_id
         results.append({"kind": kind, "ok": True, "detail": catalog_id})
     store.update(catalogs=catalogs)
+    if results and all(row["ok"] for row in results):
+        return step_completed("wizard/_catalogs.html", results=results,
+                              **wizard_context())
     return fragment("wizard/_catalogs.html", results=results, **wizard_context())
 
 
@@ -876,6 +900,9 @@ def wizard_upload():
                         "detail": f"{len(final)} entities, upload {upload_id}"})
 
     store.update(catalog_hashes=saved, uploads=uploads)
+    if results and all(row["ok"] for row in results):
+        return step_completed("wizard/_upload.html", results=results,
+                              **wizard_context())
     return fragment("wizard/_upload.html", results=results, **wizard_context())
 
 
@@ -917,7 +944,7 @@ def wizard_enable():
         return fragment("wizard/_enable.html", result={
             "ok": False, "detail": _rest_error(exc)}, **wizard_context())
     store.update(enabled=True)
-    return fragment("wizard/_enable.html", result={
+    return step_completed("wizard/_enable.html", result={
         "ok": True, "detail": "Enabled for development."}, **wizard_context())
 
 
@@ -960,4 +987,5 @@ def wizard_teardown_run():
 
     store.update(skill_id="", catalogs={}, uploads={}, catalog_hashes={},
                  enabled=False)
-    return fragment("wizard/_teardown.html", results=results, **wizard_context())
+    return step_completed("wizard/_teardown.html", results=results,
+                          **wizard_context())

@@ -1,13 +1,6 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ampere endpoint check</title>
-<link rel="stylesheet" href="{{ url_for('setup.static', filename='vendor/pico.min.css') }}">
-</head>
-<body>
-<main class="container">
+{% extends "bare.html" %}
+{% block title %}Ampere endpoint check{% endblock %}
+{% block body %}
 {% if outcome == 'seen' %}
   <h1>Got it</h1>
   <p>Your bridge is reachable from outside your network.</p>
@@ -20,6 +13,4 @@
   <p>This verification link is not one this bridge is waiting on. Generate a
      fresh one on the endpoint page.</p>
 {% endif %}
-</main>
-</body>
-</html>
+{% endblock %}

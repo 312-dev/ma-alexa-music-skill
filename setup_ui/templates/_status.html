@@ -1,3 +1,40 @@
+<div class="tiles">
+  <div class="tile {% if smapi is none or not smapi.connected or not smapi.skill_id %}{% elif smapi.worst.voice_ready %}ok{% elif smapi.worst.state == 'failed' %}bad{% else %}warn{% endif %}">
+    <p class="label">Voice</p>
+    <p class="value">
+      {% if smapi is none %}<span class="pill idle">not checked</span>
+      {% elif not smapi.connected %}<span class="pill idle">not connected</span>
+      {% elif not smapi.skill_id %}<span class="pill idle">no skill</span>
+      {% elif smapi.worst.voice_ready %}<span class="pill ok">ready</span>
+      {% elif smapi.worst.state == 'failed' %}<span class="pill bad">broken</span>
+      {% else %}<span class="pill warn">not ready</span>{% endif %}
+    </p>
+  </div>
+  <div class="tile {% if smapi and smapi.enablement %}{{ 'ok' if smapi.enablement.enabled else 'bad' }}{% endif %}">
+    <p class="label">Enablement</p>
+    <p class="value">
+      {% if smapi and smapi.enablement %}
+        {% if smapi.enablement.enabled %}<span class="pill ok">enabled</span>
+        {% else %}<span class="pill bad">unbound</span>{% endif %}
+      {% else %}<span class="pill idle">unknown</span>{% endif %}
+    </p>
+  </div>
+  <div class="tile {{ 'ok' if subsonic.ok else 'bad' }}">
+    <p class="label">Music server</p>
+    <p class="value">
+      {% if subsonic.ok %}<span class="pill ok">reachable</span>
+      {% else %}<span class="pill bad">unreachable</span>{% endif %}
+    </p>
+  </div>
+  <div class="tile {{ 'ok' if requests else '' }}">
+    <p class="label">Last request</p>
+    <p class="value">
+      {% if requests %}{{ requests[0].ago }}
+      {% else %}<span class="pill idle">nothing yet</span>{% endif %}
+    </p>
+  </div>
+</div>
+
 {% if smapi and smapi.enablement and not smapi.enablement.enabled %}
 <article class="loud">
   <h3>The skill is not enabled, so Alexa is not using it</h3>
@@ -8,7 +45,7 @@
     it receives, which are none.
   </p>
   <p>{{ smapi.enablement.detail }}</p>
-  <p><a href="/setup/wizard#step-enable" role="button" class="secondary outline">
+  <p><a href="/setup/wizard/enable" role="button" class="secondary outline">
       Re-enable in the wizard</a></p>
   <p><small>A catalog upload silently unbinds the skill, so this can appear
     right after a successful sync. Cycling enablement is the fix.</small></p>

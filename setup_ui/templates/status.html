@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Ampere status{% endblock %}
 {% block body %}
-<h1>Status</h1>
-<p class="quiet">
-  Four situations look identical from outside Alexa. This page tells them apart.
-</p>
+<div class="page-head">
+  <h1>Status</h1>
+  <p>Live view of the skill, the catalog and the music server. Refreshes
+     automatically.</p>
+</div>
 <div id="live" hx-get="/setup/status/panel" hx-trigger="every 10s" hx-swap="innerHTML">
   {% include "_status.html" %}
 </div>
