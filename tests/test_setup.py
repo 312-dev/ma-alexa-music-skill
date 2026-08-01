@@ -74,6 +74,7 @@ def isolated(monkeypatch, tmp_path):
     views._VENDORS.update(at=0.0, value=None)
     views.wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
     views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    views._BINDING.update(at=0.0, value=None)
     views._UPLOAD.update(running=False, phase="", percent=None, results=None,
                          message="", done_at=0.0, cancel=False)
     views.TOKENS = validate.Tokens()
@@ -1334,6 +1335,35 @@ def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
     assert views._UPLOAD["message"].startswith("Stopped")
     assert views._UPLOAD["running"] is False
     assert store.load().get("uploads") in (None, {})
+
+
+def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    calls = []
+    monkeypatch.setattr(smapi_rest, "delete_enablement",
+                        lambda sid: calls.append(("del", sid)))
+    monkeypatch.setattr(smapi_rest, "set_enablement",
+                        lambda sid: calls.append(("set", sid)))
+    monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: True)
+
+    body = ui.get("/setup/status").data.decode()
+    assert "Cycle enablement" in body
+    assert ">Disable</button>" in body
+
+    body = ui.post("/setup/skill/enable",
+                   headers={"HX-Request": "true"}).data.decode()
+    assert ("del", "amzn1.ask.skill.a") in calls
+    assert ("set", "amzn1.ask.skill.a") in calls
+    assert "Enabled for development." in body
+    assert store.load()["enabled_at"]
+
+    monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: False)
+    body = ui.post("/setup/skill/disable",
+                   headers={"HX-Request": "true"}).data.decode()
+    assert calls[-1] == ("del", "amzn1.ask.skill.a")
+    assert store.load()["enabled"] is False
+    assert "Disabled." in body
+    assert "not bound" in body
 
 
 def test_logs_page_shows_the_ring_tail_and_captures(ui, anon):

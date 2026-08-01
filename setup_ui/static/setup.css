@@ -365,6 +365,10 @@ progress::-moz-progress-bar {
 #ingestion { margin-top: .9rem; }
 #ingestion + p { margin-top: .9rem; }
 
+/* Side-by-side action buttons, each its own form (plain-POST fallback). */
+.btnrow { display: flex; gap: .6rem; flex-wrap: wrap; }
+.btnrow form { margin: 0; }
+
 /* Step bodies stack tables, forms and prose; give the block elements even
    breathing room instead of letting them touch. */
 .content .table-container { margin-block: .9rem; }

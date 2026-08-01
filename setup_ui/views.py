@@ -376,6 +376,7 @@ def status_context(force: bool = False) -> dict:
         "smapi": smapi_snapshot(force),
         "checked_ago": ago(_SMAPI_CACHE["at"]) if _SMAPI_CACHE["at"] else "never",
         "alias": current.get("alias", ""),
+        "binding": _binding_now(current),
         "state": current,
     }
 
@@ -837,24 +838,81 @@ def step_context(step_key: str) -> dict:
     return context
 
 
-def _binding_now(state: dict) -> dict:
+_BINDING = {"at": 0.0, "value": None}
+
+
+def _binding_now(state: dict, force: bool = False) -> dict:
     """What Amazon says about the enablement right now.
 
     The stored enabled flag records that the wizard once cycled it; only the
     live answer knows whether a later catalog upload silently unbound the
-    skill. When the lookup itself fails, say unknown rather than guessing."""
-    skill_id = state.get("skill_id") or os.environ.get("SKILL_ID", "")
-    out = {"known": False, "bound": False, "cycled_ago": ""}
+    skill. When the lookup itself fails, say unknown rather than guessing.
+    Cached briefly: the status panel polls every ten seconds and must not
+    turn that into a SMAPI call apiece."""
+    now = time.time()
+    if not force and _BINDING["value"] and now - _BINDING["at"] < 30:
+        out = dict(_BINDING["value"])
+    else:
+        skill_id = state.get("skill_id") or os.environ.get("SKILL_ID", "")
+        out = {"known": False, "bound": False, "cycled_ago": ""}
+        if skill_id and smapi_rest.connected():
+            try:
+                out["bound"] = smapi_rest.enablement_status(skill_id)
+                out["known"] = True
+            except Exception:
+                pass
+        _BINDING.update(at=now, value=dict(out))
     if state.get("enabled_at"):
         out["cycled_ago"] = ago(state["enabled_at"])
-    if not skill_id or not smapi_rest.connected():
-        return out
-    try:
-        out["bound"] = smapi_rest.enablement_status(skill_id)
-        out["known"] = True
-    except Exception:
-        pass
     return out
+
+
+def _cycle_enablement(skill_id: str) -> dict:
+    """Delete then set the enablement. The delete is required, not redundant:
+    a catalog upload unbinds the provider slot without reporting it, and only
+    a full cycle rebinds it."""
+    if not skill_id:
+        return {"ok": False, "detail": "No skill id yet."}
+    try:
+        try:
+            smapi_rest.delete_enablement(skill_id)
+        except smapi_rest.SmapiError:
+            pass  # Not enabled is the normal state here, not a failure.
+        smapi_rest.set_enablement(skill_id)
+    except Exception as exc:
+        return {"ok": False, "detail": _rest_error(exc)}
+    store.update(enabled=True, enabled_at=time.time())
+    return {"ok": True, "detail": "Enabled for development."}
+
+
+@bp.post("/skill/enable")
+def skill_enable():
+    current = store.load()
+    result = _cycle_enablement(
+        current.get("skill_id") or os.environ.get("SKILL_ID", ""))
+    fresh = store.load()
+    return fragment("_binding.html", result=result, state=fresh,
+                    binding=_binding_now(fresh, force=True))
+
+
+@bp.post("/skill/disable")
+def skill_disable():
+    current = store.load()
+    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
+    if not skill_id:
+        result = {"ok": False, "detail": "No skill id yet."}
+    else:
+        try:
+            smapi_rest.delete_enablement(skill_id)
+            store.update(enabled=False)
+            result = {"ok": True,
+                      "detail": ("Disabled. Alexa will not route to this "
+                                 "skill until it is enabled again.")}
+        except Exception as exc:
+            result = {"ok": False, "detail": _rest_error(exc)}
+    fresh = store.load()
+    return fragment("_binding.html", result=result, state=fresh,
+                    binding=_binding_now(fresh, force=True))
 
 
 @bp.get("/wizard")
@@ -1284,24 +1342,14 @@ def wizard_ingestion():
 @bp.post("/wizard/enable")
 def wizard_enable():
     current = store.load()
-    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
-    if not skill_id:
-        return fragment("wizard/_enable.html", result={
-            "ok": False, "detail": "No skill id yet."}, **wizard_context())
-    try:
-        # Delete first. Uploading a catalog unbinds the skill from the provider
-        # slot without reporting it anywhere, and only a cycle rebinds it.
-        try:
-            smapi_rest.delete_enablement(skill_id)
-        except smapi_rest.SmapiError:
-            pass  # Not enabled is the normal state here, not a failure.
-        smapi_rest.set_enablement(skill_id)
-    except Exception as exc:
-        return fragment("wizard/_enable.html", result={
-            "ok": False, "detail": _rest_error(exc)}, **wizard_context())
-    store.update(enabled=True, enabled_at=time.time())
-    return step_completed("wizard/_enable.html", result={
-        "ok": True, "detail": "Enabled for development."}, **wizard_context())
+    result = _cycle_enablement(
+        current.get("skill_id") or os.environ.get("SKILL_ID", ""))
+    _BINDING.update(at=0.0, value=None)
+    if not result["ok"]:
+        return fragment("wizard/_enable.html", result=result,
+                        **wizard_context())
+    return step_completed("wizard/_enable.html", result=result,
+                          **wizard_context())
 
 
 @bp.get("/wizard/teardown")
