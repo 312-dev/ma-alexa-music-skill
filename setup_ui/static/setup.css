@@ -86,3 +86,40 @@ nav ul { flex-wrap: wrap; }
 
 .brand { display: flex; align-items: center; gap: .5rem; }
 .mark { width: 1.8rem; height: 1.8rem; flex: none; color: var(--pico-color); }
+
+/* Density.
+
+   Pico ramps the root font size with the viewport: 106.25% at 576px up to
+   131.25% at 1536px. On a desktop monitor that lands the base around 21px and
+   h1 at 2rem on top of it, which is fine for a marketing page and far too big
+   for a settings screen you are scanning for a status pill.
+
+   Pinned to 100% at every breakpoint, with the heading scale and the gap above
+   headings brought back in proportion. Kept at 16px rather than smaller, and
+   the vertical rhythm left generous, because the point is to remove the
+   inflation rather than to cram: the pills, tables and status rows still need
+   to be picked out at a glance. */
+:root, :host { --pico-font-size: 100%; }
+@media (min-width: 576px)  { :root, :host { --pico-font-size: 100%; } }
+@media (min-width: 768px)  { :root, :host { --pico-font-size: 100%; } }
+@media (min-width: 1024px) { :root, :host { --pico-font-size: 100%; } }
+@media (min-width: 1280px) { :root, :host { --pico-font-size: 100%; } }
+@media (min-width: 1536px) { :root, :host { --pico-font-size: 100%; } }
+
+h1 { --pico-font-size: 1.6rem;  --pico-typography-spacing-top: 1.5rem; }
+h2 { --pico-font-size: 1.3rem;  --pico-typography-spacing-top: 1.75rem; }
+h3 { --pico-font-size: 1.15rem; --pico-typography-spacing-top: 1.5rem; }
+
+/* Cards carry most of the page, and Pico's default padding around them adds up
+   fast when there are seven of them stacked. */
+article { --pico-block-spacing-vertical: .9rem; margin-bottom: 1rem; }
+article > header { --pico-block-spacing-vertical: .6rem; }
+:where(input, select, textarea) { --pico-form-element-spacing-vertical: .55rem; }
+button, [role="button"] { --pico-form-element-spacing-vertical: .55rem; }
+
+/* Long enough to read comfortably, short enough that a status table does not
+   sprawl across an ultrawide. */
+main.container { max-width: 56rem; }
+
+details > summary { margin-bottom: .4rem; }
+.big-code { font-size: .95rem; }

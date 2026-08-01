@@ -55,8 +55,8 @@
   <header><strong>Catalog ingestion</strong>
     <small class="quiet"> checked {{ checked_ago }}</small></header>
   {% if smapi is none %}
-    <p class="quiet">Not checked yet. Reading this means running the ASK CLI once
-      per catalog, which takes a few seconds, so it is not on the ten-second poll.</p>
+    <p class="quiet">Not checked yet. Reading this is one Amazon request per
+      catalog, a few seconds in all, so it is not on the ten-second poll.</p>
   {% elif not smapi.connected %}
     <p><span class="pill idle">not connected</span>
       This bridge is not authorised against your Amazon developer account yet.
@@ -90,7 +90,7 @@
   {% endif %}
   <form hx-post="/setup/status/refresh" hx-target="#live" method="post"
         action="/setup/status/refresh">
-    <button type="submit" class="secondary">Check with the ASK CLI now</button>
+    <button type="submit" class="secondary">Check ingestion now</button>
   </form>
   <footer>
     <small>
