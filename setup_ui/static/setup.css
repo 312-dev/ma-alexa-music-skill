@@ -1,37 +1,112 @@
 /* Ampere admin styles, layered on Pico.
 
-   Organization: tokens, density, the application shell, shared components,
-   then the wizard stepper. Pico stays underneath for form controls, tables
-   and both color schemes; everything here goes through its variables so
-   light and dark keep working without a second set of rules. */
+   The design language comes from the product's own world: analog audio gear.
+   Silkscreened small-cap labels, hairline rules, LED indicators, and an amber
+   backlight, on a dark faceplate or a silver-faced panel depending on the
+   scheme. Pico stays underneath for form controls and tables; everything here
+   goes through its variables so both schemes keep working without a second
+   set of rules.
 
-/* --- tokens ---------------------------------------------------------------- */
+   Organization: fonts, tokens, density, the application shell, shared
+   components, then the wizard stepper. */
+
+/* --- fonts ------------------------------------------------------------------
+   IBM Plex, vendored like every other asset: this page must work with no
+   network beyond itself. */
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 600; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal; font-weight: 700; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+/* --- tokens ----------------------------------------------------------------- */
 
 :root {
-  --amp-accent: #E8A33D;
+  --amp-accent: #E8A33D;   /* the meter backlight */
+  --amp-needle: #D8542F;
+  --amp-sidebar-width: 15rem;
+  --amp-radius: 6px;
+  --pico-font-family-sans-serif: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --pico-font-family-monospace: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  --pico-font-family: var(--pico-font-family-sans-serif);
+  --pico-border-radius: var(--amp-radius);
+}
+
+/* State colors are LEDs: brighter in the dark scheme, inked in the light one,
+   so text set in them keeps contrast in both. Pico scopes its palette under
+   :root:not([data-theme=...]), so overrides must match that specificity or
+   they silently lose. */
+:root:not([data-theme=dark]) {
   --amp-ok: #1b7f4c;
   --amp-warn: #8a6100;
   --amp-bad: #a11d1d;
   --amp-idle: #5b5b5b;
-  --amp-sidebar-width: 15rem;
-  --amp-radius: 8px;
-}
-
-/* Pico scopes its palette under :root:not([data-theme=...]), so overrides
-   must match that specificity or they silently lose. */
-:root:not([data-theme=dark]) {
-  --pico-primary: #b06f10;
+  --amp-rail: #E7E4DE;
+  --amp-hairline: #CFCBC2;
+  /* Silver-faced panel: brushed aluminum, black silkscreen, amber backlight. */
+  --pico-background-color: #EDEBE6;
+  --pico-color: #26211B;
+  --pico-card-background-color: #F7F5F1;
+  --pico-card-sectioning-background-color: #EFEDE8;
+  --pico-muted-color: #6b645a;
+  --pico-muted-border-color: #CFCBC2;
+  --pico-primary: #a3650b;
   --pico-primary-hover: #8d5809;
   --pico-primary-focus: rgba(232, 163, 61, .3);
-  --pico-primary-underline: rgba(176, 111, 16, .5);
-  --pico-primary-background: #b06f10;
-  --pico-primary-border: #b06f10;
+  --pico-primary-underline: rgba(163, 101, 11, .5);
+  --pico-primary-background: #a3650b;
+  --pico-primary-border: #a3650b;
   --pico-primary-hover-background: #8d5809;
   --pico-primary-hover-border: #8d5809;
   --pico-primary-inverse: #fff;
+  /* Pico's stock secondary is a slate blue from no part of this palette;
+     warm graphite belongs on the panel. */
+  --pico-secondary: #57503F;
+  --pico-secondary-hover: #453F32;
+  --pico-secondary-background: #57503F;
+  --pico-secondary-border: #57503F;
+  --pico-secondary-hover-background: #453F32;
+  --pico-secondary-hover-border: #453F32;
+  --pico-secondary-inverse: #fff;
+  --pico-secondary-focus: rgba(87, 80, 63, .25);
+  /* Pico's form wells are slate blue; the panel is warm. */
+  --pico-form-element-background-color: #FBFAF7;
+  --pico-form-element-border-color: #C6C1B8;
+  --pico-form-element-active-border-color: #a3650b;
+  --pico-form-element-focus-color: rgba(232, 163, 61, .35);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme=light]) {
+    --amp-ok: #55b97e;
+    --amp-warn: #E8A33D;
+    --amp-bad: #e0684d;
+    --amp-idle: #8b8579;
+    --amp-rail: #16130F;
+    --amp-hairline: #38322A;
+    /* Dark faceplate: warm near-black, not neutral gray. */
+    --pico-background-color: #1A1713;
+    --pico-color: #E9E4DB;
+    --pico-card-background-color: #211D18;
+    --pico-card-sectioning-background-color: #262119;
+    --pico-muted-color: #9d9689;
+    --pico-muted-border-color: #38322A;
+    --pico-code-background-color: #16130F;
     --pico-primary: #E8A33D;
     --pico-primary-hover: #f2b45a;
     --pico-primary-focus: rgba(232, 163, 61, .25);
@@ -41,7 +116,30 @@
     --pico-primary-hover-background: #f2b45a;
     --pico-primary-hover-border: #f2b45a;
     --pico-primary-inverse: #17130F;
+    --pico-secondary: #A99F8E;
+    --pico-secondary-hover: #BFB6A5;
+    --pico-secondary-background: #4A443A;
+    --pico-secondary-border: #4A443A;
+    --pico-secondary-hover-background: #57503F;
+    --pico-secondary-hover-border: #57503F;
+    --pico-secondary-inverse: #E9E4DB;
+    --pico-secondary-focus: rgba(169, 159, 142, .2);
+    --pico-form-element-background-color: #16130F;
+    --pico-form-element-border-color: #38322A;
+    --pico-form-element-active-border-color: #E8A33D;
+    --pico-form-element-focus-color: rgba(232, 163, 61, .3);
+    --pico-form-element-placeholder-color: #7d7669;
   }
+}
+
+/* The silkscreen: the small, wide-tracked, uppercase label that hi-fi gear
+   prints beside every control. One class, reused everywhere a label labels. */
+.silk, .side .section, .tile .label, .pill {
+  font-family: var(--pico-font-family-sans-serif);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
 }
 
 /* --- density ----------------------------------------------------------------
@@ -57,17 +155,31 @@
 @media (min-width: 1280px) { :root, :host { --pico-font-size: 100%; } }
 @media (min-width: 1536px) { :root, :host { --pico-font-size: 100%; } }
 
-h1 { --pico-font-size: 1.5rem;  --pico-typography-spacing-top: 0; }
-h2 { --pico-font-size: 1.25rem; --pico-typography-spacing-top: 1.5rem; }
-h3 { --pico-font-size: 1.1rem;  --pico-typography-spacing-top: 1.25rem; }
+h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
+h1 { --pico-font-size: 1.45rem; --pico-typography-spacing-top: 0; }
+h2 { --pico-font-size: 1.2rem;  --pico-typography-spacing-top: 1.5rem; }
+h3 { --pico-font-size: 1.05rem; --pico-typography-spacing-top: 1.25rem; }
 
-article { --pico-block-spacing-vertical: .9rem; margin-bottom: 1rem; }
+article {
+  --pico-block-spacing-vertical: .9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--amp-hairline);
+  border-radius: var(--amp-radius);
+  box-shadow: none;
+}
 article > header { --pico-block-spacing-vertical: .6rem; }
 :where(input, select, textarea) { --pico-form-element-spacing-vertical: .55rem; }
-button, [role="button"] { --pico-form-element-spacing-vertical: .55rem; }
+button, [role="button"] {
+  --pico-form-element-spacing-vertical: .55rem;
+  font-weight: 600;
+}
 
 table { font-size: .92rem; }
 td, th { vertical-align: top; }
+thead th {
+  font-size: .66rem; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--pico-muted-color);
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
@@ -100,8 +212,8 @@ body.shell {
 .skip:focus { left: 0; }
 
 aside.side {
-  background: var(--pico-card-background-color);
-  border-right: 1px solid var(--pico-muted-border-color);
+  background: var(--amp-rail);
+  border-right: 1px solid var(--amp-hairline);
   padding: 1.1rem .9rem;
   display: flex; flex-direction: column; gap: .8rem;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
@@ -109,11 +221,12 @@ aside.side {
 
 .side .brand {
   display: flex; align-items: center; gap: .5rem;
-  font-weight: 700; font-size: 1.05rem;
-  padding: 0 .4rem;
+  font-weight: 700; font-size: 1.02rem; letter-spacing: .01em;
+  padding: 0 .4rem .8rem;
+  border-bottom: 1px solid var(--amp-hairline);
 }
 .side .brand .mark, .bare .brand .mark, .brand .mark {
-  width: 1.7rem; height: 1.7rem; flex: none; color: var(--pico-color);
+  width: 1.7rem; height: 1.7rem; flex: none; color: var(--amp-ink);
 }
 
 .side nav { flex: 1; }
@@ -121,21 +234,20 @@ aside.side {
 .side nav li { margin: 0; padding: 0; }
 
 .side .section {
-  font-size: .68rem; font-weight: 700; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--pico-muted-color);
-  padding: .9rem .4rem .3rem;
+  color: var(--pico-muted-color);
+  padding: 1rem .4rem .35rem;
 }
 
 .side nav a {
   display: flex; align-items: center; justify-content: space-between;
   gap: .5rem;
-  padding: .42rem .6rem; margin: .1rem 0;
+  padding: .4rem .6rem; margin: .1rem 0;
   border-radius: var(--amp-radius);
   color: var(--amp-ink); text-decoration: none;
   border-left: 3px solid transparent;
-  font-size: .92rem;
+  font-size: .9rem;
 }
-.side nav a:hover { background: var(--pico-secondary-focus); }
+.side nav a:hover { background: var(--pico-primary-focus); }
 .side nav a[aria-current="page"] {
   border-left-color: var(--amp-accent);
   background: var(--pico-primary-focus);
@@ -146,17 +258,20 @@ aside.side {
 }
 
 .side .badge {
-  font-size: .68rem; font-weight: 700;
-  padding: .05rem .45rem; border-radius: 1rem;
-  background: var(--pico-muted-border-color); color: var(--pico-color);
+  font-family: var(--pico-font-family-monospace);
+  font-size: .68rem; font-weight: 400;
+  padding: .1rem .45rem; border-radius: 3px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--amp-hairline);
+  color: var(--pico-muted-color);
 }
 
 .side footer {
-  border-top: 1px solid var(--pico-muted-border-color);
+  border-top: 1px solid var(--amp-hairline);
   padding-top: .7rem; font-size: .85rem;
 }
 .side footer a { color: var(--pico-muted-color); text-decoration: none; }
-.side footer a:hover { color: var(--pico-color); }
+.side footer a:hover { color: var(--amp-ink); }
 
 main.content {
   padding: 1.6rem 2rem 3rem;
@@ -172,9 +287,10 @@ main.content {
   body.shell { grid-template-columns: 1fr; }
   aside.side {
     position: static; height: auto;
-    border-right: none; border-bottom: 1px solid var(--pico-muted-border-color);
+    border-right: none; border-bottom: 1px solid var(--amp-hairline);
     padding: .7rem .9rem; gap: .4rem;
   }
+  .side .brand { border-bottom: none; padding-bottom: 0; }
   .side nav ul { display: flex; flex-wrap: wrap; gap: .1rem .3rem; }
   .side .section { display: none; }
   .side nav a { border-left: none; border-bottom: 3px solid transparent; border-radius: var(--amp-radius) var(--amp-radius) 0 0; }
@@ -194,8 +310,9 @@ body.bare {
 .bare .card {
   width: 100%; max-width: 27rem;
   background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: calc(var(--amp-radius) * 1.5);
+  border: 1px solid var(--amp-hairline);
+  border-top: 3px solid var(--amp-accent);
+  border-radius: var(--amp-radius);
   padding: 1.6rem 1.7rem;
 }
 .bare .card .brand {
@@ -212,21 +329,25 @@ body.bare {
 
 /* --- shared components ------------------------------------------------------ */
 
+/* Status readouts are LEDs beside silkscreen text, not filled badges: the dot
+   carries the color, the label stays legible ink, and a lit LED gets the one
+   glow this design allows itself. */
 .pill {
-  display: inline-block;
-  padding: .12rem .6rem;
-  border-radius: 1rem;
-  font-size: .72rem;
-  font-weight: 700;
-  letter-spacing: .03em;
-  text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem;
   white-space: nowrap;
-  color: #fff;
+  color: var(--amp-ink);
 }
-.pill.ok   { background: var(--amp-ok); }
-.pill.warn { background: var(--amp-warn); }
-.pill.bad  { background: var(--amp-bad); }
-.pill.idle { background: var(--amp-idle); }
+.pill::before {
+  content: "";
+  width: .5rem; height: .5rem; border-radius: 50%;
+  background: var(--amp-idle);
+  flex: none;
+}
+.pill.ok::before   { background: var(--amp-ok);   box-shadow: 0 0 .35rem var(--amp-ok); }
+.pill.warn::before { background: var(--amp-warn); box-shadow: 0 0 .35rem var(--amp-warn); }
+.pill.bad::before  { background: var(--amp-bad);  box-shadow: 0 0 .35rem var(--amp-bad); }
+.pill.idle::before { background: var(--amp-idle); box-shadow: none; }
+.pill.idle { color: var(--pico-muted-color); }
 
 /* Health tiles: the state of the whole system in one glance, color-coded on
    the left edge so the row can be swept without reading. */
@@ -237,22 +358,22 @@ body.bare {
   margin-bottom: 1.1rem;
 }
 .tile {
-  border: 1px solid var(--pico-muted-border-color);
-  border-left: 4px solid var(--amp-idle);
+  border: 1px solid var(--amp-hairline);
+  border-left: 3px solid var(--amp-idle);
   border-radius: var(--amp-radius);
   background: var(--pico-card-background-color);
   padding: .65rem .8rem;
   margin: 0;
+  box-shadow: none;
 }
 .tile.ok   { border-left-color: var(--amp-ok); }
 .tile.warn { border-left-color: var(--amp-warn); }
 .tile.bad  { border-left-color: var(--amp-bad); }
 .tile .label {
-  font-size: .68rem; font-weight: 700; letter-spacing: .07em;
-  text-transform: uppercase; color: var(--pico-muted-color);
-  margin-bottom: .3rem;
+  color: var(--pico-muted-color);
+  margin-bottom: .35rem;
 }
-.tile .value { font-size: .86rem; margin: 0; }
+.tile .value { font-size: .85rem; margin: 0; }
 .tile .value .pill { margin-right: .3rem; }
 
 .check {
@@ -260,7 +381,7 @@ body.bare {
   gap: .8rem;
   align-items: flex-start;
   padding: .7rem 0;
-  border-bottom: 1px solid var(--pico-muted-border-color);
+  border-bottom: 1px solid var(--amp-hairline);
 }
 .check:last-of-type { border-bottom: none; }
 .check > div { min-width: 0; }
@@ -273,12 +394,13 @@ body.bare {
   font-size: .95rem;
   word-break: break-all;
   background: var(--pico-code-background-color);
-  padding: .4rem .6rem; border-radius: 6px;
+  border: 1px solid var(--amp-hairline);
+  padding: .4rem .6rem; border-radius: var(--amp-radius);
 }
 
 .loud {
   display: block;
-  border-left: .3rem solid var(--amp-bad);
+  border-left: .25rem solid var(--amp-bad);
   padding: .8rem 1rem;
   background: var(--pico-card-sectioning-background-color);
 }
@@ -298,10 +420,12 @@ details > summary { margin-bottom: .4rem; }
 main.container { max-width: 56rem; }
 
 /* --- wizard stepper ---------------------------------------------------------
-   A track stepper: equal columns, one circle per step on a connecting line,
-   label underneath. Eight titled pills can never share a row inside a 52rem
-   column, and wrapped pills read as a cloud rather than a sequence; fixed
-   columns keep the order legible no matter how long the titles are. */
+   The signal chain: one LED node per step on a connecting wire, label
+   underneath. Done nodes are lit green, the current node is backlit amber,
+   and the wire fills in behind them, so the chain itself shows how far the
+   signal has traveled. Eight titled pills can never share a row inside a
+   52rem column; fixed columns keep the order legible no matter how long the
+   titles are. */
 
 nav.steps { margin-bottom: 1.6rem; }
 nav.steps ol {
@@ -312,9 +436,8 @@ nav.steps li {
   flex: 1; min-width: 0; position: relative;
   margin: 0; padding: 0;
 }
-/* Each step draws the track segment back to the one before it, stopping short
-   of both circles. Segments after a done step fill in, so the line itself
-   shows how far the run has progressed. */
+/* Each step draws the wire segment back to the one before it, stopping short
+   of both nodes. Segments after a done step carry signal. */
 nav.steps li + li::before {
   content: "";
   position: absolute;
@@ -322,13 +445,13 @@ nav.steps li + li::before {
   left: calc(-50% + 1.1rem);
   right: calc(50% + 1.1rem);
   height: 2px;
-  background: var(--pico-muted-border-color);
+  background: var(--amp-hairline);
 }
 nav.steps li.done + li::before { background: var(--amp-ok); }
 nav.steps a, nav.steps .locked {
   display: flex; flex-direction: column; align-items: center; gap: .35rem;
   padding: 0 .25rem;
-  font-size: .74rem; line-height: 1.25; text-align: center;
+  font-size: .72rem; line-height: 1.25; text-align: center;
   text-decoration: none;
   color: var(--pico-muted-color);
 }
@@ -337,7 +460,7 @@ nav.steps .num {
   display: grid; place-items: center; flex: none;
   width: 1.6rem; height: 1.6rem; border-radius: 50%;
   background: var(--pico-background-color);
-  border: 2px solid var(--pico-muted-border-color);
+  border: 2px solid var(--amp-hairline);
   /* The theme's own text color is the only pairing that has contrast against
      the muted circle in both modes; the background color was invisible in
      dark. */
@@ -348,17 +471,19 @@ nav.steps li.done a { color: var(--amp-ink); }
 nav.steps li.done .num {
   background: var(--amp-ok); border-color: var(--amp-ok);
   color: #fff; font-size: 0;
+  box-shadow: 0 0 .45rem color-mix(in srgb, var(--amp-ok) 55%, transparent);
 }
 nav.steps li.done .num::after { content: "\2713"; font-size: .78rem; }
 nav.steps li.current a { color: var(--pico-primary); font-weight: 600; }
 nav.steps li.current .num {
-  background: var(--pico-primary); border-color: var(--pico-primary);
-  color: var(--pico-primary-inverse); font-size: .72rem;
+  background: var(--amp-accent); border-color: var(--amp-accent);
+  color: #17130F; font-size: .72rem;
+  box-shadow: 0 0 .5rem color-mix(in srgb, var(--amp-accent) 60%, transparent);
 }
 nav.steps li.current .num::after { content: none; }
 nav.steps .locked { opacity: .6; cursor: default; }
 
-/* Narrow screens: circles and track only. The page heading directly below
+/* Narrow screens: nodes and wire only. The page heading directly below
    already names the current step and its position, so labels add nothing at
    this width except collisions. Hidden accessibly rather than removed, so the
    list still reads in full to a screen reader. */
