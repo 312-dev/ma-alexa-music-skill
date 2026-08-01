@@ -721,6 +721,16 @@ def fake_rest(monkeypatch, **overrides):
     return created
 
 
+def test_the_manifest_category_is_a_valid_enum():
+    """Amazon rejects MUSIC_AND_AUDIO (the display category) with
+    INVALID_ENUM_VALUE; STREAMING_SERVICE is the manifest value."""
+    manifest = smapi.manifest(name="Ampere",
+                              public_base="https://ampere.example.com",
+                              cert_type="Trusted")
+    category = manifest["manifest"]["publishingInformation"]["category"]
+    assert category == "STREAMING_SERVICE"
+
+
 def test_wizard_creates_a_skill_once_the_endpoint_passes(ui, monkeypatch):
     created = fake_rest(monkeypatch)
     store.update(endpoint_ok=True, cert_type="Wildcard")

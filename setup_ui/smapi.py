@@ -319,7 +319,10 @@ def manifest(*, name: str, public_base: str, cert_type: str,
                 "isAvailableWorldwide": False,
                 "distributionCountries": ["US"],
                 "distributionMode": "PRIVATE",
-                "category": "MUSIC_AND_AUDIO",
+                # STREAMING_SERVICE is the valid manifest enum for a music provider;
+                # MUSIC_AND_AUDIO is only the display category and the API
+                # rejects it with INVALID_ENUM_VALUE.
+                "category": "STREAMING_SERVICE",
                 "testingInstructions": (
                     "Private development-stage music skill. Requires account "
                     "linking against the operator's own bridge."
