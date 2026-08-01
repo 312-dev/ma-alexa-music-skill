@@ -2,7 +2,7 @@
 
 Every step of the chain is a bypass on its own if it is skipped, so each one
 gets a test that fails for exactly that reason. The `..` case is the one that
-matters most: an unnormalised path check accepts
+matters most: an unnormalized path check accepts
 `https://s3.amazonaws.com/echo.api/../anything/at/all.pem`, which is a
 host-pinned URL that fetches an unpinned certificate.
 
@@ -139,14 +139,14 @@ def amazon(monkeypatch, ca, good_leaf):
 
 
 def test_good_url_accepted():
-    url, reason = signature.normalise_cert_url(GOOD_URL)
+    url, reason = signature.normalize_cert_url(GOOD_URL)
     assert url == GOOD_URL
     assert reason == "ok"
 
 
 def test_dot_dot_escape_is_rejected():
     """The classic bypass: host is pinned, path is not, so nothing is pinned."""
-    url, reason = signature.normalise_cert_url(
+    url, reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com/echo.api/../attacker/cert.pem"
     )
     assert url is None
@@ -154,22 +154,22 @@ def test_dot_dot_escape_is_rejected():
 
 
 def test_percent_encoded_dot_dot_is_rejected():
-    url, _reason = signature.normalise_cert_url(
+    url, _reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com/echo.api/%2e%2e/attacker/cert.pem"
     )
     assert url is None
 
 
 def test_dot_dot_that_lands_back_inside_is_accepted():
-    """Normalising means resolving, not banning the characters."""
-    url, _reason = signature.normalise_cert_url(
+    """Normalizing means resolving, not banning the characters."""
+    url, _reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com/echo.api/x/../echo-api-cert-7.pem"
     )
     assert url == "https://s3.amazonaws.com/echo.api/echo-api-cert-7.pem"
 
 
 def test_wrong_host_rejected():
-    url, reason = signature.normalise_cert_url(
+    url, reason = signature.normalize_cert_url(
         "https://attacker.example.com/echo.api/cert.pem"
     )
     assert url is None
@@ -177,21 +177,21 @@ def test_wrong_host_rejected():
 
 
 def test_host_lookalike_prefix_rejected():
-    url, _reason = signature.normalise_cert_url(
+    url, _reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com.attacker.example/echo.api/cert.pem"
     )
     assert url is None
 
 
 def test_host_comparison_is_case_insensitive():
-    url, _reason = signature.normalise_cert_url(
+    url, _reason = signature.normalize_cert_url(
         "https://S3.AmazonAWS.com/echo.api/cert.pem"
     )
     assert url == "https://s3.amazonaws.com/echo.api/cert.pem"
 
 
 def test_plain_http_rejected():
-    url, reason = signature.normalise_cert_url(
+    url, reason = signature.normalize_cert_url(
         "http://s3.amazonaws.com/echo.api/cert.pem"
     )
     assert url is None
@@ -199,7 +199,7 @@ def test_plain_http_rejected():
 
 
 def test_non_443_port_rejected():
-    url, reason = signature.normalise_cert_url(
+    url, reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com:8443/echo.api/cert.pem"
     )
     assert url is None
@@ -207,21 +207,21 @@ def test_non_443_port_rejected():
 
 
 def test_explicit_443_accepted():
-    url, _reason = signature.normalise_cert_url(
+    url, _reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com:443/echo.api/cert.pem"
     )
     assert url == "https://s3.amazonaws.com/echo.api/cert.pem"
 
 
 def test_sibling_path_rejected():
-    url, _reason = signature.normalise_cert_url(
+    url, _reason = signature.normalize_cert_url(
         "https://s3.amazonaws.com/echo.api.evil/cert.pem"
     )
     assert url is None
 
 
 def test_missing_url_rejected():
-    url, reason = signature.normalise_cert_url("")
+    url, reason = signature.normalize_cert_url("")
     assert url is None
     assert "missing" in reason
 

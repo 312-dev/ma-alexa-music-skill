@@ -76,7 +76,7 @@ evening looking for one.
 
 That constraint shapes the rest of this guide. The bridge captures every inbound
 directive to disk for exactly this reason, and the
-[troubleshooting page](../troubleshooting/) is organised around what you can
+[troubleshooting page](../troubleshooting/) is organized around what you can
 observe rather than what you would like to inspect.
 
 ## Next

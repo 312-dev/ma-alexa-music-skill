@@ -80,7 +80,7 @@ def test_entity_type_matches_the_entity_kind(client):
         assert out["payload"]["content"]["metadata"]["type"] == expected, entity
 
 
-def test_catalog_hit_is_named_not_labelled_with_its_kind(client, app):
+def test_catalog_hit_is_named_not_labeled_with_its_kind(client, app):
     """Amazon sends entityId with no `value`, so the name comes from the cache.
 
     In production `prewarm_artists` fills this at boot; the old code answered

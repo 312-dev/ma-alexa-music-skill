@@ -113,7 +113,7 @@ current track rather than the whole queue.
 ### Alexa sends `shuffle: false` on every fresh `Initiate`
 
 Which makes "the user turned shuffle off" and "nothing was specified"
-indistinguishable at that point. Any shuffle-by-default behaviour has to be a
+indistinguishable at that point. Any shuffle-by-default behavior has to be a
 policy decision in your code, not a reading of the request.
 
 ## Content and catalog

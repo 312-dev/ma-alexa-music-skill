@@ -130,7 +130,7 @@ the code reads, with defaults.
 | `SIGNING_KEY` | HMAC key for signed asset URLs and OAuth tokens. |
 | `OAUTH_CLIENT_ID` | Client id you will also enter in the skill's account-linking configuration. |
 | `OAUTH_CLIENT_SECRET` | Client secret, same. |
-| `OAUTH_LINK_SECRET` | Passphrase typed once in the Alexa app to authorise linking. |
+| `OAUTH_LINK_SECRET` | Passphrase typed once in the Alexa app to authorize linking. |
 | `ADMIN_TOKEN` | Gates `/setup`, `/captures`, `/diag` and the queue API. Without it the wizard refuses to serve at all rather than serving open. |
 
 :::caution[`PUBLIC_BASE` and `SUBSONIC_URL` have no defaults]

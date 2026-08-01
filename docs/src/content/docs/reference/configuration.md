@@ -24,17 +24,17 @@ Everything is configured by environment variable. There is no config file.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VERIFY_REQUESTS` | `warn` | `off` logs the outcome only, `warn` logs a warning and serves anyway, `on` rejects with 403. An unrecognised value is treated as `warn`, with a warning. |
+| `VERIFY_REQUESTS` | `warn` | `off` logs the outcome only, `warn` logs a warning and serves anyway, `on` rejects with 403. An unrecognized value is treated as `warn`, with a warning. |
 | `SIGNATURE_FETCH_TIMEOUT` | `4` | Seconds allowed to fetch Amazon's certificate chain. |
 
 The policy is read per request rather than at import, so changing it needs a
 restart of the process but not a reload of the module.
 
-## Playback behaviour
+## Playback behavior
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AFTER_CONTENT` | `stop` | What plays once the requested content runs out: `stop`, `artist`, `genre`, `library` or `radio`. Anything but `stop` extends the queue past its last track rather than replacing it, seeded from the request itself. An unrecognised value logs a warning and falls back to `stop`. |
+| `AFTER_CONTENT` | `stop` | What plays once the requested content runs out: `stop`, `artist`, `genre`, `library` or `radio`. Anything but `stop` extends the queue past its last track rather than replacing it, seeded from the request itself. An unrecognized value logs a warning and falls back to `stop`. |
 | `RADIO_ARTISTS` | `12` | How many similar artists a station draws on. |
 | `RADIO_TRACKS_PER_ARTIST` | `12` | Per-artist cap within a station, so a prolific seed artist is not most of their own station. |
 
@@ -60,7 +60,7 @@ requests JSON.
 |---|---|---|
 | `OAUTH_CLIENT_ID` | `ma-alexa` | Client id, matched against what Amazon sends. |
 | `OAUTH_CLIENT_SECRET` | empty | Client secret. Accepted as form parameters or HTTP Basic. |
-| `OAUTH_LINK_SECRET` | empty | Passphrase typed once in the Alexa app to authorise linking. Empty means linking always fails. |
+| `OAUTH_LINK_SECRET` | empty | Passphrase typed once in the Alexa app to authorize linking. Empty means linking always fails. |
 | `OAUTH_ACCESS_TTL` | `2592000` | Access token lifetime in seconds, 30 days. Refresh tokens are fixed at one year. |
 | `SIGNING_KEY` | random per process | Shared with the bridge. Rotating it invalidates every token and forces a relink. |
 
@@ -89,7 +89,7 @@ the container image.
 It also reads the Subsonic variables above. If any catalog id is missing it
 exits with status 2 without uploading anything.
 
-Uploads go through the Skill Management REST API, authorised by the Login with
+Uploads go through the Skill Management REST API, authorized by the Login with
 Amazon credentials the wizard stored. The older CLI form still works if you
 have it:
 
@@ -109,7 +109,7 @@ composer such as Music Assistant.
 |---|---|---|
 | `EXTERNAL_QUEUE_TTL` | `604800` | How long a published queue stays resolvable, in seconds. Seven days. |
 | `EXTERNAL_QUEUE_MAX` | `64` | How many published queues are kept. |
-| `MA_HANDOFF_PHRASE` | `music assistant` | Comma-separated phrases recognised as the handoff. |
+| `MA_HANDOFF_PHRASE` | `music assistant` | Comma-separated phrases recognized as the handoff. |
 
 ## Defaults worth overriding immediately
 

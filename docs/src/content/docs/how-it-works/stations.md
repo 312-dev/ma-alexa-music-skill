@@ -23,7 +23,7 @@ The trailing word is stripped before the search runs, so the lookup is for the
 artist and not for their name plus a word they never said. It is matched
 **trailing only**, so "Radiohead" and "Radio Moscow" are still themselves.
 
-A station is always built from an artist, so if Alexa labelled the request as
+A station is always built from an artist, so if Alexa labeled the request as
 something else the bridge resolves an artist anyway.
 
 ## How the pool is built

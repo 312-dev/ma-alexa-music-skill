@@ -73,7 +73,7 @@ request captures plus what Alexa says out loud.
 - **Captures grow without bound.** There is no rotation on `/data/captures`.
 - **Streams are always transcoded to MP3 at 256 kbit/s.** Whether Alexa would
   accept FLAC on the *music skill* path specifically has not been tested; the
-  behaviour is inherited from a note in the `AudioPlayer` documentation. It
+  behavior is inherited from a note in the `AudioPlayer` documentation. It
   would cost roughly four times the bandwidth if enabled.
 - **Home Assistant often registers each Echo more than once**, and automations
   pointed at the inactive duplicate fail silently. See

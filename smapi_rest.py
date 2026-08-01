@@ -1,4 +1,4 @@
-"""SMAPI over REST, authorised by Login with Amazon.
+"""SMAPI over REST, authorized by Login with Amazon.
 
 This exists because the ASK CLI cannot be driven from a container. `ask` is a
 Node program that stores credentials obtained through an interactive browser

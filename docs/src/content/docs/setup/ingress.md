@@ -20,7 +20,7 @@ because tunnels do not work, but for four specific reasons:
 - **The audio does not traverse a third party.** Every track your household
   plays is a sustained transfer through whatever is in the middle. Keeping it on
   infrastructure you control means no one else is carrying your library.
-- **No terms-of-service grey area.** Sustained non-HTML content through a free
+- **No terms-of-service gray area.** Sustained non-HTML content through a free
   tier of a CDN or tunnel provider is at best undefined and at worst against the
   terms. A reverse proxy on your own host has no such question.
 - **No relay latency against a hard budget.** Amazon's `Initiate` directive has

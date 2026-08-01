@@ -11,7 +11,7 @@ is specific to one music server.
 
 <figure class="ampere-figure">
 <div class="ampere-scroll">
-<svg viewBox="0 0 720 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="flow-title">
+<svg viewBox="0 0 720 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-labeledby="flow-title">
   <title id="flow-title">Echo talks to Amazon, Amazon talks to the Ampere bridge, the bridge talks to your Subsonic server. Amazon separately fetches audio and cover art from signed, expiring URLs on the bridge.</title>
   <defs>
     <marker id="flow-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -64,7 +64,7 @@ play, asks for the next item, tells you shuffle changed. These are latency
 critical: `Initiate` has a 100ms p50 and 400ms p99 budget.
 
 Each one is verified against Amazon's signature headers before it is handled.
-The certificate chain URL is pinned to Amazon's own bucket, normalised before
+The certificate chain URL is pinned to Amazon's own bucket, normalized before
 the prefix is compared, validated once and then cached for an hour, so a
 verified request costs one dict lookup and one RSA verify. The music envelope
 carries no timestamp, so there is no replay window to check. See

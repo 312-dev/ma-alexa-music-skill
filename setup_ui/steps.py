@@ -107,7 +107,7 @@ STEPS: tuple[Step, ...] = (
          "HTTPS from the public internet. This step confirms that it is.",
          "wizard/_endpoint.html", _endpoint_done),
     Step("amazon", "Amazon account",
-         "Authorises this service to manage skills and catalogs on your "
+         "Authorizes this service to manage skills and catalogs on your "
          "behalf, using credentials you register yourself.",
          "wizard/_amazon.html", _amazon_done),
     Step("alias", "Alias",
@@ -124,7 +124,7 @@ STEPS: tuple[Step, ...] = (
          "wizard/_catalogs.html", _catalogs_done),
     Step("upload", "Upload your library",
          "Sends your artists, albums, tracks, playlists and genres to Amazon "
-         "so Alexa can recognise them.",
+         "so Alexa can recognize them.",
          "wizard/_upload.html", _upload_done),
     Step("enable", "Enable the skill",
          "Binds the skill to your account. Without this, Alexa answers from "

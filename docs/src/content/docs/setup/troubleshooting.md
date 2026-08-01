@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: The real failure modes, organised by what you can observe.
+description: The real failure modes, organized by what you can observe.
 sidebar:
   order: 10
 ---

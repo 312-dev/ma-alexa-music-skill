@@ -57,7 +57,7 @@ are behind CGNAT or cannot open ports.
 Free, at the Alexa developer console.
 
 You do **not** need the ASK CLI, Node, or a terminal. The bridge talks to
-Amazon's Skill Management API directly, authorised through Login with Amazon in
+Amazon's Skill Management API directly, authorized through Login with Amazon in
 your browser.
 
 You will register **your own** Login with Amazon security profile during setup,

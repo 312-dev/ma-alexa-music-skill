@@ -76,7 +76,7 @@ Each handled directive logs a line like
 Nothing about the failure will be self-explanatory, because
 [music skills cannot be simulated](../what-this-is/#the-one-thing-to-know-before-you-start)
 and Amazon surfaces very little. Go to
-[Troubleshooting](../troubleshooting/), which is organised by what you can
+[Troubleshooting](../troubleshooting/), which is organized by what you can
 actually observe.
 
 The two most common first-time answers:

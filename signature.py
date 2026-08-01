@@ -36,7 +36,7 @@ Full X.509 path validation is not something to hand-roll, so this uses
 `cryptography`. It is the only dependency in the project beyond flask and
 gunicorn, and it earns its place. If it is not importable this module still
 imports and `verify()` returns a clear "unavailable" reason, so the absence of
-the library degrades to the pre-existing behaviour rather than to a crash on
+the library degrades to the pre-existing behavior rather than to a crash on
 every request.
 """
 
@@ -115,7 +115,7 @@ def policy() -> str:
 # --- certificate chain URL --------------------------------------------------
 
 
-def normalise_cert_url(url: str) -> tuple[str | None, str]:
+def normalize_cert_url(url: str) -> tuple[str | None, str]:
     """Validate SignatureCertChainUrl and return the canonical form.
 
     The path is percent-decoded and `..` segments are resolved *before* the
@@ -123,7 +123,7 @@ def normalise_cert_url(url: str) -> tuple[str | None, str]:
     `https://s3.amazonaws.com/echo.api/../evil/cert.pem` starts with
     `/echo.api/` and fetches something else entirely.
 
-    The normalised URL, not the caller's, is what gets fetched and what keys
+    The normalized URL, not the caller's, is what gets fetched and what keys
     the cache, so a thousand spellings of one path cannot evict the real entry
     a thousand times over.
     """
@@ -317,7 +317,7 @@ def clear_cache() -> None:
 def verify(headers: Mapping[str, str], body: bytes) -> tuple[bool, str]:
     """Is this request signed by Amazon? Returns (ok, reason).
 
-    `body` must be the bytes as received. Re-serialising the parsed JSON
+    `body` must be the bytes as received. Re-serializing the parsed JSON
     produces a different byte string (key order, separators, unicode escaping)
     and the signature will never match.
     """
@@ -337,7 +337,7 @@ def verify(headers: Mapping[str, str], body: bytes) -> tuple[bool, str]:
     if not signature_b64:
         return False, "missing Signature-256 and Signature headers"
 
-    url, reason = normalise_cert_url(lower.get("signaturecertchainurl", ""))
+    url, reason = normalize_cert_url(lower.get("signaturecertchainurl", ""))
     if url is None:
         return False, reason
 

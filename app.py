@@ -257,7 +257,7 @@ def similar_artist_ids(seed_id: str) -> list[str]:
 
 
 def artist_sample(artist_id: str, tracks: list[dict], limit: int) -> list[dict]:
-    """A capped, stable slice of one artist's catalogue.
+    """A capped, stable slice of one artist's catalog.
 
     Seeded on the artist id rather than the queueId, so the pool is identical
     for every queue built from the same contentId. That is what lets the pool
@@ -358,7 +358,7 @@ def match_playlist(query: str) -> dict | None:
 
     Subsonic's search3 does not cover playlists, so this matches against the
     playlist list directly. Speech tends to append the word "playlist", and
-    casing is never reliable, so both are normalised away before comparing.
+    casing is never reliable, so both are normalized away before comparing.
     """
     wanted = re.sub(r"\bplaylists?\b", "", query, flags=re.I).strip().lower()
     if not wanted:
@@ -855,7 +855,7 @@ def handle_get_playable_content(payload: dict) -> Response:
     }.get(wanted or media_type or "", ["playlist", "song", "album", "artist"])
 
     # A station is always built from an artist, so resolve one even if Alexa
-    # labelled the request as something else.
+    # labeled the request as something else.
     if station:
         preference = ["artist", "album", "song"]
 
@@ -1016,7 +1016,7 @@ def handle_initiate(payload: dict) -> Response:
 
 
 def _ref_values(payload: dict, key: str = "currentItemReference") -> dict:
-    """Normalise the two reference shapes Amazon uses.
+    """Normalize the two reference shapes Amazon uses.
 
     GetNextItem / GetPreviousItem / JumpToItem send a bare
     {id, queueId, contentId}. SetShuffle / SetLoop / SetRepeat / GetView /
@@ -1152,7 +1152,7 @@ def handle_jump_to_item(payload: dict) -> Response:
     try:
         target = int(payload.get("targetItemId", ""))
     except (TypeError, ValueError):
-        return error("Alexa.Media", "INVALID_ITEM", "unrecognised target item")
+        return error("Alexa.Media", "INVALID_ITEM", "unrecognized target item")
 
     item = item_at(content_id, target, queue_id)
     if item is None:

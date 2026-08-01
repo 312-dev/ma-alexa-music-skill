@@ -276,7 +276,7 @@ def test_handoff_phrase_is_configurable(monkeypatch):
     assert not queue_api.is_handoff_phrase("music assistant")
 
 
-def test_handoff_name_falls_back_when_unlabelled(queue_client):
+def test_handoff_name_falls_back_when_unlabeled(queue_client):
     publish(queue_client, ["t1"])
     assert queue_api.handoff_name() == "Music Assistant"
     time.sleep(0.01)

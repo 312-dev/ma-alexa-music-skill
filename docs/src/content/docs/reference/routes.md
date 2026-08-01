@@ -11,7 +11,7 @@ description: Every HTTP route the bridge serves, and who is expected to call it.
 | `/` | POST | none | The same handler, for manifests that point at the origin root. |
 
 A body that is not a JSON object is answered with `INVALID_DIRECTIVE` and a 400.
-An unrecognised namespace and name pair is answered with `INVALID_DIRECTIVE` at
+An unrecognized namespace and name pair is answered with `INVALID_DIRECTIVE` at
 payload version 3.0 and logged.
 
 Inbound requests are verified against Amazon's signature headers, under
@@ -19,7 +19,7 @@ Inbound requests are verified against Amazon's signature headers, under
 anyway, `on` rejects with 403. The default is `warn`.
 
 The certificate chain URL is pinned to Amazon's own bucket
-(`s3.amazonaws.com/echo.api/`), percent-decoded and normalised before the prefix
+(`s3.amazonaws.com/echo.api/`), percent-decoded and normalized before the prefix
 is compared, so `/echo.api/../evil/cert.pem` does not pass. The chain is
 validated and cached for an hour, because `Initiate` has a 100ms p50 budget and
 a cache hit has to be one dict lookup and one RSA verify.

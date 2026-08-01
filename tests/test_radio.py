@@ -202,7 +202,7 @@ def test_default_is_stop(app):
     assert app.AFTER_CONTENT == "stop"
 
 
-def test_setting_is_normalised_and_unknown_values_are_refused(app):
+def test_setting_is_normalized_and_unknown_values_are_refused(app):
     for raw, expected in [
         ("radio", "radio"), (" ARTIST ", "artist"), ("genre", "genre"),
         ("library", "library"), ("stop", "stop"), ("", "stop"),

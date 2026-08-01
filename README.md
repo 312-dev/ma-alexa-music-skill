@@ -130,6 +130,6 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirement
 
 No test touches the network; every Subsonic call is mocked.
 
-## Licence
+## License
 
 MIT. See [LICENSE](LICENSE).

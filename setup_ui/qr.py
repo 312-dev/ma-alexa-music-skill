@@ -355,7 +355,7 @@ def encode(text: str, ecl: str = "M") -> list[list[int]] | None:
 def svg(matrix: list[list[int]], quiet: int = 4) -> str:
     """Inline SVG for a matrix.
 
-    Colours are pinned rather than inherited: a QR inverted by a dark-mode rule
+    Colors are pinned rather than inherited: a QR inverted by a dark-mode rule
     will not scan on most phones.
     """
     size = len(matrix) + quiet * 2

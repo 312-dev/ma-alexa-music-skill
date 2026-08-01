@@ -125,7 +125,7 @@ _NOISE = re.compile(r"\b(playlist|station|radio|queue)s?\b", re.I)
 _PUNCT = re.compile(r"[^\w\s]+")
 
 
-def _normalise(text: str) -> str:
+def _normalize(text: str) -> str:
     """Flatten spoken text enough to compare it against a configured phrase.
 
     Speech arrives with inconsistent casing, an occasional trailing "playlist",
@@ -139,8 +139,8 @@ def _normalise(text: str) -> str:
 
 def is_handoff_phrase(text: str) -> bool:
     """True when this utterance is asking for the published Music Assistant queue."""
-    spoken = _normalise(text)
-    return bool(spoken) and any(spoken == _normalise(p) for p in HANDOFF_PHRASES)
+    spoken = _normalize(text)
+    return bool(spoken) and any(spoken == _normalize(p) for p in HANDOFF_PHRASES)
 
 
 def handoff_content_id() -> str | None:

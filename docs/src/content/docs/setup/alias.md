@@ -16,8 +16,8 @@ provider.** You upload every artist, album, track, playlist and genre in your
 library so that speech resolves to real entity ids. That same catalog is then
 competing with your alias word for the same utterance.
 
-So the failure mode is not "Alexa did not recognise the alias". It is "Alexa
-recognised something else you own, and played that instead".
+So the failure mode is not "Alexa did not recognize the alias". It is "Alexa
+recognized something else you own, and played that instead".
 
 ## Three real collisions
 

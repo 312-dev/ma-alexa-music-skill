@@ -7,7 +7,7 @@ Directives arrive as JSON on `POST /music` (and `POST /`). The bridge dispatches
 on `(header.namespace, header.name)` and writes every request to the capture
 directory before handling it.
 
-An unrecognised pair is answered with `INVALID_DIRECTIVE` at payload version
+An unrecognized pair is answered with `INVALID_DIRECTIVE` at payload version
 3.0, and logged.
 
 ## The routing table
@@ -54,7 +54,7 @@ instead left the Alexa app never registering the new shuffle or loop state.
 
 ## Two reference shapes
 
-Amazon sends the queue reference two different ways, and the bridge normalises
+Amazon sends the queue reference two different ways, and the bridge normalizes
 both:
 
 ```json
@@ -94,7 +94,7 @@ This is where a spoken phrase becomes a contentId. In order:
 
 Playlists are matched against the playlist list directly rather than through
 search, because Subsonic's `search3` does not cover playlists. The trailing word
-"playlist" is normalised away first, and casing is ignored.
+"playlist" is normalized away first, and casing is ignored.
 
 An empty query with no criteria, which is what `play <alias>` on its own
 produces, plays the library at random.

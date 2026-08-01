@@ -12,7 +12,7 @@ result is inspectable rather than magic.
 ## Connect to Amazon
 
 Skill and catalog operations go through Amazon's Skill Management API, which
-needs your authorisation. **You register your own credentials for this.** There
+needs your authorization. **You register your own credentials for this.** There
 is no shared OAuth application, and nothing is hosted by this project, so your
 refresh token is minted against your own client and stays in your own `/data`.
 
