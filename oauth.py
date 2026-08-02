@@ -2,9 +2,10 @@
 
 Alexa requires account linking before a music skill becomes usable, even for a
 private single-user skill. Rather than run a database, every artifact (code,
-access token, refresh token) is a self-contained HMAC-signed blob. That keeps
-this correct across multiple gunicorn workers, which an in-memory store would
-not be.
+access token, refresh token) is a self-contained HMAC-signed blob. Nothing is
+stored, so nothing has to be kept in sync or survive a restart: a token is
+valid because it verifies, not because it was found in a table. An in-memory
+store would drop every linked account on each deploy.
 """
 
 from __future__ import annotations

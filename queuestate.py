@@ -6,13 +6,17 @@ SetShuffle/SetLoop as fire-and-forget directives whose only acknowledgement is
 an empty generic response, and expects the very next GetNextItem to reflect the
 change.
 
-State is written to disk rather than held in memory because gunicorn runs
-multiple workers, and a dict would give each worker its own divergent view.
-Writes are atomic (tmp + rename) so a concurrent read never sees a partial file.
+State is written to disk rather than held in memory so that a restart does not
+silently un-shuffle a queue that is still playing. The container runs a single
+gunicorn worker, so a dict would in fact be coherent today, but it would tie a
+listener's queue to one process's lifetime for no gain. Writes are atomic
+(tmp + rename) so a concurrent read never sees a partial file, which also keeps
+this correct for anyone who does run more than one worker.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
@@ -87,29 +91,22 @@ def update(queue_id: str, **changes) -> dict:
             json.dump(state, handle)
         os.replace(tmp, target)
     except Exception:
-        with contextlib_suppress():
+        # Suppressing Exception rather than everything: a cleanup failure must
+        # not mask the original error, but a KeyboardInterrupt arriving here
+        # still has to get out.
+        with contextlib.suppress(Exception):
             os.unlink(tmp)
         raise
-    with contextlib_suppress():
+    with contextlib.suppress(Exception):
         prune()  # housekeeping must never fail a directive
     return state
-
-
-class contextlib_suppress:
-    """Tiny stand-in so a cleanup failure never masks the original error."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return True
 
 
 def order(ids: list[str], queue_id: str, shuffled: bool) -> list[str]:
     """Return the play order for a queue.
 
-    The shuffle is seeded with the queueId so every worker, and every later
-    request, derives the identical order. A plain random.shuffle would reorder
+    The shuffle is seeded with the queueId, so every later request derives the
+    identical order without storing it. A plain random.shuffle would reorder
     the queue on each GetNextItem and playback would wander.
     """
     if not shuffled or len(ids) < 2:

@@ -163,10 +163,10 @@ def _skeleton(version: int) -> tuple[list[list[int]], list[list[bool]]]:
                 grid[r][c] = 1 if i % 2 == 0 else 0
                 fixed[r][c] = True
 
-    centres = _ALIGN[version]
+    centers = _ALIGN[version]
     corners = {(6, 6), (6, size - 7), (size - 7, 6)}
-    for row in centres:
-        for col in centres:
+    for row in centers:
+        for col in centers:
             # Alignment patterns do overlap the timing lines, so the only
             # exclusion is the three finder corners.
             if (row, col) in corners:

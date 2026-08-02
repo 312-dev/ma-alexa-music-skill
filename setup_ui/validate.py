@@ -426,7 +426,7 @@ def compare(candidate: str, name: str) -> tuple[str, str] | None:
         return "high", "the same name"
     if alias in other.split() or other in alias.split():
         return "high", "one is a whole word of the other"
-    # Spacing is not a defence. "jukebox" lost to the track "Juke Box Hero",
+    # Spacing is not a defense. "jukebox" lost to the track "Juke Box Hero",
     # which shares no whole word with it and is not a substring of it either.
     tight_alias, tight_other = alias.replace(" ", ""), other.replace(" ", "")
     if tight_alias == tight_other:
