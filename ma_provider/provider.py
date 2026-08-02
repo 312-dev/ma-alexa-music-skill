@@ -325,20 +325,24 @@ class AmperePlayer(Player):
         """Whether this group is holding its members right now.
 
         MA asks this to decide whether the member Echoes are owned by the group
-        and should therefore be hidden from the player picker. Alexa forms and
-        dissolves the cluster itself, so the honest answer is whatever the group
-        is currently doing: playing or paused means it has them, anything else
-        means they are free to be picked individually.
+        and should therefore be hidden from the player picker.
+
+        Playing only, deliberately, against MA's own guidance that a group
+        should also hold its members while paused and through an idle grace
+        period. That guidance assumes a group the user can put down. Music
+        Assistant offers this player no stop control, only pause, so a group
+        that held its members while paused held them until something else
+        started playing, and in practice that meant every Echo in the group was
+        permanently missing from the picker. Releasing on pause is the lesser
+        wrong: the worst it costs is a member being individually selectable
+        while the group happens to be paused.
 
         A non-group player must always answer False, which is what the base
         class does and why this only overrides for a group.
         """
         if not self.is_group:
             return False
-        return self._attr_playback_state in (
-            PlaybackState.PLAYING,
-            PlaybackState.PAUSED,
-        )
+        return self._attr_playback_state == PlaybackState.PLAYING
 
     @property
     def api(self) -> AlexaAPI:
@@ -414,8 +418,20 @@ class AmperePlayer(Player):
         queue_id = media.source_id
         if not queue_id:
             return 0
-        queue = self.mass.player_queues.get(queue_id)
-        item = getattr(queue, "current_item", None)
+        queues = self.mass.player_queues
+
+        # The item being played, addressed by id, not queue.current_item.
+        # play_index loads the item first and assigns current_item afterwards,
+        # so reading the queue's idea of "current" during a seek can still
+        # return the previous item, whose streamdetails carry no offset. That
+        # read as zero and republished the queue from the top, which is a seek
+        # that restarts the song: observed 2026-08-02, one seek in a run of
+        # them, the rest correct.
+        item = queues.get_item(queue_id, media.queue_item_id)
+        if item is None:
+            queue = queues.get(queue_id)
+            item = getattr(queue, "current_item", None)
+
         details = getattr(item, "streamdetails", None)
         # Seconds as a float on MA's side, milliseconds as an int on Alexa's.
         return max(0, int(float(getattr(details, "seek_position", 0) or 0) * 1000))

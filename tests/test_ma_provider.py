@@ -218,10 +218,10 @@ def _bare_player(provider):
 
 def _queue_with_seek(seconds):
     """The chain play_media walks: queue -> current_item -> streamdetails."""
-    queue = SimpleNamespace(
-        current_item=SimpleNamespace(
-            streamdetails=SimpleNamespace(seek_position=seconds)))
-    return SimpleNamespace(get=lambda _qid: queue)
+    item = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=seconds))
+    queue = SimpleNamespace(current_item=item)
+    return SimpleNamespace(get=lambda _qid: queue,
+                           get_item=lambda _qid, _item_id: item)
 
 
 def test_seek_is_supported_by_republishing_with_an_offset():
@@ -247,7 +247,7 @@ def test_the_seek_position_is_read_off_the_queue_in_milliseconds():
     provider = _provider_module()
 
     player = _bare_player(provider)
-    media = SimpleNamespace(source_id="q1")
+    media = SimpleNamespace(source_id="q1", queue_item_id="i1")
     player.mass = SimpleNamespace(player_queues=_queue_with_seek(90.5))
 
     assert player._seek_offset_ms(media) == 90500
@@ -260,7 +260,8 @@ def test_a_plain_play_publishes_no_offset():
     player = _bare_player(provider)
     player.mass = SimpleNamespace(player_queues=_queue_with_seek(0.0))
 
-    assert player._seek_offset_ms(SimpleNamespace(source_id="q1")) == 0
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id="q1", queue_item_id="i1")) == 0
 
 
 def test_a_queue_that_has_gone_is_not_an_offset_and_not_a_crash():
@@ -268,11 +269,13 @@ def test_a_queue_that_has_gone_is_not_an_offset_and_not_a_crash():
     provider = _provider_module()
 
     player = _bare_player(provider)
-    player.mass = SimpleNamespace(
-        player_queues=SimpleNamespace(get=lambda _qid: None))
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get=lambda _qid: None, get_item=lambda _qid, _item_id: None))
 
-    assert player._seek_offset_ms(SimpleNamespace(source_id="q1")) == 0
-    assert player._seek_offset_ms(SimpleNamespace(source_id=None)) == 0
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id="q1", queue_item_id="i1")) == 0
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id=None, queue_item_id=None)) == 0
 
 
 def test_player_does_not_require_flow_mode():
@@ -652,12 +655,18 @@ def test_a_playing_group_does_hold_its_members():
     assert _group(provider, PlaybackState.PLAYING).is_active_session is True
 
 
-def test_a_paused_group_still_holds_its_members():
-    """Pausing a group is not releasing it; the cluster is still formed."""
+def test_a_paused_group_releases_its_members():
+    """Against MA's guidance, and on purpose.
+
+    MA says a group should hold its members while paused. That assumes a group
+    the user can put down; MA offers this player no stop control, only pause.
+    A group that held its members while paused held them until something else
+    started, so every Echo in it was permanently missing from the picker.
+    """
     provider = _provider_module()
     from music_assistant_models.enums import PlaybackState
 
-    assert _group(provider, PlaybackState.PAUSED).is_active_session is True
+    assert _group(provider, PlaybackState.PAUSED).is_active_session is False
 
 
 def test_a_plain_echo_never_holds_anything():
@@ -699,3 +708,38 @@ def test_a_group_does_not_claim_to_be_powered():
 
     assert _constructed(provider, is_group=True)._attr_powered is None
     assert _constructed(provider, is_group=False)._attr_powered is True
+
+
+def test_the_seeked_item_is_addressed_by_id_not_by_the_queue_position():
+    """play_index assigns current_item after loading, so a seek can race it.
+
+    Observed 2026-08-02: one seek in a run of them published no offset and
+    restarted the song, because the queue's idea of "current" was still the
+    previous item, whose streamdetails carry no seek.
+    """
+    provider = _provider_module()
+
+    stale = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=0.0))
+    seeked = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=74.0))
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get_item=lambda _qid, item_id: seeked if item_id == "wanted" else None,
+        get=lambda _qid: SimpleNamespace(current_item=stale)))
+
+    media = SimpleNamespace(source_id="q1", queue_item_id="wanted")
+    assert player._seek_offset_ms(media) == 74000
+
+
+def test_an_unknown_item_id_falls_back_to_the_queue_position():
+    """Better the queue's guess than no offset at all."""
+    provider = _provider_module()
+
+    current = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=30.0))
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get_item=lambda _qid, _item_id: None,
+        get=lambda _qid: SimpleNamespace(current_item=current)))
+
+    media = SimpleNamespace(source_id="q1", queue_item_id="gone")
+    assert player._seek_offset_ms(media) == 30000
