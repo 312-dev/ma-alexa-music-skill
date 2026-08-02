@@ -557,6 +557,14 @@ class AmperePlayer(Player):
             self._attr_elapsed_time_last_updated = time.time()
 
         if not title:
+            # Every state bug tonight has come from guessing what Alexa sent.
+            # A poll with a state but no title leaves current_media pointing at
+            # whatever played last, so if that is happening it needs to be
+            # visible rather than inferred. Keys only: the payload carries
+            # tokens.
+            self.logger.info(
+                "%s reported %s with no track title; keys were %s",
+                self.name, state or "<no state>", sorted(info))
             return
 
         # Alexa omits fields it does not feel like sending, and omits more of
@@ -567,6 +575,9 @@ class AmperePlayer(Player):
         # said nothing about, so the last known value stands.
         previous = self._attr_current_media
         same_track = previous is not None and previous.title == title
+        if not same_track:
+            self.logger.info("%s is now playing %r (was %r)", self.name, title,
+                             getattr(previous, "title", None))
 
         def kept(value: Any, attribute: str) -> Any:
             if value not in (None, ""):

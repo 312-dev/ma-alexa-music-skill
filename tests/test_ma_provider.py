@@ -219,6 +219,9 @@ def _bare_player(provider):
     controller and standing that up would make these tests of MA.
     """
     player = provider.AmperePlayer.__new__(provider.AmperePlayer)
+    player.logger = SimpleNamespace(
+        warning=lambda *a, **k: None, info=lambda *a, **k: None,
+        debug=lambda *a, **k: None)
     player.is_group = False
     player._player_id = "p1"
     player._attr_current_media = None
@@ -547,9 +550,6 @@ def _pollable(provider, state_api):
     player = _bare_player(provider)
     player._attr_available = True
     player._attr_name = "Bathroom Echo"
-    player.logger = SimpleNamespace(
-        warning=lambda *a, **k: None, info=lambda *a, **k: None,
-        debug=lambda *a, **k: None)
     player.update_state = lambda *a, **k: None
     type(player).state_api = property(lambda self: state_api)
     return player

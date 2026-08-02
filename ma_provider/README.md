@@ -52,7 +52,7 @@ Docker:
 docker run -d --name music-assistant \
   --network host \
   -v /opt/music-assistant/data:/data \
-  -v /opt/ampere/ma_provider:/app/music_assistant/providers/ampere:ro \
+  -v /opt/ampere/ma_provider:/app/venv/lib/python3.14/site-packages/music_assistant/providers/ampere:ro \
   ghcr.io/music-assistant/server:2.9.10
 ```
 
@@ -79,7 +79,7 @@ services:
     network_mode: host
     volumes:
       - /opt/music-assistant/data:/data
-      - /opt/ampere/ma_provider:/app/music_assistant/providers/ampere:ro
+      - /opt/ampere/ma_provider:/app/venv/lib/python3.14/site-packages/music_assistant/providers/ampere:ro
 ```
 
 Nomad:
@@ -90,7 +90,7 @@ config {
   network_mode = "host"
   volumes = [
     "/opt/music-assistant/data:/data",
-    "/opt/ampere/ma_provider:/app/music_assistant/providers/ampere:ro",
+    "/opt/ampere/ma_provider:/app/venv/lib/python3.14/site-packages/music_assistant/providers/ampere:ro",
   ]
 }
 ```
@@ -98,12 +98,21 @@ config {
 Home Assistant OS add-on users cannot do this: the add-on container is not
 yours to mount into. Run MA as a container.
 
-Verify the path inside the image before blaming the provider, because a mount
-onto a path that does not exist creates it silently and MA then finds a
-provider directory it never scanned:
+**Check the path in the image you are running.** In the 2.9.10 container the
+package lives under the venv, not at `/app/music_assistant`, and the path is
+Python-version specific. Find it rather than copying it:
 
 ```sh
-docker exec music-assistant ls /app/music_assistant/providers/ampere
+docker exec music-assistant python -c \
+  "import music_assistant, os; print(os.path.dirname(music_assistant.__file__))"
+```
+
+Verify the mount landed before blaming the provider, because a mount onto a
+path that does not exist creates it silently and MA then finds a provider
+directory it never scanned:
+
+```sh
+docker exec music-assistant ls /app/venv/lib/python3.14/site-packages/music_assistant/providers/ampere
 ```
 
 `alexapy` is installed by MA itself from the manifest's `requirements` on first
