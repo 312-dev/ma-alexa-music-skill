@@ -18,11 +18,51 @@ import os
 import pathlib
 import random
 import tempfile
+import time
 
 STATE_DIR = pathlib.Path(os.environ.get("QUEUE_STATE_DIR", "/data/queuestate"))
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT: dict[str, object] = {"shuffle": False, "loop": False, "repeat": "OFF"}
+
+# A queue's state outlives the queue: nothing tells this service that Alexa has
+# finished with one, so without an expiry every queue ever started leaves a file
+# behind permanently. A week is far longer than any real session, including one
+# left paused overnight, and losing a state file only means the queue reverts to
+# unshuffled defaults rather than breaking.
+STATE_TTL = float(os.environ.get("QUEUE_STATE_TTL", str(7 * 86400)))
+_PRUNE_INTERVAL = 600.0
+_last_prune = 0.0
+
+
+def prune(now: float | None = None) -> int:
+    """Drop state files no live queue can still be using. Returns how many.
+
+    Self-throttled: this is called from the write path, which runs on every
+    shuffle and loop directive, and a directory walk per directive would be
+    wasteful for something whose deadline is a week away.
+    """
+    global _last_prune
+    stamp = time.time() if now is None else now
+    if stamp - _last_prune < _PRUNE_INTERVAL:
+        return 0
+    _last_prune = stamp
+    dropped = 0
+    try:
+        entries = list(os.scandir(STATE_DIR))
+    except OSError:
+        return 0
+    for entry in entries:
+        if not entry.name.endswith(".json"):
+            continue
+        try:
+            if stamp - entry.stat().st_mtime < STATE_TTL:
+                continue
+            os.unlink(entry.path)
+            dropped += 1
+        except OSError:
+            pass
+    return dropped
 
 
 def _path(queue_id: str) -> pathlib.Path:
@@ -50,6 +90,8 @@ def update(queue_id: str, **changes) -> dict:
         with contextlib_suppress():
             os.unlink(tmp)
         raise
+    with contextlib_suppress():
+        prune()  # housekeeping must never fail a directive
     return state
 
 

@@ -73,6 +73,29 @@ setup_ui.views.start_auto_sync()
 
 app = Flask(__name__)
 
+_BOOTED = False
+
+
+@app.before_request
+def _boot_once():
+    """One-time capture hygiene, deferred off import.
+
+    Doing this at import would run it in every process that imports app for a
+    test collection or a CLI, and would slow the first health check behind a
+    directory rewrite. Once per process, on the first request, is enough.
+    """
+    global _BOOTED
+    if _BOOTED:
+        return None
+    _BOOTED = True
+    try:
+        scrubbed, dropped = scrub_captures(), prune_captures()
+        if scrubbed or dropped:
+            logger.info("captures: redacted %d, pruned %d", scrubbed, dropped)
+    except Exception:
+        logger.warning("capture hygiene failed", exc_info=True)
+    return None
+
 # Queue handoff for Music Assistant, which composes queues this service has no
 # other way to name. Registered here rather than defined inline so the wire
 # contract lives next to the provider that speaks it.
@@ -597,9 +620,114 @@ def error(namespace: str, err_type: str, message: str, version: str = "1.0") -> 
     )
 
 
+# Keys whose values are credentials rather than telemetry. Every music
+# directive carries the linked account's OAuth token and an Alexa API token,
+# and a capture is written to disk in the clear and rendered into the Logs
+# screen, so the value must never be stored. The key itself stays, replaced
+# with a marker: "was this request signed" is read off the presence of the
+# signature headers, and a redaction that removed them would break that.
+# SignatureCertChainUrl is deliberately absent, being a public URL that is
+# genuinely useful when verification is being debugged.
+SECRET_KEYS = frozenset({
+    "accesstoken", "apiaccesstoken", "authorization", "refreshtoken",
+    "bearertoken", "signature", "signature-256",
+})
+REDACTED = "<redacted>"
+
+# How many captures to keep. Nothing bounded this directory before: one file
+# per directive, forever. It is read by the status panel on a ten second poll
+# and scanned by the scheduler every minute, so unbounded growth was a slow
+# leak in disk and in both of those hot paths.
+CAPTURE_KEEP = int(os.environ.get("CAPTURE_KEEP", "400"))
+
+_CAPTURES_WRITTEN = 0
+_PRUNE_EVERY = 20
+
+
+def redact(value):
+    """Strip credential values out of a capture, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: REDACTED if key.lower() in SECRET_KEYS else redact(inner)
+            for key, inner in value.items()
+        }
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
+
+def prune_captures(keep: int | None = None) -> int:
+    """Delete the oldest captures past the cap. Returns how many went.
+
+    Filenames lead with a UTC timestamp, so lexical order is chronological
+    order and no stat call is needed to sort them.
+    """
+    limit = CAPTURE_KEEP if keep is None else keep
+    if limit <= 0:
+        return 0
+    try:
+        names = sorted(p.name for p in LOG_DIR.glob("*.json"))
+    except OSError:
+        return 0
+    dropped = 0
+    for name in names[:max(0, len(names) - limit)]:
+        try:
+            (LOG_DIR / name).unlink()
+            dropped += 1
+        except OSError:
+            pass
+    return dropped
+
+
+def scrub_captures() -> int:
+    """Redact credentials out of captures written before redaction existed.
+
+    Runs once at boot. Without it the tokens already on disk would sit there
+    until the prune cap eventually walked past them, which on a quiet install
+    could be months.
+    """
+    changed = 0
+    try:
+        paths = list(LOG_DIR.glob("*.json"))
+    except OSError:
+        return 0
+    for path in paths:
+        try:
+            raw = path.read_text()
+            if not any(key in raw.lower() for key in SECRET_KEYS):
+                continue
+            body = json.loads(raw)
+        except (OSError, ValueError):
+            continue
+        cleaned = redact(body)
+        if cleaned == body:
+            continue
+        try:
+            path.write_text(json.dumps(cleaned, indent=2))
+            changed += 1
+        except OSError:
+            pass
+    return changed
+
+
 def capture(payload: object, kind: str) -> None:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-    (LOG_DIR / f"{stamp}-{kind}.json").write_text(json.dumps(payload, indent=2))
+    """Record a directive and the answer we gave it. Never fatal.
+
+    This runs after the response has already been built. A failure here, and
+    a full disk is the realistic one, used to escape into the request handler
+    and turn a correct answer into a 500, so losing telemetry took playback
+    down with it. Telemetry is never worth a directive.
+    """
+    global _CAPTURES_WRITTEN
+    try:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        (LOG_DIR / f"{stamp}-{kind}.json").write_text(
+            json.dumps(redact(payload), indent=2))
+        _CAPTURES_WRITTEN += 1
+        if _CAPTURES_WRITTEN % _PRUNE_EVERY == 0:
+            prune_captures()
+    except Exception:
+        logger.warning("capture failed for %s", kind, exc_info=True)
 
 
 # --------------------------------------------------------------------------
