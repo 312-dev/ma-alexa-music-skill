@@ -221,27 +221,40 @@ def soon(delta: float) -> str:
     return f"in {seconds // 86400} days"
 
 
-def last_requests(limit: int = 4) -> list[dict]:
-    """The newest inbound captures.
+def recent_captures(limit: int) -> list[tuple[str, float]]:
+    """The newest captures, newest first, as (filename, when it arrived).
 
-    Sorted by mtime and truncated before anything is parsed. The capture
-    directory grows without bound on a busy day, and this panel refreshes every
-    ten seconds, so reading all of it would be the most expensive thing the
-    process does.
+    Ordered by filename rather than mtime. The name leads with the arrival
+    stamp, so lexical order is chronological order, the sort costs no syscalls
+    at all, and the ordering survives scrub_captures rewriting a file in place
+    to strip credentials. Truncated before any read, because the panels built
+    on this refresh every ten seconds.
     """
     try:
-        entries = [e for e in os.scandir(log_dir()) if e.name.endswith(".json")]
+        names = sorted((e.name for e in os.scandir(log_dir())
+                        if e.name.endswith(".json")), reverse=True)
     except OSError:
         return []
-    entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+    rows = []
+    for name in names[:limit]:
+        when = _capture_time(name)
+        if when is None:
+            try:  # not a name this service wrote; fall back rather than hide it
+                when = (log_dir() / name).stat().st_mtime
+            except OSError:
+                continue
+        rows.append((name, when))
+    return rows
 
+
+def last_requests(limit: int = 4) -> list[dict]:
+    """The newest inbound captures, parsed enough to describe them."""
     out = []
-    for entry in entries[:limit]:
-        stamp = entry.stat().st_mtime
-        directive = entry.name.split("-", 1)[-1][:-5] or entry.name
+    for name, stamp in recent_captures(limit):
+        directive = name.split("-", 1)[-1][:-5] or name
         signed = None
         try:
-            body = json.loads(pathlib.Path(entry.path).read_text())
+            body = json.loads((log_dir() / name).read_text())
             header = (body.get("body") or {}).get("header") or {}
             if header.get("namespace"):
                 directive = f"{header['namespace']}.{header.get('name', '?')}"
@@ -265,17 +278,15 @@ def _logs_context() -> dict:
     rows = [dict(r, ago=ago(r["at"])) for r in records]
     captures = []
     try:
-        entries = [e for e in os.scandir(log_dir()) if e.name.endswith(".json")]
-        entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
-        for entry in entries[:8]:
+        for name, when in recent_captures(8):
             try:
-                body = json.loads(pathlib.Path(entry.path).read_text())
+                body = json.loads((log_dir() / name).read_text())
             except (OSError, ValueError):
                 body = {}
             headers = body.get("headers") or {}
             captures.append({
-                "name": entry.name,
-                "ago": ago(entry.stat().st_mtime),
+                "name": name,
+                "ago": ago(when),
                 "signed": any(k.lower().startswith("signature")
                               for k in headers),
                 "pretty": json.dumps(

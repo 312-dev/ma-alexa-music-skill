@@ -135,6 +135,32 @@ def test_a_boot_scrub_does_not_scramble_the_history(isolated):
     assert health["miss"] is True, "the unanswered newest search is still a miss"
 
 
+def test_the_status_and_logs_panels_survive_a_scrub_too(isolated):
+    """Same defect, same fix: what the operator is shown must stay ordered.
+
+    "Did anything arrive recently" is the question the Status panel exists to
+    answer, so reporting a rewritten capture as having just arrived is the one
+    wrong answer it must not give.
+    """
+    scrub = time.time()
+    write_capture(isolated, 9000, SEARCH, mtime=scrub)
+    write_capture(isolated, 30, INITIATE, mtime=scrub)
+
+    newest = views.last_requests(limit=4)
+    assert newest[0]["directive"].endswith("Initiate"), "newest first"
+    assert "seconds ago" in newest[0]["ago"]
+    assert "hours ago" in newest[1]["ago"], "the old one is still old"
+
+    names = [name for name, _ in views.recent_captures(4)]
+    assert names == sorted(names, reverse=True)
+
+
+def test_recent_captures_keeps_a_foreign_filename(isolated):
+    """A stray file should still be listed, not silently dropped."""
+    (isolated / "captures" / "stray.json").write_text("{}")
+    assert [n for n, _ in views.recent_captures(4)] == ["stray.json"]
+
+
 def test_capture_time_reads_the_name_not_the_clock(isolated):
     """Ordering comes from the filename, so it survives anything touching mtime."""
     assert views._capture_time("20260802T153412987654-x.json") == pytest.approx(
