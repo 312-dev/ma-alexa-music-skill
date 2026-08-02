@@ -56,6 +56,20 @@ docker run -d --name music-assistant \
   ghcr.io/music-assistant/server:2.9.10
 ```
 
+### Restarting the container is not enough to load new provider code
+
+Measured 2026-08-02, the hard way, after several changes were reported as
+deployed and were not running. Rewriting the bind-mounted files and restarting
+Music Assistant re-registers the players and logs `Loaded player provider
+Ampere`, which looks exactly like a successful reload and is not one.
+
+**Disable the provider in Music Assistant and re-enable it.** That is what
+actually re-reads the code.
+
+Anything measured against a restart alone is measuring the previous build, so
+when a fix appears to have no effect, cycle the provider before believing the
+result. This one cost several rounds of chasing a bug that was already fixed.
+
 Compose:
 
 ```yaml

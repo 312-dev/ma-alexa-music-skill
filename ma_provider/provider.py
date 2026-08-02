@@ -522,11 +522,21 @@ class AmperePlayer(Player):
             return
 
         state = (info.get("state") or "").upper()
+        before = self._attr_playback_state
         self._attr_playback_state = {
             "PLAYING": PlaybackState.PLAYING,
             "PAUSED": PlaybackState.PAUSED,
             "IDLE": PlaybackState.IDLE,
         }.get(state, PlaybackState.IDLE)
+
+        # Logged because a group's state decides whether its members are hidden
+        # from the player picker, and every theory about what a cluster device
+        # reports has so far been wrong. On change only: this runs per poll.
+        if self.is_group and self._attr_playback_state != before:
+            self.logger.info(
+                "group %s reports %r -> %s (holding members: %s)",
+                self.name, state or "<no state>", self._attr_playback_state,
+                self.is_active_session)
 
         volume = info.get("volume") or {}
         if isinstance(volume.get("volume"), int):
