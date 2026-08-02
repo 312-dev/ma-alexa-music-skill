@@ -1359,12 +1359,15 @@ def _binding_stale(state: dict, now: float) -> bool:
     return now - (state.get("enabled_at") or 0) >= BINDING_KEEPALIVE_HOURS * 3600
 
 
-def _recent_traffic(max_age: float = 600.0) -> bool:
-    """Has the music endpoint seen a request in the last few minutes.
+def _recent_traffic(max_age: float = 1200.0) -> bool:
+    """Has the music endpoint seen a request in the last twenty minutes.
 
     The keep-alive must never yank the enablement out from under an active
     playback session; the capture directory's newest mtime is the cheapest
-    honest signal that one exists."""
+    honest signal that one exists. Twenty minutes, not ten: a session only
+    produces a directive per track boundary, and a long ambient track or a
+    short pause must not read as idle. Staleness tolerance is hours, so the
+    wider window costs nothing."""
     try:
         newest = max((e.stat().st_mtime for e in os.scandir(log_dir())
                       if e.name.endswith(".json")), default=0.0)
