@@ -872,11 +872,30 @@ def _binding_now(state: dict, force: bool = False) -> dict:
 
 
 def _cycle_enablement(skill_id: str) -> dict:
-    """Delete then set the enablement. The delete is required, not redundant:
-    a catalog upload unbinds the provider slot without reporting it, and only
-    a full cycle rebinds it."""
+    """Re-provision the skill, then delete and set the enablement.
+
+    The manifest re-put is the load-bearing part, found the hard way: a
+    freshly created skill can sit half provisioned on Amazon's side, where
+    searches route and resolve but Playback.Initiate never comes, and no
+    amount of enablement cycling alone fixes it. Re-putting the manifest
+    forces the music-provider provisioning to run again; cycling on top of
+    that fresh registration is what actually restored playback. The delete
+    before set stays required as well: a catalog upload unbinds the provider
+    slot without reporting it."""
     if not skill_id:
         return {"ok": False, "detail": "No skill id yet."}
+    nudged = ""
+    try:
+        smapi_rest.update_manifest(
+            skill_id, smapi_rest.get_manifest(skill_id))
+        problem = _manifest_verdict(skill_id, tries=10, delay=1.5)
+        if problem:
+            return {"ok": False,
+                    "detail": f"Re-provisioning failed: {problem}"}
+        nudged = "Re-provisioned and enabled"
+    except Exception:
+        # The plain cycle is still worth doing when the nudge cannot run.
+        nudged = "Enabled (re-provisioning was skipped)"
     try:
         try:
             smapi_rest.delete_enablement(skill_id)
@@ -886,7 +905,7 @@ def _cycle_enablement(skill_id: str) -> dict:
     except Exception as exc:
         return {"ok": False, "detail": _rest_error(exc)}
     store.update(enabled=True, enabled_at=time.time())
-    return {"ok": True, "detail": "Enabled for development."}
+    return {"ok": True, "detail": f"{nudged} for development."}
 
 
 @bp.post("/skill/enable")

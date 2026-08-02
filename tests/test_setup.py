@@ -1345,6 +1345,10 @@ def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
     monkeypatch.setattr(smapi_rest, "set_enablement",
                         lambda sid: calls.append(("set", sid)))
     monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: True)
+    monkeypatch.setattr(smapi_rest, "get_manifest",
+                        lambda sid: {"manifest": {"apis": {}}})
+    monkeypatch.setattr(smapi_rest, "update_manifest",
+                        lambda sid, m: calls.append(("manifest", sid)))
 
     body = ui.get("/setup/status").data.decode()
     assert "Cycle enablement" in body
@@ -1352,9 +1356,11 @@ def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
 
     body = ui.post("/setup/skill/enable",
                    headers={"HX-Request": "true"}).data.decode()
-    assert ("del", "amzn1.ask.skill.a") in calls
+    # The re-provision nudge runs first, then the delete-set cycle.
+    assert calls.index(("manifest", "amzn1.ask.skill.a")) \
+        < calls.index(("del", "amzn1.ask.skill.a"))
     assert ("set", "amzn1.ask.skill.a") in calls
-    assert "Enabled for development." in body
+    assert "Re-provisioned and enabled for development." in body
     assert store.load()["enabled_at"]
 
     monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: False)

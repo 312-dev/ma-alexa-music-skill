@@ -303,6 +303,10 @@ def skill_status(skill_id: str) -> dict:
     return call("GET", f"/v1/skills/{skill_id}/status?resource=manifest")
 
 
+def get_manifest(skill_id: str, stage: str = "development") -> dict:
+    return call("GET", f"/v1/skills/{skill_id}/stages/{stage}/manifest")
+
+
 def update_manifest(skill_id: str, manifest: dict, stage: str = "development") -> None:
     call("PUT", f"/v1/skills/{skill_id}/stages/{stage}/manifest",
          {"manifest": _unwrap(manifest)})

@@ -36,7 +36,10 @@
   </div>
   <small class="quiet">
     Cycle after every catalog upload: uploading silently unbinds the skill
-    from the provider slot. Disable parks the skill without deleting anything.
+    from the provider slot. Cycling also re-puts the manifest, forcing Amazon
+    to re-run its provider provisioning, which unsticks a skill whose
+    searches resolve but whose playback never starts. Disable parks the skill
+    without deleting anything.
   </small>
   {% endif %}
 </article>
