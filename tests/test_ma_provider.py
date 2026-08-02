@@ -28,7 +28,7 @@ def test_command_for_a_single_device():
     """No target: the Echo the command is delivered to plays it."""
     assert (
         utterance.custom_command("ampere", "music assistant")
-        == "ask ampere to play music assistant"
+        == "ask ampere to play the music assistant playlist"
     )
 
 
@@ -36,7 +36,7 @@ def test_command_for_a_group():
     """A group has no dialog interface, so the group is named in the sentence."""
     assert (
         utterance.custom_command("ampere", "music assistant", "whole apartment")
-        == "ask ampere to play music assistant on whole apartment"
+        == "ask ampere to play the music assistant playlist on whole apartment"
     )
 
 
@@ -66,10 +66,10 @@ def test_accented_names_survive():
 
 def test_empty_target_is_dropped_not_left_dangling():
     assert utterance.custom_command("ampere", "music assistant", "***") == (
-        "ask ampere to play music assistant"
+        "ask ampere to play the music assistant playlist"
     )
     assert utterance.custom_command("ampere", "music assistant", None) == (
-        "ask ampere to play music assistant"
+        "ask ampere to play the music assistant playlist"
     )
 
 
@@ -368,3 +368,54 @@ def test_only_the_first_handoff_phrase_is_spoken():
     assert provider._first_phrase("", "fallback") == "fallback"
     assert provider._first_phrase(None, "fallback") == "fallback"
     assert provider._first_phrase(",, ,", "fallback") == "fallback"
+
+
+def test_the_utterance_names_the_kind_of_thing_it_wants():
+    """Without the noun, Alexa does not resolve the label at all.
+
+    Measured against an ingested catalog entity: "play handoff" came back
+    "I'm not quite sure how to help you with that" and never reached the
+    skill; "play the handoff playlist" resolved to playlist.ma-handoff and
+    played. Naming the kind is what picks the catalog to resolve against.
+    """
+    text = utterance.custom_command("ampere", "handoff")
+    assert text == "ask ampere to play the handoff playlist"
+    assert " playlist" in text
+
+    grouped = utterance.custom_command("ampere", "handoff", "whole apartment")
+    # The target has to stay at the end, or `on ...` is read as part of the name.
+    assert grouped.endswith("on whole apartment")
+    assert "playlist on whole apartment" in grouped
+
+
+def test_a_group_is_started_from_outside_itself():
+    """Telling a member to play on its own group silently never initiates.
+
+    Measured against real hardware: the content resolves, Initiate is never
+    sent, and Alexa says only "having trouble playing that". The identical
+    utterance from a device outside the group started four Echoes at once.
+    """
+    provider = _provider_module()
+
+    speakers = {"MEM_A": object(), "MEM_B": object(), "OUTSIDER": object()}
+    members = ["MEM_A", "MEM_B"]
+
+    assert provider._group_speaker(speakers, members) == "OUTSIDER"
+
+
+def test_the_group_speaker_choice_is_stable():
+    """Discovery runs repeatedly; a different speaker each time is a race."""
+    provider = _provider_module()
+
+    speakers = {"Z": object(), "A": object(), "M": object(), "MEM": object()}
+    members = ["MEM"]
+    assert provider._group_speaker(speakers, members) == "A"
+    assert provider._group_speaker(dict(reversed(list(speakers.items()))), members) == "A"
+
+
+def test_a_group_containing_every_speaker_falls_back_to_a_member():
+    """Better a player that cannot start than no player at all; the caller warns."""
+    provider = _provider_module()
+
+    speakers = {"MEM_A": object(), "MEM_B": object()}
+    assert provider._group_speaker(speakers, ["MEM_A", "MEM_B"]) == "MEM_A"

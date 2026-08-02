@@ -13,6 +13,16 @@ sent from software is typed, so `ask` is the only form.
 The consolation is that `ask <alias> to ...` names the skill outright, which
 leaves a trailing `on <device or group>` free to be read as a target. That is
 how one sentence both picks the provider and distributes to four speakers.
+
+The label is asked for as `the <label> playlist`, and the noun is not
+decoration. Measured 2026-08-02 against an ingested catalog entity:
+`ask ampere to play handoff` came back "I'm not quite sure how to help you
+with that" and never reached the skill, while `ask ampere to play the handoff
+playlist` resolved to `playlist.ma-handoff` and played. Naming the kind is
+what tells Alexa which catalog to resolve against; without it a one word
+label competes with every artist and track instead. The bridge strips
+`playlist` back off when it compares the words, so the phrase itself does not
+have to contain it.
 """
 
 from __future__ import annotations
@@ -54,7 +64,7 @@ def custom_command(alias: str, label: str, target: str | None = None) -> str:
     if not clean_label:
         raise ValueError("label is empty after sanitizing")
 
-    parts = ["ask", clean_alias, "to play", clean_label]
+    parts = ["ask", clean_alias, "to play the", clean_label, "playlist"]
     clean_target = sanitize(target or "")
     if clean_target:
         parts += ["on", clean_target]
