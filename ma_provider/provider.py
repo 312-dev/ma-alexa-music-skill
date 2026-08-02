@@ -30,6 +30,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+import aiohttp
 from alexapy import AlexaAPI, AlexaLogin
 from music_assistant_models.config_entries import ConfigEntry
 from music_assistant_models.enums import (
@@ -117,10 +118,13 @@ async def get_config_entries(
             key=CONF_BRIDGE_URL,
             type=ConfigEntryType.STRING,
             label="Ampere bridge URL",
-            default_value="https://alexa-music.example.com",
+            # No default. A placeholder default is worse than none here: it
+            # saves as a real value, so a field left untouched looks configured
+            # and fails later at publish time with a confusing error.
             description=(
-                "The public HTTPS base of the Ampere bridge. This is the same "
-                "host the Alexa skill endpoint points at."
+                "Base URL of the Ampere bridge, for example "
+                "http://127.0.0.1:5056 when it runs beside this container, or "
+                "the public HTTPS host the Alexa skill endpoint points at."
             ),
             required=True,
         ),
@@ -572,14 +576,57 @@ class AmpereAlexaProvider(PlayerProvider):
             os.path.join(cookie_dir, f"alexa_media.{username}.pickle")
         ]
 
-        await self.login.login()
+        # The cookies must be handed to login() explicitly. Setting _cookiefile
+        # alone is not enough: alexapy's own loader cannot read the jar aiohttp
+        # writes, so login() would fall through to a fresh credential login,
+        # which Amazon refuses without the interactive proxy flow. Passing the
+        # restored jar is what makes a saved session actually get reused.
+        await self.login.login(cookies=await _load_cookie(self.login))
         if not await self.login.test_loggedin():
-            raise LoginFailed("Amazon rejected the login")
+            # alexapy records why in .status (captcha_required,
+            # securitycode_required, login_failed, ...). Losing that turns
+            # every auth problem into the same unactionable sentence.
+            detail = ", ".join(
+                f"{key}={value}"
+                for key, value in sorted((self.login.status or {}).items())
+                if value and key not in ("password", "securitycode")
+            )
+            raise LoginFailed(
+                f"Amazon rejected the login ({detail or 'no reason reported'}). "
+                "A saved session from the upstream alexa provider is reused "
+                "when present; otherwise set it up there first."
+            )
 
 
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+
+async def _load_cookie(login: AlexaLogin) -> dict[str, str] | None:
+    """Restore a saved Alexa session into the login's own aiohttp session.
+
+    aiohttp writes its cookie jar as JSON, which alexapy's `load_cookie()`
+    cannot parse, so the jar is loaded with aiohttp's own loader and the
+    cookies handed back for `login(cookies=...)`. Loading it into the session
+    jar rather than only returning it preserves the cookie domains, which the
+    auth flow needs. Follows the upstream alexa provider deliberately: both
+    read the same file, so whichever logs in first serves the other.
+    """
+    cookiefile = login._cookiefile[0] if login._cookiefile else None
+    if not cookiefile or not await asyncio.to_thread(os.path.exists, cookiefile):
+        return None
+    if login._session is None:
+        login._create_session()
+    jar = login._session.cookie_jar
+    if not isinstance(jar, aiohttp.CookieJar):
+        return None
+    try:
+        await asyncio.to_thread(jar.load, cookiefile)
+    except (OSError, EOFError, TypeError, ValueError, AttributeError):
+        return None  # a corrupt jar is a fresh login, not a crash
+    cookies = login._get_cookies_from_session()
+    return cast("dict[str, str]", cookies) if cookies else None
 
 
 def _is_group(raw: dict[str, Any]) -> bool:

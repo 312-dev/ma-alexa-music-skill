@@ -17,9 +17,11 @@ pages.
 
 ## Why a Music Skill
 
-Alexa custom skills using the `AudioPlayer` interface cannot target multi-room
-music groups, and a Whole Home Audio group has no dialog interface, so it cannot
-be spoken or written to directly.
+A Whole Home Audio group has no dialog interface, so it cannot be spoken or
+written to directly. Custom skills using the `AudioPlayer` interface are also
+widely held not to reach multi-room groups, though that is Amazon's
+documentation rather than something tested here, and see below for how far that
+documentation can be trusted on this subject.
 
 Amazon's separate Music, Radio, and Podcast Skill API gives you Alexa's native
 player instead: a real queue, per-track metadata and art, working transport

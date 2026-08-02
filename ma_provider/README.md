@@ -30,7 +30,12 @@ The bridge, reachable over HTTPS from the MA container, with:
 Every track you want to play must exist on the Subsonic server the bridge
 streams from. A Spotify or Tidal item sitting in the MA queue has no id the
 bridge can resolve and is dropped from the published list, with a warning in
-MA's log. This is a hard limit of what the bridge can serve, not an oversight.
+MA's log.
+
+This is a limit of the current implementation rather than of the design. The
+bridge's proxy takes any URL; only the id resolution assumes Subsonic. Serving
+MA's own sources is planned, and the work it needs is set out in
+[PLAN.md](PLAN.md).
 
 ## Deployment: bind-mount
 

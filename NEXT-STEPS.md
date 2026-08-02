@@ -69,5 +69,23 @@ to achieve what an interval here already does.
       plain Subsonic 1.16.1 with no OpenSubsonic extensions, so the others named
       in the README should work. Nobody has confirmed one.
 - [ ] **Pitch the MA provider upstream** to @alams154 as a `playback_mode`
-      branch on the existing `alexa` provider rather than a competing one. See
-      `ma_provider/README.md`.
+      branch on the existing `alexa` provider rather than a competing one.
+      Phase 6 of [ma_provider/PLAN.md](ma_provider/PLAN.md).
+
+## Music Assistant as the source
+
+Ampere streams from Subsonic today. Making it stream from Music Assistant
+instead would cover every source MA has, which is the one axis where the
+upstream `alexa` provider currently wins.
+
+The design record, the verified findings behind it, the per-provider behavior
+matrix and a six-phase plan are in
+[ma_provider/PLAN.md](ma_provider/PLAN.md). The short version:
+
+- **Phase 1 is free** and has not been done: play one track through the
+  provider that is already registered and working.
+- **Phase 2 is a timeboxed spike** that answers empirically what phase 3 has to
+  handle.
+- **Phase 3 is the expensive one**, because MA serves realtime non-seekable
+  streams on session-scoped URLs and Alexa is a pull consumer that sends byte
+  ranges hours later.
