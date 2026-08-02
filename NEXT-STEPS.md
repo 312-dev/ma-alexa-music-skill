@@ -63,38 +63,28 @@ resolution misses and the raw text survives.
 - **Does `GetDisplayableContent` actually surface browse shelves?** It is
   implemented and tested, but has never been observed working on a device.
 
-## Wire Home Assistant to the pre-emptive cycle
+## Tune the keep-alive interval from measured misses
 
-`POST /setup/skill/cycle` is live and answers JSON. It exists so the caller
-that knows when the high-stakes moment is (the wake alarm) can guarantee a
-fresh binding at that instant, which neither the keep-alive clock nor the miss
-detector can promise.
+`BINDING_KEEPALIVE_HOURS = 4` is a guess extrapolated from two observations:
+the binding worked sixteen minutes after a cycle and was dead by seven hours.
+`_binding_health` now measures the thing that guess was standing in for, so
+after a few days of real traffic the interval can be set from data.
 
-Two user steps, because neither can be done from here: the HA connector has no
-managed-YAML tool, and the admin token is not readable by design.
+Each time `_reactive_check` fires, the gap between `enabled_at` and the miss is
+the observed survival time. Lower `BINDING_KEEPALIVE_HOURS` until the detector
+stops firing. Cost is only more enablement cycles, which use a different rate
+pool from catalog uploads and are nowhere near it: four hours is six a day,
+two hours is twelve.
 
-1. `secrets.yaml`: `ampere_admin_token: <the ADMIN_TOKEN value>`
-2. `configuration.yaml`, alongside the existing `rest_command:` block:
+This is deliberately kept inside the bridge. An earlier design had Home
+Assistant POST to `/setup/skill/cycle` a couple of minutes before the wake
+alarm, on the grounds that only HA knows when that is. It works, but it makes a
+home automation system responsible for this service's own housekeeping, and it
+needs the admin token copied into a second system. Tuning an interval here
+achieves the same thing with no coupling at all.
 
-```yaml
-rest_command:
-  ampere_cycle:
-    url: http://100.85.183.28:5056/setup/skill/cycle
-    method: post
-    headers:
-      X-Admin-Token: !secret ampere_admin_token
-    timeout: 45
-```
-
-Over the tailnet, so it never crosses the public origin. Then an automation
-firing at `input_datetime.wake_up_alarm` minus two minutes calls
-`rest_command.ampere_cycle`. The cycle takes up to about fifteen seconds.
-
-The alternative, if the YAML is not worth it: add `setup.skill_cycle` to
-`_OPEN` in `setup_ui/views.py` so the route needs no token and relies on the
-existing network gate alone. Cycling is idempotent and non-destructive, so the
-blast radius is "someone already on the tailnet can re-enable your own skill",
-but it does widen the admin plane and should be a deliberate choice.
+`POST /setup/skill/cycle` and `GET /setup/skill/health` stay, as a scripted
+cycle and a monitoring probe respectively. Neither expects a particular caller.
 
 ## Smaller
 
