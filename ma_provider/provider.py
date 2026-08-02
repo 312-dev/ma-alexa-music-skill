@@ -105,6 +105,12 @@ PLAYER_FEATURES: set[PlayerFeature] = {
 # heartbeat.
 POLL_INTERVAL = 10
 
+# How many consecutive failed state polls before a player is hidden. One is too
+# few: an Echo that is asleep or briefly unreachable still plays when something
+# is sent to it, and hiding it takes a working speaker off the list. Three
+# misses at POLL_INTERVAL is half a minute of silence, which is a real fault.
+POLL_FAILURES_BEFORE_UNAVAILABLE = 3
+
 
 async def setup(
     mass: MusicAssistant, manifest: ProviderManifest, config: ProviderConfig
@@ -226,6 +232,11 @@ class AlexaDevice:
 
 class AmperePlayer(Player):
     """An Echo device, or an Alexa speaker group, as a Music Assistant player."""
+
+    # Class level so a player is never one attribute short of pollable,
+    # whichever way it was constructed. refresh() deliberately leaves it alone:
+    # a rediscovery pass is not evidence about whether the device is answering.
+    _poll_failures = 0
 
     def __init__(
         self,
@@ -431,17 +442,42 @@ class AmperePlayer(Player):
         try:
             raw = await self.state_api.get_state()
         except Exception as err:  # alexapy raises a wide range of its own
-            self.logger.debug("state poll failed for %s: %s", self.player_id, err)
-            self._attr_available = False
-            self.update_state()
+            self._poll_failures += 1
+            # Warning, not debug. Nothing runs this at debug level, so the old
+            # line meant a player could vanish from Music Assistant with no
+            # trace anywhere of why.
+            if self._poll_failures == 1:
+                self.logger.warning(
+                    "state poll failed for %s (%s); keeping it available for "
+                    "now", self.name, err)
+            if self._poll_failures >= POLL_FAILURES_BEFORE_UNAVAILABLE:
+                # An Echo that did not answer is usually an Echo that is asleep
+                # or briefly unreachable, and playing to one wakes it. Hiding it
+                # on a single miss removes a speaker the user can still use.
+                if self._attr_available:
+                    self.logger.warning(
+                        "%s has failed %d state polls in a row, marking it "
+                        "unavailable", self.name, self._poll_failures)
+                self._attr_available = False
+                self.update_state()
             return
 
+        if self._poll_failures:
+            self.logger.info("%s is answering state polls again", self.name)
+        self._poll_failures = 0
         self._attr_available = True
         info = (raw or {}).get("playerInfo") or {}
         self._apply_state(info)
         self.update_state()
 
     def _apply_state(self, info: dict[str, Any]) -> None:
+        # An empty payload is not a claim that nothing is playing. A speaker
+        # group answers with no playerInfo at all while its members are audibly
+        # playing, and reading that as IDLE is what stopped the position
+        # advancing and left MA's optimistic guess as the only clock.
+        if not info:
+            return
+
         state = (info.get("state") or "").upper()
         self._attr_playback_state = {
             "PLAYING": PlaybackState.PLAYING,

@@ -510,3 +510,110 @@ def test_a_group_of_only_incapable_members_still_gets_a_speaker():
 
     speakers = {"OUT_B": object(), "OUT_A": object()}
     assert provider._group_speaker(speakers, ["NO_SKILL"]) == "OUT_A"
+
+
+# --- polling ----------------------------------------------------------------
+
+
+class _FailingStateApi:
+    """A state endpoint that raises, the way an asleep Echo's does."""
+
+    def __init__(self, raises=True, payload=None):
+        self.raises = raises
+        self.payload = payload
+        self.calls = 0
+
+    async def get_state(self):
+        self.calls += 1
+        if self.raises:
+            raise RuntimeError("device did not answer")
+        return self.payload
+
+
+def _pollable(provider, state_api):
+    player = _bare_player(provider)
+    player._attr_available = True
+    player._attr_name = "Bathroom Echo"
+    player.logger = SimpleNamespace(
+        warning=lambda *a, **k: None, info=lambda *a, **k: None,
+        debug=lambda *a, **k: None)
+    player.update_state = lambda *a, **k: None
+    type(player).state_api = property(lambda self: state_api)
+    return player
+
+
+def test_one_failed_poll_does_not_hide_a_speaker():
+    """The bug that lost two Echoes from the player list.
+
+    An Echo that is asleep or briefly unreachable still plays when something is
+    sent to it, and playing to one wakes it. Hiding it on a single miss takes a
+    working speaker off the list, and the old code did that while logging the
+    reason at debug, which nothing runs at.
+    """
+    provider = _provider_module()
+    player = _pollable(provider, _FailingStateApi())
+    try:
+        asyncio.run(player.poll())
+        assert player._attr_available is True
+        assert player._poll_failures == 1
+    finally:
+        del type(player).state_api
+
+
+def test_a_sustained_outage_does_hide_it():
+    provider = _provider_module()
+    player = _pollable(provider, _FailingStateApi())
+    try:
+        for _ in range(provider.POLL_FAILURES_BEFORE_UNAVAILABLE):
+            asyncio.run(player.poll())
+        assert player._attr_available is False
+    finally:
+        del type(player).state_api
+
+
+def test_answering_again_clears_the_failure_run():
+    provider = _provider_module()
+    api = _FailingStateApi()
+    player = _pollable(provider, api)
+    try:
+        asyncio.run(player.poll())
+        asyncio.run(player.poll())
+        api.raises = False
+        api.payload = {"playerInfo": {"state": "PLAYING"}}
+        asyncio.run(player.poll())
+        assert player._poll_failures == 0
+        assert player._attr_available is True
+    finally:
+        del type(player).state_api
+
+
+def test_an_empty_payload_is_not_a_claim_that_nothing_is_playing():
+    """A speaker group answers with no playerInfo while its members play.
+
+    Reading that as IDLE is what stopped the position advancing and left MA's
+    optimistic guess as the only clock.
+    """
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player._attr_playback_state = PlaybackState.PLAYING
+    player._attr_elapsed_time = 42
+
+    player._apply_state({})
+
+    assert player._attr_playback_state == PlaybackState.PLAYING
+    assert player._attr_elapsed_time == 42
+
+
+def test_a_real_idle_report_is_still_believed():
+    """Only an empty payload is ignored, not a payload that says IDLE."""
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player._attr_playback_state = PlaybackState.PLAYING
+
+    player._apply_state({"state": "IDLE"})
+
+    assert player._attr_playback_state == PlaybackState.IDLE
