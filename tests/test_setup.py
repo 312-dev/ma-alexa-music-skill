@@ -1349,6 +1349,26 @@ def test_autosync_due_respects_interval_and_floor(ui):
                                  "catalogs": {"a": "c"}}, now) is False
 
 
+def test_binding_keepalive_staleness_and_traffic_guard(ui, monkeypatch, tmp_path):
+    now = 1_000_000.0
+    assert views._binding_stale(
+        {"skill_id": "s", "enabled": True, "enabled_at": now - 3600}, now) is False
+    assert views._binding_stale(
+        {"skill_id": "s", "enabled": True, "enabled_at": now - 5 * 3600}, now) is True
+    assert views._binding_stale({"skill_id": "s", "enabled": False}, now) is False
+    assert views._binding_stale({"enabled": True}, now) is False
+
+    # No captures: no active session, keep-alive may run.
+    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "empty"))
+    assert views._recent_traffic() is False
+    # A fresh capture marks an active session, which must block the cycle.
+    live = tmp_path / "live"
+    live.mkdir()
+    (live / "x-Alexa.Audio.PlayQueue.GetNextItem.json").write_text("{}")
+    monkeypatch.setenv("CAPTURE_DIR", str(live))
+    assert views._recent_traffic() is True
+
+
 def test_scheduled_runs_ignore_the_parting_beacon(ui):
     views._UPLOAD.update(running=True, cancel=False, auto=True)
     ui.post("/setup/wizard/upload/stop")

@@ -1346,26 +1346,59 @@ def _auto_sync_due(state: dict, now: float) -> bool:
     return now - (state.get("last_auto_sync") or 0) >= hours * 3600
 
 
+# How stale the enablement may get before the keep-alive re-cycles it. Found
+# empirically 2026-08-02: the provider-slot binding decays within hours of a
+# re-provision cycle (worked 16 minutes after one, dead by 7 hours), leaving
+# searches resolving and playback silently never starting.
+BINDING_KEEPALIVE_HOURS = 4
+
+
+def _binding_stale(state: dict, now: float) -> bool:
+    if not (state.get("skill_id") and state.get("enabled")):
+        return False
+    return now - (state.get("enabled_at") or 0) >= BINDING_KEEPALIVE_HOURS * 3600
+
+
+def _recent_traffic(max_age: float = 600.0) -> bool:
+    """Has the music endpoint seen a request in the last few minutes.
+
+    The keep-alive must never yank the enablement out from under an active
+    playback session; the capture directory's newest mtime is the cheapest
+    honest signal that one exists."""
+    try:
+        newest = max((e.stat().st_mtime for e in os.scandir(log_dir())
+                      if e.name.endswith(".json")), default=0.0)
+    except OSError:
+        return False
+    return time.time() - newest < max_age
+
+
 def _auto_sync_loop() -> None:
+    import logging
+    log = logging.getLogger("ma-music-skill")
     while True:
         time.sleep(60)
         try:
             state = store.load()
-            if not _auto_sync_due(state, time.time()):
+            now = time.time()
+            if _auto_sync_due(state, now) and smapi_rest.connected():
+                with _UPLOAD_LOCK:
+                    if _UPLOAD["running"]:
+                        continue  # a manual run owns the job; try next minute
+                    _UPLOAD.update(running=True, phase="starting (scheduled)",
+                                   percent=None, results=None, message="",
+                                   done_at=0.0, cancel=False, auto=True)
+                store.update(last_auto_sync=now)
+                _run_upload(auto=True)
                 continue
-            if not smapi_rest.connected():
-                continue
-            with _UPLOAD_LOCK:
-                if _UPLOAD["running"]:
-                    continue  # a manual run owns the job; try next minute
-                _UPLOAD.update(running=True, phase="starting (scheduled)",
-                               percent=None, results=None, message="",
-                               done_at=0.0, cancel=False, auto=True)
-            store.update(last_auto_sync=time.time())
-            _run_upload(auto=True)
+            if (_binding_stale(state, now) and not _recent_traffic()
+                    and smapi_rest.connected()):
+                log.info("binding keep-alive: last cycle is stale, re-cycling")
+                outcome = _cycle_enablement(
+                    state.get("skill_id") or os.environ.get("SKILL_ID", ""))
+                log.info("binding keep-alive: %s", outcome["detail"])
         except Exception:
-            import logging
-            logging.getLogger("ma-music-skill").exception("auto sync failed")
+            log.exception("auto sync failed")
 
 
 _AUTO_SYNC_STARTED = threading.Event()
