@@ -13,6 +13,7 @@ import logging
 import os
 import pathlib
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -1364,8 +1365,23 @@ def test_binding_keepalive_staleness_and_traffic_guard(ui, monkeypatch, tmp_path
     # A fresh capture marks an active session, which must block the cycle.
     live = tmp_path / "live"
     live.mkdir()
-    (live / "x-Alexa.Audio.PlayQueue.GetNextItem.json").write_text("{}")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    (live / f"{stamp}-Alexa.Audio.PlayQueue.GetNextItem.json").write_text("{}")
     monkeypatch.setenv("CAPTURE_DIR", str(live))
+    assert views._recent_traffic() is True
+    # An old one does not.
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "20200101T000000000000-Alexa.Audio.PlayQueue.GetNextItem.json"
+     ).write_text("{}")
+    monkeypatch.setenv("CAPTURE_DIR", str(old))
+    assert views._recent_traffic() is False
+    # A name this service did not write falls back to mtime, which errs
+    # towards "playing" rather than risking a cycle mid-song.
+    odd = tmp_path / "odd"
+    odd.mkdir()
+    (odd / "stray.json").write_text("{}")
+    monkeypatch.setenv("CAPTURE_DIR", str(odd))
     assert views._recent_traffic() is True
 
 

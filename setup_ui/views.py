@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import pathlib
+import re
 import socket
 import threading
 import time
@@ -116,7 +117,7 @@ def secure_cookie() -> bool:
     nothing at all: the redirect fired, the cookie evaporated on the way, and
     the next request arrived unauthenticated and rendered the form again.
 
-    X-Forwarded-Proto is honoured only from a trusted proxy, for the same
+    X-Forwarded-Proto is honored only from a trusted proxy, for the same
     reason X-Forwarded-For is: otherwise the client decides its own answer.
     """
     if request.is_secure:
@@ -418,12 +419,17 @@ def scheduler_context(state: dict) -> dict:
         hours = max(AUTO_SYNC_MIN_HOURS, hours)
         sync_due = (state.get("last_auto_sync") or 0) + hours * 3600
     keepalive_due = 0.0
-    if state.get("enabled") and state.get("skill_id"):
+    if (BINDING_KEEPALIVE_HOURS > 0
+            and state.get("enabled") and state.get("skill_id")):
         keepalive_due = ((state.get("enabled_at") or 0)
                          + BINDING_KEEPALIVE_HOURS * 3600)
+    # Whole hours are the normal case and "4 hours" reads better than "4.0".
+    keepalive_hours = (int(BINDING_KEEPALIVE_HOURS)
+                       if BINDING_KEEPALIVE_HOURS == int(BINDING_KEEPALIVE_HOURS)
+                       else BINDING_KEEPALIVE_HOURS)
     return {
         "sync_hours": hours,
-        "keepalive_hours": BINDING_KEEPALIVE_HOURS,
+        "keepalive_hours": keepalive_hours,
         "sync_last": (ago(state["last_auto_sync"])
                       if state.get("last_auto_sync") else "never"),
         "sync_due": soon(sync_due - now) if sync_due else "",
@@ -1446,30 +1452,76 @@ def _auto_sync_due(state: dict, now: float) -> bool:
 # empirically 2026-08-02: the provider-slot binding decays within hours of a
 # re-provision cycle (worked 16 minutes after one, dead by 7 hours), leaving
 # searches resolving and playback silently never starting.
-BINDING_KEEPALIVE_HOURS = 4
+#
+# Configurable because four is an extrapolation from two observations, and the
+# real survival time is a property of Amazon's provisioning rather than of this
+# code, so it may well differ per account. The miss detector below measures it:
+# lower this until the detector stops firing. Cost is only more enablement
+# cycles, which draw on a different rate pool from catalog uploads and are
+# nowhere near it. Zero disables the keep-alive and leaves only the detector.
+BINDING_KEEPALIVE_HOURS = float(os.environ.get("BINDING_KEEPALIVE_HOURS", "4"))
 
 
 def _binding_stale(state: dict, now: float) -> bool:
+    if BINDING_KEEPALIVE_HOURS <= 0:
+        return False
     if not (state.get("skill_id") and state.get("enabled")):
         return False
     return now - (state.get("enabled_at") or 0) >= BINDING_KEEPALIVE_HOURS * 3600
+
+
+# A capture filename leads with the UTC instant it was written, to microsecond
+# precision, followed by the directive: 20260802T153412987654-Alexa.Media...
+# That prefix is the index. See _capture_time for why it is read and not stat'd.
+CAPTURE_STAMP = re.compile(r"^(\d{8}T\d{12})-")
+
+
+def _capture_time(name: str) -> float | None:
+    """When a capture arrived, from its filename. None if it is not one of ours.
+
+    Deliberately not st_mtime. scrub_captures rewrites captures in place to
+    strip credentials, and a rewrite resets mtime to the moment of the rewrite,
+    which collapses the entire history into whatever instant the process last
+    booted. The filename is written once and never touched again, so it is the
+    only timestamp here that means what it says.
+    """
+    match = CAPTURE_STAMP.match(name)
+    if not match:
+        return None
+    try:
+        return (datetime.strptime(match.group(1), "%Y%m%dT%H%M%S%f")
+                .replace(tzinfo=timezone.utc).timestamp())
+    except ValueError:
+        return None
 
 
 def _recent_traffic(max_age: float = 1200.0) -> bool:
     """Has the music endpoint seen a request in the last twenty minutes.
 
     The keep-alive must never yank the enablement out from under an active
-    playback session; the capture directory's newest mtime is the cheapest
-    honest signal that one exists. Twenty minutes, not ten: a session only
-    produces a directive per track boundary, and a long ambient track or a
-    short pause must not read as idle. Staleness tolerance is hours, so the
-    wider window costs nothing."""
+    playback session; the newest capture is the cheapest honest signal that one
+    exists. Twenty minutes, not ten: a session only produces a directive per
+    track boundary, and a long ambient track or a short pause must not read as
+    idle. Staleness tolerance is hours, so the wider window costs nothing."""
     try:
-        newest = max((e.stat().st_mtime for e in os.scandir(log_dir())
-                      if e.name.endswith(".json")), default=0.0)
+        entries = {e.name: e for e in os.scandir(log_dir())
+                   if e.name.endswith(".json")}
     except OSError:
         return False
-    return time.time() - newest < max_age
+    if not entries:
+        return False
+    newest = max(entries)
+    when = _capture_time(newest)
+    if when is None:
+        # Not a name this service wrote. Unlike the health ratio, erring
+        # towards "something is playing" is the safe direction here: it only
+        # delays a keep-alive whose deadline is hours away, where guessing the
+        # other way could cycle the enablement mid-song.
+        try:
+            when = entries[newest].stat().st_mtime
+        except OSError:
+            return False
+    return time.time() - when < max_age
 
 
 # The two directives that prove a binding. A search arriving means Alexa
@@ -1488,27 +1540,26 @@ def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
     """Recent searches and initiates, oldest first.
 
     Read from the capture filenames alone. The name carries a sortable UTC
-    stamp and the directive, so the whole history is available without opening
-    a single file.
+    stamp and the directive, so lexical order is chronological order and the
+    whole history is available for one scandir and no stat calls at all. This
+    is the same technique app.prune_captures uses, for the same reason.
     """
     try:
-        entries = [
-            e for e in os.scandir(log_dir())
+        names = sorted(
+            e.name for e in os.scandir(log_dir())
             if e.name.endswith(".json")
             and (SEARCH_DIRECTIVE in e.name or INITIATE_DIRECTIVE in e.name)
-        ]
+        )
     except OSError:
         return []
     rows = []
-    for entry in entries:
-        try:
-            rows.append((entry.stat().st_mtime,
-                         SEARCH_DIRECTIVE if SEARCH_DIRECTIVE in entry.name
-                         else INITIATE_DIRECTIVE))
-        except OSError:
+    for name in names[-limit:]:
+        when = _capture_time(name)
+        if when is None:
             continue
-    rows.sort()
-    return rows[-limit:]
+        rows.append((when, SEARCH_DIRECTIVE if SEARCH_DIRECTIVE in name
+                     else INITIATE_DIRECTIVE))
+    return rows
 
 
 def _binding_health(limit: int = 20, now: float | None = None) -> dict:

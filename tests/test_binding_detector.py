@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -30,13 +31,19 @@ def isolated(tmp_path, monkeypatch):
     return tmp_path
 
 
-def write_capture(root, offset_seconds: float, directive: str) -> None:
-    """A capture at a chosen age. Only the name and mtime are ever read."""
+def write_capture(root, offset_seconds: float, directive: str,
+                  mtime: float | None = None) -> None:
+    """A capture at a chosen age, named exactly the way app.capture names one.
+
+    The name is the whole signal: the detector never stats these. `mtime` is
+    here only so a test can set it to something wrong and prove that.
+    """
     when = time.time() - offset_seconds
-    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(when))
-    path = root / "captures" / f"{stamp}{int(offset_seconds):06d}-{directive}.json"
+    stamp = datetime.fromtimestamp(when, timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    path = root / "captures" / f"{stamp}-{directive}.json"
     path.write_text("{}")
-    os.utime(path, (when, when))
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
 
 
 class FakeLog:
@@ -104,6 +111,36 @@ def test_health_ignores_directives_that_prove_nothing(isolated):
     write_capture(isolated, 200, "Alexa.Audio.PlayQueue.GetNextItem")
     health = views._binding_health()
     assert health["miss"] is True
+
+
+def test_a_boot_scrub_does_not_scramble_the_history(isolated):
+    """The regression this was actually found by.
+
+    scrub_captures rewrites captures in place to strip credentials, and a
+    rewrite resets mtime. On the live box that put 111 of 176 binding events
+    into a single mtime minute, where ties broke on the directive name: every
+    tied search appeared to be followed by another search, so it read as a
+    miss. Here every file is given the same wrong mtime, which is the worst
+    case of exactly that, and the reading must not move.
+    """
+    scrub = time.time()
+    for offset, directive in ((6000, SEARCH), (5998, INITIATE),
+                              (4000, SEARCH), (3998, INITIATE),
+                              (2000, SEARCH)):
+        write_capture(isolated, offset, directive, mtime=scrub)
+
+    health = views._binding_health()
+    assert health["searches"] == 3
+    assert health["reached"] == 2, "the two paired searches still pair"
+    assert health["miss"] is True, "the unanswered newest search is still a miss"
+
+
+def test_capture_time_reads_the_name_not_the_clock(isolated):
+    """Ordering comes from the filename, so it survives anything touching mtime."""
+    assert views._capture_time("20260802T153412987654-x.json") == pytest.approx(
+        datetime(2026, 8, 2, 15, 34, 12, 987654, tzinfo=timezone.utc).timestamp())
+    assert views._capture_time("not-a-capture.json") is None
+    assert views._capture_time("20261302T999999000000-x.json") is None
 
 
 # --- the breaker ------------------------------------------------------------
@@ -235,6 +272,16 @@ def test_scheduler_context_when_nothing_is_scheduled(isolated):
     assert panel["sync_due"] == ""
     assert panel["keepalive_due"] == ""
     assert panel["sync_last"] == "never"
+
+
+def test_a_zero_interval_turns_the_keepalive_off(isolated, monkeypatch):
+    """The escape hatch for anyone whose binding does not decay."""
+    fresh = {"skill_id": "s", "enabled": True, "enabled_at": 0.0}
+    assert views._binding_stale(fresh, time.time()) is True
+    monkeypatch.setattr(views, "BINDING_KEEPALIVE_HOURS", 0)
+    assert views._binding_stale(fresh, time.time()) is False
+    store.update(**fresh)
+    assert views.scheduler_context(store.load())["keepalive_due"] == ""
 
 
 def test_soon_reads_as_the_mirror_of_ago():
