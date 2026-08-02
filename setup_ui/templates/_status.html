@@ -40,9 +40,7 @@
   <h3>The skill is not enabled, so Alexa is not using it</h3>
   <p>
     Playback falls back to your default music provider, which Alexa announces.
-    No other check reports a fault: the endpoint answers, the catalog ingests,
-    the manifest validates, and this service replies correctly to the requests
-    it receives, which are none.
+    No other check reports a fault.
   </p>
   <p>{{ smapi.enablement.detail }}</p>
   <p><a href="/setup/wizard/enable" class="btn" data-variant="outline">
@@ -56,17 +54,13 @@
 <article class="loud">
   <h3>The binding is degraded and re-cycling did not fix it</h3>
   <p>
-    A search reached this bridge and never turned into playback, so the skill
-    was re-provisioned and enabled again {{ scheduler.cycled_ago }}. Since
-    then {{ scheduler.misses }} more
-    {{ 'search has' if scheduler.misses == 1 else 'searches have' }} missed,
-    which means the cause is not the usual binding decay. Nothing further will
-    be cycled automatically until playback is seen working again.
+    The skill was re-provisioned {{ scheduler.cycled_ago }} and
+    {{ scheduler.misses }} more
+    {{ 'search has' if scheduler.misses == 1 else 'searches have' }} missed
+    since. Nothing further will be cycled until playback is seen working.
   </p>
   <p><small>Check the catalog ingestion below and the
-    <a href="/setup/logs">logs</a>. The last thing to suspect is the directive
-    handlers: a miss means Amazon stopped asking, not that the answer was
-    wrong.</small></p>
+    <a href="/setup/logs">logs</a>.</small></p>
 </article>
 {% endif %}
 
@@ -99,9 +93,8 @@
     </tbody>
   </table>
   <footer><small class="quiet">
-    The keep-alive prevents the decay on a clock. The detector catches what
-    that clock is too slow for, and fires at most once per outage so a cause
-    it cannot fix is not retried forever.
+    The keep-alive re-provisions on a clock. The detector catches what that
+    clock is too slow for, at most once per outage.
   </small></footer>
 </article>
 {% endif %}
@@ -134,9 +127,8 @@
   {% else %}
     <p><span class="pill idle">nothing yet</span></p>
     <p class="quiet">
-      No captured request. Alexa is not calling this bridge at all, which is a
-      completely different problem from Alexa calling it and discarding the
-      answer. Check enablement and the endpoint, not the directive handlers.
+      No captured request: Alexa is not calling this bridge at all. Check
+      enablement and the endpoint.
     </p>
   {% endif %}
 </article>
@@ -145,8 +137,7 @@
   <header><strong>Catalog ingestion</strong>
     <small class="quiet"> checked {{ checked_ago }}</small></header>
   {% if smapi is none %}
-    <p class="quiet">Not checked yet. Reading this is one Amazon request per
-      catalog, a few seconds in all, so it is not on the ten-second poll.</p>
+    <p class="quiet">Not checked yet.</p>
   {% elif not smapi.connected %}
     <p><span class="pill idle">not connected</span>
       This bridge is not authorized against your Amazon developer account yet.
@@ -186,12 +177,11 @@
   </form>
   <footer>
     <small>
-      <strong>ER_INGESTION: SUCCEEDED</strong> is the only gate. Once it says
-      that, voice resolution works.<br>
+      <strong>ER_INGESTION: SUCCEEDED</strong> is the only gate.<br>
       <strong>SLU_MODELING: PENDING</strong> is normal, takes weeks, and never
       blocks playback.<br>
-      <strong>A top-level status of IN_PROGRESS carries no information</strong>,
-      because SLU_MODELING pins it there for exactly as long.
+      <strong>A top-level IN_PROGRESS carries no information</strong>, since
+      SLU_MODELING pins it there.
     </small>
   </footer>
 </article>

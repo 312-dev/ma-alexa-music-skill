@@ -3,25 +3,16 @@
 {% block body %}
 <div class="page-head">
   <h1>Alias</h1>
-  <p>The word said after "on". Checked against your own library, because that
-     is what it competes with.</p>
+  <p>The word said after "on", checked against your own library.</p>
 </div>
 <p>
-  The alias is the word you say after "on": <em>"Alexa, play Radiohead on
-  ampere"</em>. Alexa resolves what you asked for against your uploaded catalog
-  <strong>before</strong> it decides which provider to route to, so every
-  artist, album, track, playlist and genre in your library competes with the
-  alias word for that slot.
+  <em>"Alexa, play Radiohead on ampere"</em>. Alexa resolves what you asked for
+  against your catalog <strong>before</strong> it picks a provider, so anything
+  in your library competes with the alias for that slot.
 </p>
 <p class="quiet">
-  Collisions therefore depend on your library and cannot be listed in advance.
-  A candidate that matches, or closely resembles, anything you own is likely to
-  be interpreted as a request for that music rather than as a provider name.
-</p>
-<p class="quiet">
-  This check cannot account for speech recognition. A word may be transcribed
-  as a different one entirely, which no textual or phonetic comparison will
-  predict. Say your shortlist to an Echo before adopting one.
+  This check cannot account for speech recognition. Say your shortlist to an
+  Echo before adopting one.
 </p>
 
 <form method="post" action="/setup/alias"

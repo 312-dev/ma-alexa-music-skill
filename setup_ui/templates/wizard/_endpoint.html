@@ -13,9 +13,8 @@
     Certificate type: <span class="mono">{{ state.cert_type or 'Trusted' }}</span>.</p>
 {% elif step.done %}
   <p><span class="pill ok">proven by live traffic</span>
-    Amazon's signed requests are already arriving, which is stronger evidence
-    than any check this page can run. Run the checks anyway if the hostname or
-    certificate has changed.</p>
+    Amazon's signed requests are already arriving. Run the checks again if the
+    hostname or certificate has changed.</p>
 {% else %}
   <p><span class="pill warn">not confirmed</span>
     Skill creation stays locked until the checks pass.</p>

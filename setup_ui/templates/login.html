@@ -3,11 +3,7 @@
 {% block body %}
 <h1>Sign in</h1>
 {% if failed %}<p class="loud">That token did not match.</p>{% endif %}
-<p>
-  This is the <span class="mono">ADMIN_TOKEN</span> you set when you deployed
-  the bridge. It is not something Ampere generated for you, and it is not your
-  Amazon password.
-</p>
+<p>The <span class="mono">ADMIN_TOKEN</span> you set when you deployed the bridge.</p>
 
 <form method="post" action="/setup/login">
   <input type="hidden" name="target" value="{{ target }}">
@@ -20,50 +16,25 @@
 
 <details class="well help">
   <summary>Where do I find it?</summary>
-  <p>Wherever you put it when you started the container. In rough order of how
-    most people run this:</p>
+  <p>Wherever you set it when you started the bridge.</p>
 
-  <p><strong>An env file</strong></p>
+  <p><strong>Env file</strong></p>
   <pre><code>grep ADMIN_TOKEN .env</code></pre>
 
-  <p><strong>Docker or Compose</strong>, reading it back out of the running
-    container:</p>
+  <p><strong>Docker or Compose</strong></p>
   <pre><code>docker exec {{ container_hint }} printenv ADMIN_TOKEN</code></pre>
 
-  <p><strong>Nomad</strong>, if the value came from a variable:</p>
+  <p><strong>Nomad</strong></p>
   <pre><code>nomad var get -item=ADMIN_TOKEN nomad/jobs/&lt;job-name&gt;</code></pre>
 
-  <p><strong>Kubernetes</strong>:</p>
+  <p><strong>Kubernetes</strong></p>
   <pre><code>kubectl get secret &lt;name&gt; -o jsonpath='{.data.ADMIN_TOKEN}' | base64 -d</code></pre>
-
-  <p class="quiet">
-    Run these in a terminal you control. Anything that prints a secret into a
-    chat window, a CI log or a shared session has leaked it.
-  </p>
 </details>
 
 <details class="well help">
   <summary>I never set one, or I have lost it</summary>
-  <p>
-    Set <span class="mono">ADMIN_TOKEN</span> in the environment and restart the
-    bridge. Any long random string will do:
-  </p>
+  <p>Set <span class="mono">ADMIN_TOKEN</span> and restart the bridge:</p>
   <pre><code>openssl rand -hex 32</code></pre>
-  <p>
-    Changing it signs out every existing session, because the cookie carries a
-    digest of the token rather than the token itself. That is also how you
-    revoke access if you think it has leaked.
-  </p>
-  <p class="quiet">
-    With no token set at all these pages refuse to serve rather than serving
-    open, so an empty value is not a way in.
-  </p>
+  <p class="quiet">Changing it signs out every existing session.</p>
 </details>
-
-<p class="quiet">
-  Why a form and not a header: browsers cannot attach
-  <span class="mono">X-Admin-Token</span> to a normal navigation, so signing in
-  here sets a signed cookie instead. The same token gates
-  <span class="mono">/diag</span> and <span class="mono">/captures</span>.
-</p>
 {% endblock %}

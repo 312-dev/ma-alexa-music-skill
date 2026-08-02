@@ -22,13 +22,10 @@
   </p>
 {% endif %}
 <p>
-  This re-puts the manifest to force Amazon to re-run the skill's music
-  provider provisioning, then removes the enablement and sets it again. Both
-  parts are required rather than redundant: a freshly created skill can sit
-  half provisioned (searches resolve, playback never starts), and a catalog
-  upload unbinds the skill from the provider slot without reporting it, while
-  ingestion still reports <span class="mono">SUCCEEDED</span> and the service
-  still answers correctly. This cycle restores both.
+  Re-puts the manifest to force Amazon to re-run music provider provisioning,
+  then removes the enablement and sets it again. Both parts are needed: a new
+  skill can sit half provisioned, and a catalog upload unbinds the provider
+  slot without reporting it.
 </p>
 <form method="post" action="/setup/wizard/enable"
       hx-post="/setup/wizard/enable" hx-target="#step-body">

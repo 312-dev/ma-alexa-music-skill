@@ -29,10 +29,7 @@
     {% endif %}
     {{ health.reached }} of the last {{ health.searches }} searches went on to
     start playback.
-    {% if health.miss %}
-      The most recent one did not, which is what a decayed binding looks like
-      from here: Alexa found the content and then never asked for it.
-    {% endif %}
+    {% if health.miss %}The most recent one did not.{% endif %}
   </p>
   {% endif %}
   {% if result %}
@@ -52,11 +49,8 @@
     </form>
   </div>
   <small class="quiet">
-    Cycle after every catalog upload: uploading silently unbinds the skill
-    from the provider slot. Cycling also re-puts the manifest, forcing Amazon
-    to re-run its provider provisioning, which unsticks a skill whose
-    searches resolve but whose playback never starts. Disable parks the skill
-    without deleting anything.
+    Cycle after every catalog upload: uploading silently unbinds the skill.
+    Disable parks it without deleting anything.
   </small>
   {% endif %}
 </article>

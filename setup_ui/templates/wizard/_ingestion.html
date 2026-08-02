@@ -19,13 +19,10 @@
   </table>
 </div>
 <small class="quiet">
-  Only <span class="mono">ER_INGESTION: SUCCEEDED</span> matters; it flips the
-  row to voice ready and unlocks the next step.
-  <span class="mono">no report yet</span> means Amazon has not reported the
-  step for this upload at all yet, which is normal in the first minutes.
-  <span class="mono">SLU_MODELING</span> sits at PENDING for weeks without
-  blocking anything, and because the top-level status is the minimum across
-  every step, it is pinned at IN_PROGRESS for exactly as long.
+  Only <span class="mono">ER_INGESTION: SUCCEEDED</span> matters; it unlocks
+  the next step. <span class="mono">no report yet</span> is normal in the first
+  minutes. <span class="mono">SLU_MODELING</span> sits at PENDING for weeks
+  without blocking anything, which pins the top-level status at IN_PROGRESS.
 </small>
 {% else %}
 <p class="quiet">Nothing uploaded yet.</p>

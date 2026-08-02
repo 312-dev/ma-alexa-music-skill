@@ -6,14 +6,9 @@
     Setup answered <code>{{ ip }}</code>, which is not in
     <code>{{ networks }}</code>.
   </p>
-  <p>
-    This service has to be reachable from the public internet, because Amazon
-    calls it directly. Setup does not: it can create skills against your Amazon
-    developer account and read your library, and Amazon never needs it. So it
-    is served only to the networks you name.
-  </p>
+  <p>Setup is served only to the networks you name, and Amazon never needs it.</p>
   <p>Reach it over your LAN, a VPN or a tailnet, using the machine's own
-    address rather than the public hostname.</p>
+    address, not the public hostname.</p>
 
   {% if proxied and not trusted %}
   <article class="loud">
@@ -21,9 +16,7 @@
     <p>
       It carried an <code>X-Forwarded-For</code> header but
       <code>TRUSTED_PROXIES</code> is not set, so the header was ignored and
-      the proxy's own address was judged instead. That header is only trusted
-      when the immediate peer is a proxy you have named, because otherwise
-      anyone could set it and claim to be on your LAN.
+      the proxy's own address was judged instead.
     </p>
     <p>
       If the proxy is the intended way in, set <code>TRUSTED_PROXIES</code> to

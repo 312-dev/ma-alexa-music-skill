@@ -19,8 +19,7 @@
     </select>
     <p class="quiet">
       Anything but <span class="mono">stop</span> extends the queue past its
-      last track rather than replacing it, seeded from the request itself. It
-      never pre-empts what was asked for.
+      last track, seeded from the request.
     </p>
   </div>
 
@@ -36,8 +35,8 @@
     <input id="f-radio-tracks" type="number" name="radio_tracks_per_artist" min="1" max="100"
            value="{{ saved.radio_tracks_per_artist }}">
     <p class="quiet">
-      Per-artist cap. Uncapped, a seed artist with two hundred tracks next to
-      neighbors with ten gives a station that is mostly the seed artist again.
+      Per-artist cap, so a prolific seed artist is not most of their own
+      station.
     </p>
   </div>
 
@@ -48,9 +47,8 @@
       Shuffle playlists by default
     </label>
     <p class="quiet">
-      Off, a playlist plays in its own order, which suits an ordered mixtape.
-      On, a fresh "play playlist X" starts shuffled, like artists and genres
-      do; the Alexa app's shuffle control still overrides either way.
+      Off, a playlist plays in its own order. On, a fresh "play playlist X"
+      starts shuffled. The Alexa app's shuffle control overrides either way.
     </p>
   </div>
 

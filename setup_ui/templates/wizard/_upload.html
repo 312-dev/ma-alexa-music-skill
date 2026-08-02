@@ -1,7 +1,6 @@
 <p>
-  Builds the catalogs from your library and uploads them. Only entities whose
-  content changed get a new timestamp, and anything that disappeared is sent as
-  a tombstone, so Alexa stops offering tracks you deleted.
+  Builds the catalogs from your library and uploads them. Only what changed is
+  sent, and deleted tracks are tombstoned so Alexa stops offering them.
 </p>
 {% if message %}<p><span class="pill bad">blocked</span> {{ message }}</p>{% endif %}
 {% if upload_job and upload_job.message %}
@@ -45,9 +44,8 @@
 
 <h3>Automatic sync</h3>
 <p class="quiet">
-  Rebuilds and uploads on a schedule. Only catalogs whose content changed are
-  uploaded, and any scheduled run that uploaded finishes by cycling enablement
-  itself, so a sync cannot silently unbind voice playback.
+  Rebuilds and uploads on a schedule. Only changed catalogs are sent, and any
+  run that uploaded cycles enablement afterwards.
 </p>
 <form method="post" action="/setup/wizard/autosync"
       hx-post="/setup/wizard/autosync" hx-target="#step-body">
@@ -56,9 +54,8 @@
     <input id="as-hours" name="hours" type="number"
            min="{{ auto_min_hours }}" step="1"
            value="{{ state.auto_sync_hours or 24 }}">
-    <p class="quiet">Minimum {{ auto_min_hours }}: that caps runs at four a
-      day, under Amazon's per-catalog upload limit, so the rate limit cannot
-      be hit. Anything lower is raised to the floor.</p>
+    <p class="quiet">Minimum {{ auto_min_hours }}, which keeps runs under
+      Amazon's per-catalog upload limit. Lower values are raised to it.</p>
   </div>
   <div role="group" class="field">
     <label>

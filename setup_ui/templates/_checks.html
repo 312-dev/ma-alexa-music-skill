@@ -35,9 +35,8 @@
   <header><strong>sslCertificateType</strong></header>
   <p class="big-code">{{ cert_type }}</p>
   <p class="quiet">
-    Put this in the skill manifest exactly as shown. Amazon accepts a manifest
-    with the wrong value and then never calls the endpoint, and neither side
-    logs anything about it.
+    Put this in the skill manifest exactly as shown. A wrong value is accepted
+    and then silently never called.
   </p>
 </article>
 {% endif %}
@@ -50,11 +49,9 @@
     {% endif %}
   </header>
   <p>
-    Every check above runs from inside your own network, where a tailnet
-    address or a split-horizon DNS answer looks perfectly healthy. This one
-    does not: scan the code on a phone <strong>with WiFi turned off</strong>,
-    so the request genuinely crosses the internet and comes back the way
-    Amazon's would.
+    The checks above run from inside your own network. Scan this on a phone
+    <strong>with WiFi turned off</strong>, so the request genuinely crosses the
+    internet.
   </p>
   <div id="proof">
     {% include "_proof.html" %}

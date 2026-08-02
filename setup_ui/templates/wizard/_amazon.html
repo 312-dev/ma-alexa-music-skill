@@ -9,10 +9,8 @@
 {% else %}
   <p><span class="pill warn">not connected</span></p>
   <p>
-    Skill and catalog operations go through Amazon's Skill Management API,
-    which needs your authorization. <strong>You register your own credentials
-    for this.</strong> There is no shared application and nothing is hosted by
-    this project, so your tokens never touch anyone else's service.
+    Skill and catalog operations go through Amazon's Skill Management API.
+    <strong>You register your own credentials for this.</strong>
   </p>
 
   <details class="well">
@@ -68,10 +66,6 @@
         <strong>Show Secret</strong> to reveal the <strong>Client
         Secret</strong>. Paste both into the form below.</li>
     </ol>
-    <p class="quiet">
-      Amazon only redirects back to https, which is why this step comes after
-      endpoint validation: by now that origin is proven to answer.
-    </p>
     <p class="quiet">Consent will ask for: <span class="mono">{{ amazon.scopes }}</span></p>
   </details>
 

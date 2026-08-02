@@ -72,11 +72,9 @@
 
     <p class="quiet">
       The manifest declares <span class="mono">apis.music</span> with an HTTPS
-      endpoint rather than a Lambda ARN, and carries
-      <span class="mono">sslCertificateType:
-      {{ state.cert_type or 'Trusted' }}</span> derived from your live
-      certificate. That field is required for an HTTPS endpoint and is not
-      mentioned in Amazon's music-skill documentation.
+      endpoint and <span class="mono">sslCertificateType:
+      {{ state.cert_type or 'Trusted' }}</span>, read from your live
+      certificate.
     </p>
     <form method="post" action="/setup/wizard/skill"
           hx-post="/setup/wizard/skill" hx-target="#step-body">
