@@ -617,3 +617,85 @@ def test_a_real_idle_report_is_still_believed():
     player._apply_state({"state": "IDLE"})
 
     assert player._attr_playback_state == PlaybackState.IDLE
+
+
+# --- group capture ----------------------------------------------------------
+#
+# MA decides whether a group owns its members from the group's `powered` and
+# `is_active_session`. A member that is owned is hidden from the player picker,
+# so getting this wrong takes working speakers off the list.
+
+
+def _group(provider, state=None):
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player.is_group = True
+    player._attr_playback_state = state or PlaybackState.IDLE
+    return player
+
+
+def test_an_idle_group_does_not_hold_its_members():
+    """The bug: every Echo in Whole Apartment vanished from the picker.
+
+    They stayed listed under Settings > Players, which is the tell: MA was not
+    hiding them for being unavailable, it was hiding them for being owned.
+    """
+    provider = _provider_module()
+    assert _group(provider).is_active_session is False
+
+
+def test_a_playing_group_does_hold_its_members():
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    assert _group(provider, PlaybackState.PLAYING).is_active_session is True
+
+
+def test_a_paused_group_still_holds_its_members():
+    """Pausing a group is not releasing it; the cluster is still formed."""
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    assert _group(provider, PlaybackState.PAUSED).is_active_session is True
+
+
+def test_a_plain_echo_never_holds_anything():
+    """MA requires False from a non-group, whatever it happens to be doing."""
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player.is_group = False
+    player._attr_playback_state = PlaybackState.PLAYING
+    assert player.is_active_session is False
+
+
+def _constructed(provider, is_group):
+    """Run only this class's __init__ body.
+
+    MA's Player.__init__ writes a default player config through the whole
+    config controller, and standing that up would make this a test of MA.
+    """
+    player = provider.AmperePlayer.__new__(provider.AmperePlayer)
+    base = provider.Player.__init__
+    provider.Player.__init__ = lambda self, prov, pid: None
+    try:
+        provider.AmperePlayer.__init__(
+            player, None, "p1", _device(provider), "Whole Apartment",
+            is_group=is_group)
+    finally:
+        provider.Player.__init__ = base
+    return player
+
+
+def test_a_group_does_not_claim_to_be_powered():
+    """`powered is True` short-circuits MA's check and captures forever.
+
+    None is what makes it fall through to is_active_session, which is the
+    question actually being asked.
+    """
+    provider = _provider_module()
+
+    assert _constructed(provider, is_group=True)._attr_powered is None
+    assert _constructed(provider, is_group=False)._attr_powered is True

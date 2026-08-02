@@ -266,7 +266,14 @@ class AmperePlayer(Player):
             manufacturer="Amazon",
         )
         self._attr_available = True
-        self._attr_powered = True
+        # None for a group, not True. MA reads a group's `powered` to decide
+        # whether its members are captured, and a group that claims to be
+        # powered captures them permanently: every Echo in Whole Apartment
+        # vanished from the player picker whether or not the group was playing,
+        # while still appearing under Settings > Players. None makes MA fall
+        # through to is_active_session below, which answers the question it is
+        # really asking. A plain Echo is powered, and says so.
+        self._attr_powered = None if is_group else True
         self._attr_needs_poll = True
         self._attr_poll_interval = POLL_INTERVAL
         self._attr_group_members = list(member_ids or [])
@@ -312,6 +319,26 @@ class AmperePlayer(Player):
         a later change to that default would silently undo it.
         """
         return False
+
+    @property
+    def is_active_session(self) -> bool:
+        """Whether this group is holding its members right now.
+
+        MA asks this to decide whether the member Echoes are owned by the group
+        and should therefore be hidden from the player picker. Alexa forms and
+        dissolves the cluster itself, so the honest answer is whatever the group
+        is currently doing: playing or paused means it has them, anything else
+        means they are free to be picked individually.
+
+        A non-group player must always answer False, which is what the base
+        class does and why this only overrides for a group.
+        """
+        if not self.is_group:
+            return False
+        return self._attr_playback_state in (
+            PlaybackState.PLAYING,
+            PlaybackState.PAUSED,
+        )
 
     @property
     def api(self) -> AlexaAPI:
