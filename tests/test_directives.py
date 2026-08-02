@@ -397,6 +397,7 @@ def test_top_songs_not_used_for_artists(client, app, monkeypatch):
 # the answer, because a real playlist of the same name would otherwise win and
 # Music Assistant would play something else without saying so.
 
+import handoff
 import queue_api  # noqa: E402
 
 
@@ -440,19 +441,19 @@ def test_unknown_ext_token_is_not_cached(app, published):
 def test_handoff_phrase_resolves_to_the_newest_queue(client, app, published):
     published(["t1"])
     expected = published(["t2", "t3"], "evening")
-    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0])
+    body = _ask_for(client, handoff.HANDOFF_PHRASES[0])
     assert body["payload"]["content"]["id"] == expected
 
 
 def test_handoff_phrase_beats_a_catalog_entity_of_the_same_name(client, published):
     """The entity branch wins on order alone if this is not checked first."""
     expected = published(["t2"])
-    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0], entity_id="playlist.p1")
+    body = _ask_for(client, handoff.HANDOFF_PHRASES[0], entity_id="playlist.p1")
     assert body["payload"]["content"]["id"] == expected
 
 
 def test_handoff_with_nothing_published_is_content_not_found(client, published):
-    body = _ask_for(client, queue_api.HANDOFF_PHRASES[0])
+    body = _ask_for(client, handoff.HANDOFF_PHRASES[0])
     assert body["payload"]["type"] == "CONTENT_NOT_FOUND"
 
 
@@ -460,3 +461,37 @@ def test_an_ordinary_request_still_reaches_the_catalog(client, published):
     published(["t1"])
     body = _ask_for(client, "Gregory Alan Isakov", entity_id="artist.a1")
     assert body["payload"]["content"]["id"] == "ar:a1"
+
+
+def test_the_handoff_entity_resolves_even_with_the_words_gone(client, published):
+    """The path that actually fires on a real device.
+
+    Amazon resolves the utterance against the catalog before the skill is
+    called, so what arrives is the entity id and the spoken phrase is not in
+    it. Matching on the words alone means never being asked at all.
+    """
+    expected = published(["t2", "t3"], "evening")
+    body = post(client, directive(
+        "Alexa.Media.Search", "GetPlayableContent",
+        {"selectionCriteria": {"attributes": [
+            {"type": "PLAYLIST", "entityId": f"playlist.{handoff.HANDOFF_ENTITY_ID}"},
+            {"type": "MEDIA_TYPE", "value": "PLAYLIST"},
+        ]}},
+    ))
+    assert body["payload"]["content"]["id"] == expected
+
+
+def test_a_real_playlist_is_not_mistaken_for_the_handoff(client, published):
+    published(["t2"])
+    body = _ask_for(client, "road trip", entity_id="playlist.p1")
+    assert body["payload"]["content"]["id"] == "pl:p1"
+
+
+def test_the_handoff_entity_with_nothing_published_is_content_not_found(client):
+    body = post(client, directive(
+        "Alexa.Media.Search", "GetPlayableContent",
+        {"selectionCriteria": {"attributes": [
+            {"type": "PLAYLIST", "entityId": f"playlist.{handoff.HANDOFF_ENTITY_ID}"},
+        ]}},
+    ))
+    assert body["payload"]["type"] == "CONTENT_NOT_FOUND"

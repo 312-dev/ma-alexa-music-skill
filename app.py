@@ -909,7 +909,10 @@ def handle_get_playable_content(payload: dict) -> Response:
     spoken = " ".join(
         str(a.get("value")) for a in attrs if a.get("value")
     ).strip()
-    if queue_api.is_handoff_phrase(spoken):
+    by_entity = any(
+        queue_api.is_handoff_entity(str(a.get("entityId") or "")) for a in attrs
+    )
+    if by_entity or queue_api.is_handoff_phrase(spoken):
         content_id = queue_api.handoff_content_id()
         if not content_id:
             return error("Alexa.Media", "CONTENT_NOT_FOUND",

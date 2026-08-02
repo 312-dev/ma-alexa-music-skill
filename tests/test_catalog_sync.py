@@ -20,6 +20,7 @@ import types
 import pytest
 
 import catalog_sync
+import handoff
 import subsonic
 
 
@@ -337,3 +338,38 @@ def test_song_does_not_retry_when_the_server_answered(monkeypatch):
     monkeypatch.setattr(subsonic, "call", call)
     assert _REAL_SONG("nope") is None
     assert seen == ["getSong.view"]
+
+
+# --- the handoff entity -----------------------------------------------------
+
+
+def test_the_handoff_phrase_is_in_the_catalog():
+    """Without this entity the phrase is unsayable.
+
+    Amazon resolves an utterance against the catalog before routing it, and an
+    utterance it cannot resolve produces no request at all rather than a search
+    carrying the words. So a handoff the bridge answers without any lookup
+    still has to exist as an entity for Alexa to ask about it.
+    """
+    entity = catalog_sync.handoff_entity()
+    assert entity["id"] == f"playlist.{handoff.HANDOFF_ENTITY_ID}"
+    assert handoff.is_handoff_entity(entity["id"])
+    assert [n["value"] for n in entity["names"]] == list(handoff.HANDOFF_PHRASES)
+
+
+def test_every_configured_phrase_is_a_name_on_the_one_entity(monkeypatch):
+    """Moving off a colliding phrase is a config change, not a second identity."""
+    monkeypatch.setattr(handoff, "HANDOFF_PHRASES", ("hand off", "the queue"))
+    entity = catalog_sync.handoff_entity()
+    assert entity["id"] == f"playlist.{handoff.HANDOFF_ENTITY_ID}"
+    assert [n["value"] for n in entity["names"]] == ["hand off", "the queue"]
+
+
+def test_the_handoff_entity_ships_with_the_playlists(monkeypatch):
+    monkeypatch.setattr(subsonic, "call", lambda *a, **k: {})
+    monkeypatch.setattr(subsonic, "playlists", lambda: [{"id": "p1", "name": "Road trip"}])
+    monkeypatch.setattr(subsonic, "genres", lambda: [])
+    collected = catalog_sync.collect()
+    ids = [e["id"] for e in collected["playlists"]]
+    assert f"playlist.{handoff.HANDOFF_ENTITY_ID}" in ids
+    assert "playlist.p1" in ids

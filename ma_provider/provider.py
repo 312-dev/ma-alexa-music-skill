@@ -258,6 +258,29 @@ class AmperePlayer(Player):
         # from. Best effort, and duplicated titles resolve to the first.
         self._titles_to_items: dict[str, str] = {}
 
+    def refresh(
+        self,
+        device: AlexaDevice,
+        name: str,
+        *,
+        speaker: AlexaDevice | None = None,
+        member_ids: list[str] | None = None,
+    ) -> None:
+        """Take the fields a later discovery pass can legitimately change.
+
+        Everything a rediscovery can tell us that the constructor set, and
+        nothing else: the id, the group flag and the feature set are fixed for
+        the life of the player, and the title index belongs to whatever queue
+        is currently playing.
+        """
+        self.device = device
+        self.speaker = speaker or device
+        self._attr_name = name
+        if self.is_group:
+            self.group_name = name
+        self._attr_group_members = list(member_ids or [])
+        self._attr_available = True
+
     @property
     def provider_instance(self) -> AmpereAlexaProvider:
         return cast("AmpereAlexaProvider", self.provider)
@@ -471,9 +494,8 @@ class AmpereAlexaProvider(PlayerProvider):
             device = _device(raw)
             name = raw.get("accountName") or raw["serialNumber"]
             speakers[raw["serialNumber"]] = device
-            await self.mass.players.register_or_update(
-                AmperePlayer(self, f"{self.instance_id}:{raw['serialNumber']}",
-                             device, name)
+            await self._publish(
+                f"{self.instance_id}:{raw['serialNumber']}", device, name
             )
 
         if not expose_groups:
@@ -488,18 +510,55 @@ class AmpereAlexaProvider(PlayerProvider):
                 # can be spoken to, so it cannot be started.
                 continue
             name = raw.get("accountName") or "Alexa group"
-            await self.mass.players.register_or_update(
-                AmperePlayer(
-                    self,
-                    f"{self.instance_id}:{raw['serialNumber']}",
-                    _device(raw),
-                    name,
-                    is_group=True,
-                    speaker=speakers[members[0]],
-                    member_ids=[f"{self.instance_id}:{m}" for m in members],
-                )
+            await self._publish(
+                f"{self.instance_id}:{raw['serialNumber']}",
+                _device(raw),
+                name,
+                is_group=True,
+                speaker=speakers[members[0]],
+                member_ids=[f"{self.instance_id}:{m}" for m in members],
             )
             self.logger.debug("group %s speaks through %s", name, members[0])
+
+    async def _publish(
+        self,
+        player_id: str,
+        device: AlexaDevice,
+        name: str,
+        *,
+        is_group: bool = False,
+        speaker: AlexaDevice | None = None,
+        member_ids: list[str] | None = None,
+    ) -> None:
+        """Register a player, or refresh the one already registered.
+
+        Discovery runs again on every reload, so this is called repeatedly with
+        the same ids. It deliberately does not hand a freshly built Player to
+        `register_or_update` on those later passes: that method replaces the
+        object in place without re-running registration, so the replacement
+        never gets `set_initialized()` and drops straight out of `all_players`,
+        which is what the UI and the API both read. The player stays in the
+        controller's dict and vanishes from everywhere else.
+        """
+        existing = self.mass.players.get_player(player_id)
+        if isinstance(existing, AmperePlayer):
+            existing.refresh(
+                device, name, speaker=speaker, member_ids=member_ids
+            )
+            existing.update_state()
+            return
+
+        await self.mass.players.register_or_update(
+            AmperePlayer(
+                self,
+                player_id,
+                device,
+                name,
+                is_group=is_group,
+                speaker=speaker,
+                member_ids=member_ids,
+            )
+        )
 
     # -- queue mapping -------------------------------------------------------
 

@@ -37,13 +37,13 @@ import json
 import logging
 import os
 import pathlib
-import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, jsonify, request
 
+import handoff
 import subsonic
 
 logger = logging.getLogger("ma-music-skill.queue-api")
@@ -114,33 +114,24 @@ _FETCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="extq-fetch")
 # newest published queue, never to the `ext:current` alias. Alexa would echo an
 # alias back for hours and quietly follow it onto a later queue; a token pins
 # the answer at the moment the user asked.
+#
+# The phrase must also be *in the catalog*, which is not a nicety. Measured on
+# 2026-08-02: Amazon does not forward an utterance the catalog cannot resolve.
+# "ask ampere to play Gregory Alan Isakov" arrived, played and streamed; "ask
+# ampere to play music assistant" and a deliberate nonsense phrase produced no
+# inbound request at all, not a search with free text in it. Entity resolution
+# is Amazon's gate, ahead of the skill, so an unresolvable phrase is not passed
+# through as text; it is simply never asked about. Hence HANDOFF_ENTITY_ID
+# below and the entity `catalog_sync.py` emits for it. The free-text branch is
+# kept because it costs nothing and covers the case where Amazon does forward
+# the words.
 
-HANDOFF_PHRASES = tuple(
-    p.strip().lower()
-    for p in os.environ.get("MA_HANDOFF_PHRASE", "music assistant").split(",")
-    if p.strip()
-)
-
-_NOISE = re.compile(r"\b(playlist|station|radio|queue)s?\b", re.I)
-_PUNCT = re.compile(r"[^\w\s]+")
-
-
-def _normalize(text: str) -> str:
-    """Flatten spoken text enough to compare it against a configured phrase.
-
-    Speech arrives with inconsistent casing, an occasional trailing "playlist",
-    and whatever punctuation the ASR felt like. match_playlist in app.py strips
-    the same things for the same reason.
-    """
-    value = _PUNCT.sub(" ", (text or "").lower())
-    value = _NOISE.sub(" ", value)
-    return " ".join(value.split())
-
-
-def is_handoff_phrase(text: str) -> bool:
-    """True when this utterance is asking for the published Music Assistant queue."""
-    spoken = _normalize(text)
-    return bool(spoken) and any(spoken == _normalize(p) for p in HANDOFF_PHRASES)
+# The naming itself lives in `handoff`, so `catalog_sync` can emit the entity
+# without importing this module and its state directories. Only the predicates
+# are re-exported: aliasing the constants too would leave a name here that
+# reads like the setting and silently is not the one the predicates consult.
+is_handoff_phrase = handoff.is_handoff_phrase
+is_handoff_entity = handoff.is_handoff_entity
 
 
 def handoff_content_id() -> str | None:

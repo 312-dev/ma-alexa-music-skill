@@ -32,6 +32,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import handoff
 import subsonic
 
 STATE_PATH = pathlib.Path(os.environ.get("CATALOG_STATE", "/data/catalog-state.json"))
@@ -93,6 +94,28 @@ def base(entity_id: str, name: str) -> dict:
         "popularity": POPULARITY,
         "locales": LOCALES,
     }
+
+
+def handoff_entity() -> dict:
+    """The catalog entry that makes the Music Assistant handoff sayable.
+
+    Amazon resolves an utterance against the catalog before it routes anywhere,
+    and does not forward one it cannot resolve: a phrase absent from the
+    catalog produces no request at all, rather than a search carrying the words
+    (measured 2026-08-02, see handoff.HANDOFF_ENTITY_ID). So the phrase has
+    to be an entity, even though the bridge answers it without looking anything
+    up.
+
+    Every configured phrase becomes an alternative name on one entity, so
+    moving off a phrase that collides with the library is still a config
+    change and not a second catalog identity.
+    """
+    entity = base(f"playlist.{handoff.HANDOFF_ENTITY_ID}", "Music Assistant")
+    entity["names"] = [
+        {"language": "en", "value": phrase[:512]}
+        for phrase in handoff.HANDOFF_PHRASES
+    ] or entity["names"]
+    return entity
 
 
 # --- collection -------------------------------------------------------------
@@ -173,6 +196,7 @@ def collect(progress=None) -> dict[str, list[dict]]:
     tell(f"reading playlists ({len(out['tracks'])} tracks found)", 0.97)
     for playlist in subsonic.playlists():
         out["playlists"].append(base(f"playlist.{playlist['id']}", playlist.get("name")))
+    out["playlists"].append(handoff_entity())
     log(f"playlists: {len(out['playlists'])}")
 
     for genre in subsonic.genres():

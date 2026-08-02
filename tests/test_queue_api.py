@@ -8,6 +8,7 @@ import time
 import pytest
 
 import app as app_module
+import handoff
 import queue_api
 
 AUTH = {"X-Admin-Token": "test-admin-token"}
@@ -270,7 +271,7 @@ def test_handoff_phrase_matching():
 
 
 def test_handoff_phrase_is_configurable(monkeypatch):
-    monkeypatch.setattr(queue_api, "HANDOFF_PHRASES", ("my queue", "the hand off"))
+    monkeypatch.setattr(handoff, "HANDOFF_PHRASES", ("my queue", "the hand off"))
     assert queue_api.is_handoff_phrase("my queue")
     assert queue_api.is_handoff_phrase("The Hand Off")
     assert not queue_api.is_handoff_phrase("music assistant")

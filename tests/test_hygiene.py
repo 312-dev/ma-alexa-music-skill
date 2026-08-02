@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
+import re
 import time
 
 import pytest
@@ -181,3 +183,23 @@ def test_writing_queue_state_still_works_when_prune_fails(tmp_path, monkeypatch)
 
     monkeypatch.setattr(queuestate, "prune", explode)
     assert queuestate.update("q1", shuffle=True)["shuffle"] is True
+
+
+def test_every_module_the_app_imports_is_in_the_image():
+    """The Dockerfile names its modules one by one, so a new one is silently
+    left out and the container dies on import at start.
+
+    Caught the hard way: `handoff.py` was added, the build succeeded, the image
+    passed a push and only failed when it ran.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    dockerfile = (root / "Dockerfile").read_text()
+    copied = set(re.findall(r"[\w./-]+\.py", dockerfile))
+
+    modules = {
+        path.name
+        for path in root.glob("*.py")
+        if path.name not in {"conftest.py", "setup.py"}
+    }
+    missing = sorted(modules - copied)
+    assert not missing, f"not COPYed into the image: {', '.join(missing)}"
