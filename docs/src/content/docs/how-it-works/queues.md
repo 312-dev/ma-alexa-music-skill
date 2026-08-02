@@ -76,9 +76,9 @@ Shuffle is seeded on the `queueId`, not on the clock:
 random.Random(queue_id).shuffle(out)
 ```
 
-Every worker, and every later request for the same queue, derives the identical
-order. A plain shuffle would reorder the queue on each `GetNextItem` and
-playback would wander.
+Every later request for the same queue derives the identical order without any
+of it being stored. A plain shuffle would reorder the queue on each
+`GetNextItem` and playback would wander.
 
 ## Continuing past the end
 

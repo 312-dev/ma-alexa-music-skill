@@ -30,6 +30,27 @@ something, which closes this. It can only do so if `SKILL_ID` is set; without
 it the run warns loudly and the skill stays unbound until you cycle by hand.
 See [Catalog and enablement](../../setup/catalog/#the-trap-uploading-a-catalog-unbinds-the-skill).
 
+## The skill's binding decays on its own
+
+The single most expensive thing here to learn by experiment. The binding between
+the skill and its provider slot rots within hours of being established, with no
+upload, no manifest change and no deploy involved. Searches keep resolving,
+Amazon keeps reporting the skill as enabled, the bridge keeps answering
+correctly, and nothing plays.
+
+Ampere works around it rather than fixing it, because the cause is on Amazon's
+side and is not observable from here:
+
+- a keep-alive re-provisions the skill every `BINDING_KEEPALIVE_HOURS`
+  (default 4) while nothing is playing, and
+- a detector cycles once when a search is seen not reaching playback, then waits
+  for real evidence of recovery before it will try again.
+
+The Status page shows how many recent searches reached playback. **That ratio is
+the only honest health signal**, because every other indicator reads green
+throughout the failure. See
+[the finding](../../how-it-works/findings/#the-provider-slot-binding-decays-on-a-clock).
+
 ## The Alexa app will not render a scrubber
 
 The item declares `{"type": "ADJUST", "name": "SEEK_POSITION", "enabled": true}`
@@ -70,7 +91,10 @@ request captures plus what Alexa says out loud.
 - **A track's display name can fall back to its raw id** in
   `GetPlayableContent`, where the single-song lookup fails but track resolution
   succeeds. Cosmetic, seen with "Juke Box Hero".
-- **Captures grow without bound.** There is no rotation on `/data/captures`.
+- **Captures are pruned to the newest `CAPTURE_KEEP`**, 400 by default, and
+  queue state files expire after `QUEUE_STATE_TTL`. Neither directory grows
+  without bound, but neither is archived either: a failure older than the last
+  400 directives is no longer diagnosable.
 - **Streams are always transcoded to MP3 at 256 kbit/s.** Whether Alexa would
   accept FLAC on the *music skill* path specifically has not been tested; the
   behavior is inherited from a note in the `AudioPlayer` documentation. It

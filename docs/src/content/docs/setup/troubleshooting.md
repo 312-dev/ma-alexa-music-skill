@@ -15,22 +15,36 @@ bridge**, and **what Alexa said out loud**. If a suggestion here sounds
 indirect, that is why.
 :::
 
-## Your three instruments
+## Your four instruments
+
+Three of them are on the Status page at `/setup/status`, which is the fastest
+route to all of this and needs no shell:
+
+- **Skill binding**, how many recent searches reached playback
+- **Scheduler**, what the background thread will do and when
+- **Logs** at `/setup/logs`, the last inbound directives with what was answered
+  and how long each handler took
+
+The same things from a terminal:
 
 ```sh
 # 1. Did anything arrive, and what was it?
 docker exec ampere ls -t /data/captures | head
 curl -s -H "X-Admin-Token: $ADMIN_TOKEN" https://ampere.example.com/captures
 
-# 2. Can the bridge reach the music server?
+# 2. Is the skill actually reaching playback?
+curl -s -H "X-Admin-Token: $ADMIN_TOKEN" https://ampere.example.com/setup/skill/health
+
+# 3. Can the bridge reach the music server?
 curl -s -H "X-Admin-Token: $ADMIN_TOKEN" 'https://ampere.example.com/diag?q=radiohead'
 
-# 3. What did each handler do, and how long did it take?
+# 4. What did each handler do, and how long did it take?
 docker logs --tail 100 ampere
 ```
 
-`/captures` and `/diag` both return 401 unless `ADMIN_TOKEN` is set and the
-`X-Admin-Token` header matches it.
+All of these return 401 unless `ADMIN_TOKEN` is set and the `X-Admin-Token`
+header matches it, and they answer only on the networks named by
+`SETUP_ALLOW_NETWORKS`.
 
 ## Alexa says "Here's ... from Spotify"
 
@@ -41,12 +55,9 @@ usually answering everything correctly at the same time, and `ER_INGESTION` will
 report `SUCCEEDED`, which is what makes this one so misleading.
 
 The usual cause is a catalog upload. Uploading a catalog silently unbinds the
-skill. Cycle enablement:
-
-```sh
-Open the wizard and run the enablement step. It deletes the enablement and
-sets it again, which is what rebinds the provider slot.
-```
+skill. Open the wizard and run the enablement step: it re-PUTs the manifest,
+waits for that to succeed, then deletes and sets the enablement, which is what
+rebinds the provider slot.
 
 If you did not upload a catalog, check that the skill is enabled at all, and
 that the account is still linked.
@@ -56,6 +67,50 @@ The catalog sync cycles enablement for you after any run that uploaded
 something, but only when `SKILL_ID` is set. If you land here after a sync, check
 the sync log: it says loudly when it could not rebind.
 :::
+
+## Alexa acknowledges, and nothing plays
+
+No error, no fallback to another provider, no announcement. Just silence, or a
+brief "OK" and then nothing.
+
+This is the **binding decay**, and it is the failure this project spent the most
+time on. Check it directly rather than by inference:
+
+```sh
+curl -s -H "X-Admin-Token: $ADMIN_TOKEN" \
+  https://ampere.example.com/setup/skill/health
+```
+
+```json
+{
+  "searches": 20,
+  "reached": 7,
+  "miss": true,
+  "miss_at": 1785686320.6,
+  "last_initiate": 1785682322.6,
+  "armed": true,
+  "misses_since_cycle": 0,
+  "degraded": false
+}
+```
+
+`reached` well below `searches` means searches are arriving and never turning
+into playback. The same ratio is on the Status page under Skill binding.
+
+**Do not chase the response payload.** The bridge is answering correctly; that
+is not the variable. Do not trust the enablement status either, which reports
+enabled throughout.
+
+| Reading | What it means | What to do |
+|---|---|---|
+| `miss: true`, `armed: true` | A miss was just seen; the detector is about to cycle | Wait a minute, then ask again |
+| `armed: false`, `degraded: false` | It cycled and is waiting for proof of recovery | Ask Alexa to play something. That is the proof |
+| `degraded: true` | It cycled and searches are **still** missing | The cycle is not the fix here. Check account linking and that the skill still exists |
+| `reached` tracking `searches` | The binding is healthy | The problem is elsewhere on this page |
+
+If this recurs on a predictable rhythm, the keep-alive interval is too slow for
+your account. Lower `BINDING_KEEPALIVE_HOURS` from its default of 4 until the
+misses stop.
 
 ## Nothing reaches the bridge
 

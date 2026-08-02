@@ -108,12 +108,25 @@ indicative rather than stable.
 
 | Route | Purpose |
 |---|---|
-| `/setup/status` | The state of ingestion, enablement and last inbound request |
+| `/setup/status` | Ingestion, enablement, binding health, the scheduler and the last inbound request |
+| `/setup/logs` | Recent directives with the response given and the time each handler took |
 | `/setup/endpoint` | Endpoint checks and the QR proof |
 | `/setup/verify/<token>` | The target the QR code points at |
 | `/setup/alias` | Alias checker against your own library |
 | `/setup/stations` | Station tuning, with a live pool preview |
 | `/setup/wizard` | Skill creation, catalogs, ingestion and enablement |
+
+Two are meant to be called by something other than a browser:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/setup/skill/health` | GET | Binding health as JSON, for a monitor. `{searches, reached, miss, miss_at, last_initiate, armed, misses_since_cycle, degraded}` |
+| `/setup/skill/cycle` | POST | Re-provision and re-enable the skill. Answers `{ok, detail, enabled_at}`, or 503 if the cycle failed |
+
+`/setup/skill/cycle` exists so a cycle can be scripted. Nothing is expected to
+call it on a schedule: the bridge already runs its own keep-alive and miss
+detector, and driving it from outside means putting `ADMIN_TOKEN` in a second
+system to duplicate work this one already does.
 
 :::caution[`/setup` refuses to serve without `ADMIN_TOKEN`]
 Serving it open would hand anyone who found the URL the ability to run `ask`

@@ -111,9 +111,10 @@ for a linking passphrase. That is your `OAUTH_LINK_SECRET`. Type it once. The
 bridge then issues an access token valid for 30 days by default
 (`OAUTH_ACCESS_TTL`) and a refresh token valid for a year.
 
-Every token is a self-contained HMAC-signed blob rather than a database row,
-which is what keeps it correct across gunicorn workers. It also means rotating
-`SIGNING_KEY` invalidates every issued token and forces a relink.
+Every token is a self-contained HMAC-signed blob rather than a database row, so
+a token is valid because it verifies rather than because it was found in a
+table, and a restart or a redeploy does not unlink your account. It also means
+rotating `SIGNING_KEY` invalidates every issued token and forces a relink.
 
 :::note[Redirect URIs are pinned]
 The bridge only accepts redirects to Amazon's own per-vendor link endpoints:

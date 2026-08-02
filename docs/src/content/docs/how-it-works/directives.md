@@ -80,7 +80,7 @@ This is where a spoken phrase becomes a contentId. In order:
    straight to a contentId with no search at all.
 3. **Free-text search.** Otherwise the attribute values are joined and searched.
    Alexa tells the bridge what *kind* of thing was asked for, and that is
-   honoured: an artist request queues that artist rather than a track whose
+   honored: an artist request queues that artist rather than a track whose
    title happens to match better.
 
 | Requested kind | Search preference |

@@ -1,40 +1,15 @@
 # Next steps
 
-State as of 2026-07-31. Everything in the previous version of this file is
-built: the setup wizard, endpoint validation, the alias checker, station
-tuning, request verification, the enablement cycle, and the Music Assistant
-provider. What follows is what is genuinely left.
-
-Architecture and design notes now live on the docs site under **How it works**,
-not here. This file is only a to-do list.
-
-## Deploy the new build
-
-Not yet deployed. The running service on the box is the pre-rebrand build, and
-two of tonight's fixes are in the repo only.
-
-**`PUBLIC_BASE` is now required and has no default.** It used to fall back to
-`https://alexa-music.graysons.network`. If the Nomad job for `alexa-music` was
-relying on that fallback, the container will exit at boot with a message saying
-so. Check the job spec before deploying.
-
-`SUBSONIC_URL` lost its default the same way.
-
-Also new in the image and worth knowing about on the box:
-
-- Icons are baked in at `/app/icons` and `ICON_DIR` defaults there. The job may
-  still set `ICON_DIR=/data/icons`, which is fine and keeps the volume copy.
-- `SKILL_ID` should be set so `catalog_sync.py` can rebind the skill after an
-  upload. Without it the sync prints a loud warning and leaves voice broken.
-- `VERIFY_REQUESTS` defaults to `warn`. Watch a day of real Amazon traffic log
-  `verified` before setting it to `on`.
+A to-do list. Architecture and design notes live on the docs site under
+**How it works**, and known gaps live under
+[Gaps and limits](https://graysoncadams.github.io/ampere/reference/limits/);
+neither belongs here.
 
 ## Stations are unreachable by voice
 
 Observed live. "Play Gregory Alan Isakov radio" produced a plain artist queue:
 twelve consecutive tracks by the seed artist walking the discography, none of
-the similar artists a station interleaves. Found from Home Assistant's recorder
-rather than from the bridge, which cannot see what Alexa decided.
+the similar artists a station interleaves.
 
 `station_request()` has two signals and neither fires on this path. It looks for
 a trailing "radio" or "station" in a free-text value, but when Alexa resolves
@@ -43,11 +18,30 @@ the utterance against the uploaded catalog it answers with the entity id
 appeared in a capture from this skill. So `rad:` is reachable only when entity
 resolution misses and the raw text survives.
 
-1. **Capture a real payload first.** There may be a field carrying the spoken
-   form that is simply not being read. Do not guess at this without one.
+1. **Read a real payload first.** There may be a field carrying the spoken form
+   that is simply not being read. Do not guess at this without one. The capture
+   pairing needed for this now exists.
 2. **Then put stations in the catalog.** Emit a station entity per artist
    ("<name> Radio") in `catalog_sync.py` and map its entity id straight to
    `rad:<id>`. That stops it depending on what survives entity resolution.
+
+## Tune the keep-alive interval from measured misses
+
+`BINDING_KEEPALIVE_HOURS` defaults to 4, extrapolated from two observations: the
+binding worked sixteen minutes after a cycle and was dead by seven hours.
+`_binding_health` measures the thing that guess stands in for, so the interval
+can now be set from data rather than from a hunch.
+
+Each time `_reactive_check` fires, the gap between `enabled_at` and the miss is
+an observed survival time. Lower the interval until the detector stops firing.
+Cost is only more enablement cycles, which draw on a different rate pool from
+catalog uploads and are nowhere near it: four hours is six a day, two hours is
+twelve.
+
+It is deliberately a bridge-side interval rather than something an external
+scheduler drives. Driving it from outside means putting `ADMIN_TOKEN` in a
+second system and making that system responsible for this one's housekeeping,
+to achieve what an interval here already does.
 
 ## Open questions
 
@@ -62,43 +56,18 @@ resolution misses and the raw text survives.
   Costs roughly 4x the bandwidth if enabled.
 - **Does `GetDisplayableContent` actually surface browse shelves?** It is
   implemented and tested, but has never been observed working on a device.
-
-## Tune the keep-alive interval from measured misses
-
-`BINDING_KEEPALIVE_HOURS = 4` is a guess extrapolated from two observations:
-the binding worked sixteen minutes after a cycle and was dead by seven hours.
-`_binding_health` now measures the thing that guess was standing in for, so
-after a few days of real traffic the interval can be set from data.
-
-Each time `_reactive_check` fires, the gap between `enabled_at` and the miss is
-the observed survival time. Lower `BINDING_KEEPALIVE_HOURS` until the detector
-stops firing. Cost is only more enablement cycles, which use a different rate
-pool from catalog uploads and are nowhere near it: four hours is six a day,
-two hours is twelve.
-
-This is deliberately kept inside the bridge. An earlier design had Home
-Assistant POST to `/setup/skill/cycle` a couple of minutes before the wake
-alarm, on the grounds that only HA knows when that is. It works, but it makes a
-home automation system responsible for this service's own housekeeping, and it
-needs the admin token copied into a second system. Tuning an interval here
-achieves the same thing with no coupling at all.
-
-`POST /setup/skill/cycle` and `GET /setup/skill/health` stay, as a scripted
-cycle and a monitoring probe respectively. Neither expects a particular caller.
+- **Is the decay interval account-specific?** Four hours came from one account.
+  `BINDING_KEEPALIVE_HOURS` exists so finding out does not need a fork, but
+  there is no second data point yet.
 
 ## Smaller
 
 - [ ] **Per-artist station exclusions.** The station tuning page mentions them
-      but there is no mechanism in `app.py` to honour them, so they are not
+      but there is no mechanism in `app.py` to honor them, so they are not
       offered.
-- [ ] **Rotate the Navidrome password.** It was decrypted into a session
-      transcript.
-- [ ] **Duplicate Home Assistant Echo entities.** Every Echo is registered two
-      or three times and only some are live: `media_player.whole_apartment`,
-      `_2` and `_3` all exist, and only `_2` follows playback. Automations
-      pointed at a dead one fail silently. Root cause is likely more than one
-      Alexa Media Player config entry. Removing entities breaks whatever
-      references them, so check before deleting.
+- [ ] **No server other than Navidrome has been exercised.** The client speaks
+      plain Subsonic 1.16.1 with no OpenSubsonic extensions, so the others named
+      in the README should work. Nobody has confirmed one.
 - [ ] **Pitch the MA provider upstream** to @alams154 as a `playback_mode`
       branch on the existing `alexa` provider rather than a competing one. See
       `ma_provider/README.md`.

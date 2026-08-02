@@ -145,6 +145,60 @@ The fix is to cycle enablement: `ask smapi delete-skill-enablement` then
 enablement, which is what makes it costly. The catalog sync now does the cycle
 itself after any run that uploaded something, provided it knows the skill id.
 
+### A recreated skill sits half provisioned until the manifest is re-PUT
+
+After deleting and recreating a skill, everything reads correct. A signed
+`GetPlayableContent` arrives, entity resolution answers with a catalog id, the
+response is spec-valid, the skill shows enabled, and a replayed `Initiate`
+returns a working stream queue. Amazon simply never sends `Initiate`.
+
+**Cycling enablement alone does not fix this one.** Re-PUT the manifest (GET it,
+PUT it back), wait for `lastUpdateRequest` to report `SUCCEEDED`, and only then
+cycle. The manifest update is what forces Amazon to re-run the skill's
+music-provider provisioning; the cycle then binds against it.
+
+This is why the wizard's enablement step does re-PUT, poll, delete, set rather
+than just delete and set.
+
+### The provider-slot binding decays on a clock
+
+The worst of them, because nothing anywhere reports it.
+
+Enablement is not a one-time provisioning step. The binding between the skill
+and its provider slot **rots on its own within hours**, with no upload, no
+manifest change and no deploy involved. Observed: playback working 16 minutes
+after a cycle, dead 7 hours later. Throughout the failure, `enablement_status`
+reports enabled, the search resolves against the catalog, and the bridge answers
+200 with a valid payload. `Initiate` never comes. The only symptom is silence.
+
+Identical requests fail before a cycle and succeed seconds after one, which is
+what rules out the response being the variable.
+
+**Amazon's acknowledgement proves nothing.** A cycle returning 200 is not
+evidence the slot is bound, because the status reports bound during the outage
+too. This is the trap the whole failure mode lives in, and any fix that treats
+the API's answer as confirmation will report success while the skill stays dead.
+
+The only honest measure is your own inbound traffic: for each
+`Alexa.Media.Search.GetPlayableContent`, did an `Alexa.Media.Playback.Initiate`
+follow it before the next search did. The bridge counts exactly that ratio and
+shows it on the Status page. Two mechanisms act on it:
+
+- **A keep-alive** re-provisions when the enablement is older than
+  `BINDING_KEEPALIVE_HOURS` (default 4) and nothing is currently playing.
+- **A miss detector** cycles once when a search fails to reach playback, then
+  **disarms until an `Initiate` is actually observed**. One attempt per outage.
+  Without that breaker, a cause a cycle cannot fix would churn the enablement
+  against Amazon's rate limits on every failed request.
+
+:::caution[Read the ratio from filenames, not mtimes]
+If you build something similar: order the captures by their filename timestamp,
+not by file mtime. Anything that rewrites a capture in place, such as a pass
+that strips credentials out of old ones, resets its mtime and collapses the
+history into one instant. Measured here, that misclassified 37 of 108 pairs
+while leaving the aggregate close enough to look healthy.
+:::
+
 ### The alias competes with your own catalog
 
 Alexa resolves content against your uploaded catalog **before** it routes to a

@@ -13,12 +13,39 @@ Everything is configured by environment variable. There is no config file.
 | `SIGNING_KEY` | random per process | HMAC key for signed asset URLs, OAuth tokens, external queue tokens and the setup session cookie. If unset, a fresh random key is generated at startup and everything previously issued stops working on restart. **Set this.** |
 | `STREAM_TTL` | `43200` | Lifetime of a signed stream URL, in seconds. 12 hours. |
 | `ADMIN_TOKEN` | unset | Gates `/setup`, `/captures`, `/diag` and the queue API. Unset means the wizard refuses to serve and the admin routes refuse everything. **Set this.** |
-| `CAPTURE_DIR` | `/data/captures` | Where inbound directives are written. Created at startup. |
+| `CAPTURE_DIR` | `/data/captures` | Where inbound directives are written. Created at startup. Credentials are redacted on the way in. |
+| `CAPTURE_KEEP` | `400` | How many captures to keep. The oldest past the cap are deleted. `0` disables pruning and lets the directory grow without bound. |
 | `ICON_DIR` | `/app/icons` | Where skill icons are served from. Populated by the image. Override to use your own artwork without rebuilding. |
 | `QUEUE_STATE_DIR` | `/data/queuestate` | Per-queue shuffle, loop and repeat state. |
+| `QUEUE_STATE_TTL` | `604800` | How long a queue's state file survives, in seconds. Seven days. Nothing tells the bridge that Alexa has finished with a queue, so without an expiry every queue ever started leaves a file behind. |
 | `SETUP_STATE_DIR` | `/data` | Where the setup wizard records what it has established. |
 | `PREWARM` | `1` | Load every artist name at startup in one call. Set to `0` to skip, which is what the test suite does. |
-| `PORT` | `5056` | Only used when running `app.py` directly with Python. The container's gunicorn command binds 5056 explicitly and ignores this. |
+| `PORT` | `5056` | The port when running `app.py` directly with Python, and the port advertised over mDNS. The container's gunicorn command binds 5056 explicitly, so changing this there changes only what mDNS announces. |
+
+## Skill binding
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BINDING_KEEPALIVE_HOURS` | `4` | How stale the skill's enablement may get before the keep-alive re-provisions it. `0` disables the keep-alive and leaves only the miss detector. See [Binding decay](../../how-it-works/findings/#the-provider-slot-binding-decays-on-a-clock). |
+
+The default is an extrapolation from two observations and the real interval may
+differ per account. The Status page reports how many recent searches reached
+playback; lower this until that stops showing misses.
+
+## Admin plane
+
+Covered in full, with the reasoning, under
+[Admin access](../../setup/admin-access/).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SETUP_ALLOW_NETWORKS` | `private` | Which networks `/setup`, `/diag` and `/captures` answer on. `private` is loopback, RFC1918, link-local and CGNAT, which includes Tailscale. Also takes `any` or a list of CIDRs. |
+| `TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` may be believed. Only read when the immediate peer is listed. |
+| `SETUP_LOCKOUT_THRESHOLD` | `5` | Failed logins from one address before it is locked out. |
+| `SETUP_LOCKOUT_SECONDS` | `900` | How long that lockout lasts. |
+| `MDNS` | `0` | Advertise `<name>.local` on the LAN. Needs `network_mode: host` to work at all. |
+| `MDNS_NAME` | `ampere` | The name advertised. |
+| `VENDOR_ID` | empty | Only needed if your Amazon developer account has more than one vendor. The wizard refuses to guess. |
 
 ## Request verification
 
@@ -26,6 +53,7 @@ Everything is configured by environment variable. There is no config file.
 |---|---|---|
 | `VERIFY_REQUESTS` | `warn` | `off` logs the outcome only, `warn` logs a warning and serves anyway, `on` rejects with 403. An unrecognized value is treated as `warn`, with a warning. |
 | `SIGNATURE_FETCH_TIMEOUT` | `4` | Seconds allowed to fetch Amazon's certificate chain. |
+| `SSL_CERT_FILE` | unset | Standard OpenSSL variable. Tried first when loading trust anchors, ahead of the platform CA bundle. Only needed if your CA store is somewhere unusual. |
 
 The policy is read per request rather than at import, so changing it needs a
 restart of the process but not a reload of the module.
@@ -111,11 +139,16 @@ composer such as Music Assistant.
 | `EXTERNAL_QUEUE_MAX` | `64` | How many published queues are kept. |
 | `MA_HANDOFF_PHRASE` | `music assistant` | Comma-separated phrases recognized as the handoff. |
 
-## Defaults worth overriding immediately
+## The three that have no usable default
 
 :::caution
-`PUBLIC_BASE` and `SUBSONIC_URL` both default to the original author's
-deployment, and `SIGNING_KEY` defaults to a value that changes on every restart.
-A bridge left on those three defaults will start, pass its health check, and
-work for nothing.
+`PUBLIC_BASE` has no default and the bridge **refuses to start** without it,
+because a wrong value does not fail at startup: it fails later as audio that
+will not play, with nothing in any log to say why.
+
+`SUBSONIC_URL` also has no default, but it fails softer. The bridge starts and
+answers its health check, and every search comes back empty.
+
+`SIGNING_KEY` defaults to a fresh random value per process, so leaving it unset
+invalidates every signed stream URL and every linked account on each restart.
 :::
