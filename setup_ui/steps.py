@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import os
-import pathlib
 import time
 from dataclasses import dataclass
 from typing import Callable
 
 import smapi_rest
+
+from . import captures
 
 
 @dataclass(frozen=True)
@@ -49,15 +50,13 @@ def _amazon_traffic(max_age: float = 7 * 86400) -> bool:
         return _TRAFFIC["ok"]
 
     found = False
-    capture_dir = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
     try:
-        entries = [e for e in os.scandir(capture_dir) if e.name.endswith(".json")]
-        entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
-        for entry in entries[:8]:
-            if now - entry.stat().st_mtime > max_age:
+        for name, when in captures.recent(8):
+            if now - when > max_age:
                 break
             try:
-                headers = json.loads(pathlib.Path(entry.path).read_text()).get("headers") or {}
+                body = json.loads((captures.log_dir() / name).read_text())
+                headers = body.get("headers") or {}
             except (OSError, ValueError, AttributeError):
                 continue
             if any(k.lower().startswith("signature") for k in headers):

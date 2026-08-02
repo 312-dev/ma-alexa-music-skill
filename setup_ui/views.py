@@ -13,8 +13,6 @@ import hashlib
 import hmac
 import json
 import os
-import pathlib
-import re
 import socket
 import threading
 import time
@@ -29,7 +27,8 @@ import logring
 import smapi_rest
 import subsonic
 
-from . import access, qr, smapi, state as store, steps as wizard_steps, validate
+from . import (access, captures, qr, smapi, state as store,
+               steps as wizard_steps, validate)
 
 bp = Blueprint(
     "setup", __name__,
@@ -192,8 +191,11 @@ def public_base() -> str:
     return os.environ.get("PUBLIC_BASE", "").rstrip("/")
 
 
-def log_dir() -> pathlib.Path:
-    return pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
+# Capture naming and ordering live in one module, because the wizard's step
+# model needs them too and cannot import this one without a cycle.
+log_dir = captures.log_dir
+recent_captures = captures.recent
+_capture_time = captures.capture_time
 
 
 def ago(when: float) -> str:
@@ -219,32 +221,6 @@ def soon(delta: float) -> str:
     if seconds < 86400:
         return f"in {seconds // 3600} hours"
     return f"in {seconds // 86400} days"
-
-
-def recent_captures(limit: int) -> list[tuple[str, float]]:
-    """The newest captures, newest first, as (filename, when it arrived).
-
-    Ordered by filename rather than mtime. The name leads with the arrival
-    stamp, so lexical order is chronological order, the sort costs no syscalls
-    at all, and the ordering survives scrub_captures rewriting a file in place
-    to strip credentials. Truncated before any read, because the panels built
-    on this refresh every ten seconds.
-    """
-    try:
-        names = sorted((e.name for e in os.scandir(log_dir())
-                        if e.name.endswith(".json")), reverse=True)
-    except OSError:
-        return []
-    rows = []
-    for name in names[:limit]:
-        when = _capture_time(name)
-        if when is None:
-            try:  # not a name this service wrote; fall back rather than hide it
-                when = (log_dir() / name).stat().st_mtime
-            except OSError:
-                continue
-        rows.append((name, when))
-    return rows
 
 
 def last_requests(limit: int = 4) -> list[dict]:
@@ -1481,31 +1457,6 @@ def _binding_stale(state: dict, now: float) -> bool:
     return now - (state.get("enabled_at") or 0) >= BINDING_KEEPALIVE_HOURS * 3600
 
 
-# A capture filename leads with the UTC instant it was written, to microsecond
-# precision, followed by the directive: 20260802T153412987654-Alexa.Media...
-# That prefix is the index. See _capture_time for why it is read and not stat'd.
-CAPTURE_STAMP = re.compile(r"^(\d{8}T\d{12})-")
-
-
-def _capture_time(name: str) -> float | None:
-    """When a capture arrived, from its filename. None if it is not one of ours.
-
-    Deliberately not st_mtime. scrub_captures rewrites captures in place to
-    strip credentials, and a rewrite resets mtime to the moment of the rewrite,
-    which collapses the entire history into whatever instant the process last
-    booted. The filename is written once and never touched again, so it is the
-    only timestamp here that means what it says.
-    """
-    match = CAPTURE_STAMP.match(name)
-    if not match:
-        return None
-    try:
-        return (datetime.strptime(match.group(1), "%Y%m%dT%H%M%S%f")
-                .replace(tzinfo=timezone.utc).timestamp())
-    except ValueError:
-        return None
-
-
 def _recent_traffic(max_age: float = 1200.0) -> bool:
     """Has the music endpoint seen a request in the last twenty minutes.
 
@@ -1514,25 +1465,8 @@ def _recent_traffic(max_age: float = 1200.0) -> bool:
     exists. Twenty minutes, not ten: a session only produces a directive per
     track boundary, and a long ambient track or a short pause must not read as
     idle. Staleness tolerance is hours, so the wider window costs nothing."""
-    try:
-        entries = {e.name: e for e in os.scandir(log_dir())
-                   if e.name.endswith(".json")}
-    except OSError:
-        return False
-    if not entries:
-        return False
-    newest = max(entries)
-    when = _capture_time(newest)
-    if when is None:
-        # Not a name this service wrote. Unlike the health ratio, erring
-        # toward "something is playing" is the safe direction here: it only
-        # delays a keep-alive whose deadline is hours away, where guessing the
-        # other way could cycle the enablement mid-song.
-        try:
-            when = entries[newest].stat().st_mtime
-        except OSError:
-            return False
-    return time.time() - when < max_age
+    newest = captures.newest_time()
+    return newest is not None and time.time() - newest < max_age
 
 
 # The two directives that prove a binding. A search arriving means Alexa
@@ -1557,7 +1491,7 @@ def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
     """
     try:
         names = sorted(
-            e.name for e in os.scandir(log_dir())
+            e.name for e in os.scandir(captures.log_dir())
             if e.name.endswith(".json")
             and (SEARCH_DIRECTIVE in e.name or INITIATE_DIRECTIVE in e.name)
         )
@@ -1565,9 +1499,9 @@ def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
         return []
     rows = []
     for name in names[-limit:]:
-        when = _capture_time(name)
+        when = captures.capture_time(name)
         if when is None:
-            continue
+            continue  # a name we did not write proves nothing about binding
         rows.append((when, SEARCH_DIRECTIVE if SEARCH_DIRECTIVE in name
                      else INITIATE_DIRECTIVE))
     return rows

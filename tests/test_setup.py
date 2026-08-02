@@ -1791,6 +1791,28 @@ def test_no_captures_at_all_is_not_proof(captures_dir):
     assert steps._endpoint_done({}) is False
 
 
+def test_a_scrub_does_not_make_ancient_traffic_look_current(captures_dir):
+    """Age comes from the filename, so rewriting a capture cannot refresh it.
+
+    The credential scrub rewrites captures in place, which resets mtime. A
+    signed directive from a year ago must not start counting as proof that
+    Amazon can reach this deployment today.
+    """
+    from setup_ui import steps
+    _capture(captures_dir, "20250101T120000000000-Alexa.Media.Playback.Initiate.json",
+             {"Signature-256": "x", "SignatureCertChainUrl": "y"})
+    os.utime(captures_dir / "20250101T120000000000-Alexa.Media.Playback.Initiate.json",
+             (time.time(), time.time()))  # the scrub
+    assert steps._endpoint_done({}) is False
+
+    # The same capture, arriving today, is proof.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    _capture(captures_dir, f"{stamp}-Alexa.Media.Playback.Initiate.json",
+             {"Signature-256": "x", "SignatureCertChainUrl": "y"})
+    steps._TRAFFIC.update(at=0.0, ok=False)
+    assert steps._endpoint_done({}) is True
+
+
 def test_the_stored_flag_still_counts(captures_dir):
     from setup_ui import steps
     assert steps._endpoint_done({"endpoint_ok": True}) is True
