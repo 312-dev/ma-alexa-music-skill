@@ -181,3 +181,81 @@ def test_access_token_not_accepted_as_refresh_token(client):
         "client_id": "ma-alexa", "client_secret": "test-client-secret",
     })
     assert resp.status_code == 400
+
+
+# --- the mechanism room-to-room transfer depends on -------------------------
+#
+# Measured 2026-08-02. Moving audio between Echoes produces no directive at
+# all: Amazon re-forms the speaker cluster in its own audio layer and has the
+# new master re-request the URL the previous one was already playing, with a
+# Range header, mid-track. The skill is never asked to do anything. So these
+# three properties of a stream URL are not conveniences, they are the whole
+# multi-room feature, and nothing else in the suite would notice them break.
+
+
+def test_a_stream_url_is_not_bound_to_whichever_device_asked_first(
+        client, fake_subsonic, monkeypatch):
+    """The second Echo presents the identical URL and must be served."""
+    import app as app_module
+
+    seen = []
+
+    def fake_proxy(upstream, content_type_default):
+        seen.append(upstream)
+        return app_module.Response(b"audio", status=200,
+                                   headers={"Content-Type": "audio/mpeg"})
+
+    monkeypatch.setattr(app_module, "_proxy", fake_proxy)
+    url, _expires = app_module.signed_url("stream", "t1")
+    path = url[url.index("/stream/"):]
+
+    assert client.get(path).status_code == 200
+    assert client.get(path).status_code == 200, "a transfer replays the same URL"
+    assert len(seen) == 2
+
+
+def test_a_range_request_is_forwarded_and_its_answer_preserved(
+        client, fake_subsonic, monkeypatch):
+    """The joining speaker asks for the middle of the track, not the start.
+
+    A 200 with the whole file here would restart the song in every room, which
+    is what a transfer must not do.
+    """
+    import app as app_module
+
+    class FakeUpstream:
+        status = 206
+        headers = {"Content-Type": "audio/mpeg", "Accept-Ranges": "bytes",
+                   "Content-Range": "bytes 500-999/1000", "Content-Length": "500"}
+
+        def read(self, *_):
+            return b""
+
+        def __iter__(self):
+            return iter([b"tail"])
+
+    sent = {}
+
+    def fake_urlopen(req, timeout=None):
+        sent["range"] = req.get_header("Range")
+        return FakeUpstream()
+
+    monkeypatch.setattr(app_module.urllib.request, "urlopen", fake_urlopen)
+    url, _expires = app_module.signed_url("stream", "t1")
+    path = url[url.index("/stream/"):]
+
+    resp = client.get(path, headers={"Range": "bytes=500-"})
+    assert sent["range"] == "bytes=500-", "the Range must reach Navidrome"
+    assert resp.status_code == 206, "a 200 here restarts the track in every room"
+    assert resp.headers["Content-Range"] == "bytes 500-999/1000"
+    assert resp.headers["Accept-Ranges"] == "bytes"
+
+
+def test_a_url_outlives_any_plausible_track(app):
+    """A transfer re-requests a URL minted when the track began.
+
+    Expiry has to clear the length of a track by a wide margin or a move near
+    the end of a long one would 403 into silence.
+    """
+    _url, expires = app.signed_url("stream", "t1")
+    assert expires - time.time() > 3600, "an hour is the floor, not the target"
