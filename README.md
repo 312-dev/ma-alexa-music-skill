@@ -39,6 +39,13 @@ This is not a five minute install. The catalog upload alone takes time to
 ingest on Amazon's side. The [setup guide](https://graysoncadams.github.io/ampere/setup/what-this-is/)
 walks the whole path and is honest about which steps are slow.
 
+It also needs to keep running, not just be reachable when you ask for music.
+Alexa's binding to a music skill **decays on its own within hours**, silently,
+while every status Amazon reports stays green. The bridge re-provisions itself
+on a timer and watches its own traffic for searches that never reach playback.
+That is handled, but it is why this is a service rather than a script. See
+[Gaps and limits](https://graysoncadams.github.io/ampere/reference/limits/).
+
 ## Quick start
 
 ```sh

@@ -45,7 +45,7 @@ Some servers ignore that flag and mark absent artists with a negative id, so
 those are filtered again in the client.
 
 Per-artist capping is not cosmetic. Uncapped, a seed artist with 200 tracks
-sitting next to neighbours who have 10 gives you a station that is mostly the
+sitting next to neighbors who have 10 gives you a station that is mostly the
 seed artist again. The cap is `RADIO_TRACKS_PER_ARTIST`, 12 by default, and the
 sample is seeded on the **artist id** rather than the queueId so that the pool is
 identical for every queue built from the same contentId. That is what allows the

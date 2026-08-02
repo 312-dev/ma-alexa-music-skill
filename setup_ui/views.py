@@ -1514,7 +1514,7 @@ def _recent_traffic(max_age: float = 1200.0) -> bool:
     when = _capture_time(newest)
     if when is None:
         # Not a name this service wrote. Unlike the health ratio, erring
-        # towards "something is playing" is the safe direction here: it only
+        # toward "something is playing" is the safe direction here: it only
         # delays a keep-alive whose deadline is hours away, where guessing the
         # other way could cycle the enablement mid-song.
         try:

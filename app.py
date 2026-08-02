@@ -135,7 +135,7 @@ def after_content_setting(raw: str) -> str:
 AFTER_CONTENT = after_content_setting(os.environ.get("AFTER_CONTENT", "stop"))
 
 # How wide a station casts, and how much of each artist it will take. Uncapped,
-# a seed artist with 200 tracks next to neighbours with 10 gives a station that
+# a seed artist with 200 tracks next to neighbors with 10 gives a station that
 # is mostly the seed artist again.
 RADIO_ARTISTS = int(os.environ.get("RADIO_ARTISTS", "12"))
 RADIO_TRACKS_PER_ARTIST = int(os.environ.get("RADIO_TRACKS_PER_ARTIST", "12"))
@@ -448,7 +448,7 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
 
     `endless` says the queue continues past its own last track, so NEXT stays
     enabled there. An undeclared or disabled control is a control Alexa will
-    not offer, and a station whose skip button greys out on track twelve is
+    not offer, and a station whose skip button grays out on track twelve is
     not a station.
     """
     uri, expires = signed_url("stream", song["id"])

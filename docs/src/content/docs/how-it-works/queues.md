@@ -151,5 +151,5 @@ the control is disabled." An empty controls list silently kills shuffle and
 loop.
 
 This is why `NEXT` is explicitly enabled on the last item of an endless queue. A
-station whose skip button greys out on track twelve is not a station.
+station whose skip button grays out on track twelve is not a station.
 :::

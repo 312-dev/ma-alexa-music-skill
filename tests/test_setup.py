@@ -1377,7 +1377,7 @@ def test_binding_keepalive_staleness_and_traffic_guard(ui, monkeypatch, tmp_path
     monkeypatch.setenv("CAPTURE_DIR", str(old))
     assert views._recent_traffic() is False
     # A name this service did not write falls back to mtime, which errs
-    # towards "playing" rather than risking a cycle mid-song.
+    # toward "playing" rather than risking a cycle mid-song.
     odd = tmp_path / "odd"
     odd.mkdir()
     (odd / "stray.json").write_text("{}")

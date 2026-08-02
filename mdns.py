@@ -61,7 +61,7 @@ def service_name() -> str:
 def primary_address() -> str | None:
     """The address other machines on this link would reach us on.
 
-    Opening a UDP socket towards a public address and reading back the local
+    Opening a UDP socket toward a public address and reading back the local
     end is the portable way to ask the routing table which interface would be
     used, without sending anything or needing the destination to exist.
     """
