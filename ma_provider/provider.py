@@ -558,17 +558,36 @@ class AmperePlayer(Player):
 
         if not title:
             return
+
+        # Alexa omits fields it does not feel like sending, and omits more of
+        # them around a transition or on a group. This is rebuilt from scratch
+        # every poll, so anything absent used to be erased rather than left
+        # alone: the duration visibly reset to zero on each resync, taking the
+        # progress bar with it. A field Alexa did not mention is a field Alexa
+        # said nothing about, so the last known value stands.
+        previous = self._attr_current_media
+        same_track = previous is not None and previous.title == title
+
+        def kept(value: Any, attribute: str) -> Any:
+            if value not in (None, ""):
+                return value
+            return getattr(previous, attribute, None) if same_track else None
+
         duration = progress.get("mediaLength")
-        art = (info.get("mainArt") or {}).get("url")
+        seconds = (int(duration / 1000)
+                   if isinstance(duration, (int, float)) and duration > 0
+                   else None)
+
         self._attr_current_media = PlayerMedia(
             uri=f"ampere://{self.player_id}/{title}",
             media_type=MediaType.TRACK,
             title=title,
-            artist=text.get("subText1"),
-            album=text.get("subText2"),
-            image_url=art,
-            duration=int(duration / 1000) if isinstance(duration, (int, float)) else None,
-            queue_item_id=self._titles_to_items.get(title.lower()),
+            artist=kept(text.get("subText1"), "artist"),
+            album=kept(text.get("subText2"), "album"),
+            image_url=kept((info.get("mainArt") or {}).get("url"), "image_url"),
+            duration=kept(seconds, "duration"),
+            queue_item_id=kept(self._titles_to_items.get(title.lower()),
+                               "queue_item_id"),
         )
 
 

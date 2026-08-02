@@ -212,8 +212,18 @@ def _provider_module():
 
 
 def _bare_player(provider):
-    """An AmperePlayer with no __init__ run: these tests touch one method."""
-    return provider.AmperePlayer.__new__(provider.AmperePlayer)
+    """An AmperePlayer with no __init__ run: these tests touch one method.
+
+    Only the attributes the methods under test actually read are set, since
+    MA's Player.__init__ writes a default config through the whole config
+    controller and standing that up would make these tests of MA.
+    """
+    player = provider.AmperePlayer.__new__(provider.AmperePlayer)
+    player.is_group = False
+    player._player_id = "p1"
+    player._attr_current_media = None
+    player._titles_to_items = {}
+    return player
 
 
 def _queue_with_seek(seconds):
@@ -743,3 +753,85 @@ def test_an_unknown_item_id_falls_back_to_the_queue_position():
 
     media = SimpleNamespace(source_id="q1", queue_item_id="gone")
     assert player._seek_offset_ms(media) == 30000
+
+
+# --- what a poll is allowed to erase ----------------------------------------
+
+
+def _polled(provider, previous=None):
+    player = _bare_player(provider)
+    player._attr_current_media = previous
+    return player
+
+
+def _media(provider, **kwargs):
+    from music_assistant_models.player import PlayerMedia
+
+    return PlayerMedia(uri="ampere://p1/Song", title="Song", **kwargs)
+
+
+def _info(**progress):
+    return {"state": "PLAYING", "infoText": {"title": "Song"},
+            "progress": progress}
+
+
+def test_a_poll_without_a_duration_keeps_the_one_we_had():
+    """The duration visibly reset to zero on every resync.
+
+    current_media is rebuilt from scratch each poll, so a field Alexa omitted
+    was erased rather than left alone, taking the progress bar with it.
+    """
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5000))
+
+    assert player._attr_current_media.duration == 240
+
+
+def test_a_poll_that_does_report_a_duration_is_believed():
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5000, mediaLength=300000))
+
+    assert player._attr_current_media.duration == 300
+
+
+def test_a_zero_duration_is_not_a_duration():
+    """Alexa sends 0 around a transition; it means unknown, not instantaneous."""
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5000, mediaLength=0))
+
+    assert player._attr_current_media.duration == 240
+
+
+def test_a_new_track_does_not_inherit_the_old_metadata():
+    """Carrying values forward is only safe while the title is unchanged."""
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240, artist="Someone"))
+
+    player._apply_state({"state": "PLAYING",
+                         "infoText": {"title": "A Different Song"},
+                         "progress": {}})
+
+    assert player._attr_current_media.title == "A Different Song"
+    assert player._attr_current_media.duration is None
+    assert player._attr_current_media.artist is None
+
+
+def test_artist_and_art_survive_a_thin_poll_too():
+    """Alexa omits more than just the duration, especially on a group."""
+    provider = _provider_module()
+    player = _polled(provider, _media(
+        provider, artist="Someone", album="A Record",
+        image_url="https://art.test/1.jpg"))
+
+    player._apply_state(_info(mediaProgress=5000))
+
+    media = player._attr_current_media
+    assert media.artist == "Someone"
+    assert media.album == "A Record"
+    assert media.image_url == "https://art.test/1.jpg"
