@@ -495,3 +495,84 @@ def test_the_handoff_entity_with_nothing_published_is_content_not_found(client):
         ]}},
     ))
     assert body["payload"]["type"] == "CONTENT_NOT_FOUND"
+
+
+# --- seek, which arrives as a fresh Initiate --------------------------------
+
+
+def _publish(tracks, start_offset_ms=0):
+    """Publish a queue the way Music Assistant does, returning its contentId."""
+    import queue_api
+
+    record = queue_api.publish(tracks, "from MA", start_offset_ms)
+    return f"{queue_api.CONTENT_PREFIX}:{record['token']}"
+
+
+def test_a_seek_starts_the_first_item_where_it_was_dragged_to(client, tmp_path,
+                                                              monkeypatch):
+    """The whole point. Without the offset Alexa restarts the track.
+
+    Music Assistant has no seek for a player that does not stream through it,
+    so PlayerQueues.seek re-issues play_media and the seek arrives here as an
+    ordinary Initiate on a republished queue.
+    """
+    import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    content_id = _publish(["t1", "t2"], 90500)
+    out = post(client, directive(
+        "Alexa.Media.Playback", "Initiate", {"contentId": content_id},
+    ))
+    first = out["payload"]["playbackMethod"]["firstItem"]
+    assert first["stream"]["offsetInMilliseconds"] == 90500
+
+
+def test_an_ordinary_play_starts_at_zero(client, tmp_path, monkeypatch):
+    import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    content_id = _publish(["t1", "t2"])
+    out = post(client, directive(
+        "Alexa.Media.Playback", "Initiate", {"contentId": content_id},
+    ))
+    assert out["payload"]["playbackMethod"]["firstItem"][
+        "stream"]["offsetInMilliseconds"] == 0
+
+
+def test_only_the_first_item_carries_the_offset(client, tmp_path, monkeypatch):
+    """Everything after the seeked track is a normal transition.
+
+    A GetNextItem that inherited the offset would drop 90 seconds off every
+    remaining track in the queue.
+    """
+    import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    content_id = _publish(["t1", "t2"], 90500)
+    out = post(client, directive(
+        "Alexa.Media.Playback", "Initiate", {"contentId": content_id},
+    ))
+    queue_id = out["payload"]["playbackMethod"]["id"]
+
+    nxt = post(client, directive(
+        "Alexa.Audio.PlayQueue", "GetNextItem",
+        {"contentId": content_id, "queueId": queue_id, "currentItemReference": {
+            "value": {"id": "0", "contentId": content_id}}},
+    ))
+    item = nxt["payload"].get("item")
+    assert item is not None
+    assert item["stream"]["offsetInMilliseconds"] == 0
+
+
+def test_content_that_did_not_come_from_ma_has_no_offset(client):
+    """A Subsonic album cannot carry a seek; the lookup must not reach for one."""
+    import app as app_module
+
+    assert app_module.start_offset("al:al1") == 0
+    assert app_module.start_offset("") == 0

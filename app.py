@@ -578,6 +578,18 @@ def song_at(content_id: str, index: int, queue_id: str) -> dict | None:
     return queuestate.order(pool, f"{queue_id}:{lap}", True)[position]
 
 
+def start_offset(content_id: str) -> int:
+    """Milliseconds into its first track this content should begin at.
+
+    Only an `ext:` queue can carry one, because only Music Assistant publishes
+    a queue with a position attached. Everything else starts where it starts.
+    """
+    kind, _, ident = (content_id or "").partition(":")
+    if kind != queue_api.CONTENT_PREFIX:
+        return 0
+    return queue_api.start_offset_ms(ident)
+
+
 def item_at(content_id: str, index: int, queue_id: str = "") -> dict | None:
     song = song_at(content_id, index, queue_id)
     if song is None:
@@ -1129,6 +1141,16 @@ def handle_initiate(payload: dict) -> Response:
     first = item_at(content_id, 0, queue_id)
     if first is None:
         return error("Alexa.Media", "CONTENT_NOT_FOUND", f"nothing playable for {content_id}")
+
+    # A seek arrives as a fresh Initiate, because Music Assistant implements
+    # seek by re-issuing play_media on the current item. Without this the queue
+    # is republished and Alexa starts it from zero, so dragging the scrubber
+    # restarted the song while MA's own clock showed the position dragged to.
+    # Only the first item carries it: everything after it is a normal
+    # transition and starts at its own beginning.
+    if (offset := start_offset(content_id)) and first.get("stream"):
+        first["stream"]["offsetInMilliseconds"] = offset
+        logger.info("starting %s at %dms", content_id, offset)
 
     # Build the continuation pool now rather than at the track transition.
     # A station is a dozen discography walks and takes ~3s cold, and without

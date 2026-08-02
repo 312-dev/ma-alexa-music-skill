@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -118,8 +119,24 @@ def test_publish_request_shape():
     client = bridge.BridgeClient("https://ampere.example/", "tok", session=None)
     url, body = client.publish_request(["t1", "t2"], "Evening")
     assert url == "https://ampere.example/queue"
-    assert body == {"tracks": ["t1", "t2"], "name": "Evening"}
+    assert body == {"tracks": ["t1", "t2"], "name": "Evening",
+                    "start_offset_ms": 0}
     assert client.headers["X-Admin-Token"] == "tok"
+
+
+def test_a_seek_travels_with_the_queue_it_republishes():
+    """The only channel there is. MA re-issues play_media for a seek, so the
+    position has to ride along with that publish or it is lost."""
+    client = bridge.BridgeClient("https://ampere.example/", "tok", session=None)
+    _url, body = client.publish_request(["t1"], "Evening", 90500)
+    assert body["start_offset_ms"] == 90500
+
+
+def test_a_negative_offset_is_clamped_not_forwarded():
+    """Alexa is handed an unsigned position; garbage in must not reach it."""
+    client = bridge.BridgeClient("https://ampere.example/", "tok", session=None)
+    _url, body = client.publish_request(["t1"], "", -5)
+    assert body["start_offset_ms"] == 0
 
 
 def test_publish_posts_and_returns_the_content_id():
@@ -131,7 +148,8 @@ def test_publish_posts_and_returns_the_content_id():
     assert content_id == "ext:abc"
     method, url, kwargs = session.calls[0]
     assert (method, url) == ("POST", "https://ampere.example/queue")
-    assert kwargs["json"] == {"tracks": ["t1", "t2"], "name": "Evening"}
+    assert kwargs["json"] == {"tracks": ["t1", "t2"], "name": "Evening",
+                              "start_offset_ms": 0}
     assert kwargs["headers"]["X-Admin-Token"] == "tok"
 
 
@@ -193,18 +211,68 @@ def _provider_module():
     return provider
 
 
-def test_seek_is_not_in_supported_features():
-    """alexapy has no seek at all, and SeekController is a Video API.
+def _bare_player(provider):
+    """An AmperePlayer with no __init__ run: these tests touch one method."""
+    return provider.AmperePlayer.__new__(provider.AmperePlayer)
 
-    Declaring a feature Alexa cannot perform makes MA draw a scrubber that
-    silently does nothing, which is worse than not offering one.
+
+def _queue_with_seek(seconds):
+    """The chain play_media walks: queue -> current_item -> streamdetails."""
+    queue = SimpleNamespace(
+        current_item=SimpleNamespace(
+            streamdetails=SimpleNamespace(seek_position=seconds)))
+    return SimpleNamespace(get=lambda _qid: queue)
+
+
+def test_seek_is_supported_by_republishing_with_an_offset():
+    """Not through alexapy, which has no seek, but through the Item schema.
+
+    MA implements seek as play_media on the current item with an offset, and
+    Alexa's Item carries stream.offsetInMilliseconds, so the position rides
+    along with the queue that seek republishes.
     """
     provider = _provider_module()
     from music_assistant_models.enums import PlayerFeature
 
-    assert PlayerFeature.SEEK not in provider.PLAYER_FEATURES
+    assert PlayerFeature.SEEK in provider.PLAYER_FEATURES
     assert PlayerFeature.VOLUME_SET in provider.PLAYER_FEATURES
     assert PlayerFeature.NEXT_PREVIOUS in provider.PLAYER_FEATURES
+
+
+def test_the_seek_position_is_read_off_the_queue_in_milliseconds():
+    """Nothing in PlayerMedia carries it; the queue item's streamdetails do.
+
+    MA keeps it as float seconds and Alexa wants integer milliseconds.
+    """
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    media = SimpleNamespace(source_id="q1")
+    player.mass = SimpleNamespace(player_queues=_queue_with_seek(90.5))
+
+    assert player._seek_offset_ms(media) == 90500
+
+
+def test_a_plain_play_publishes_no_offset():
+    """An ordinary play must not inherit the last seek."""
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=_queue_with_seek(0.0))
+
+    assert player._seek_offset_ms(SimpleNamespace(source_id="q1")) == 0
+
+
+def test_a_queue_that_has_gone_is_not_an_offset_and_not_a_crash():
+    """Every hop to the offset is optional; a missing one means start at zero."""
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(get=lambda _qid: None))
+
+    assert player._seek_offset_ms(SimpleNamespace(source_id="q1")) == 0
+    assert player._seek_offset_ms(SimpleNamespace(source_id=None)) == 0
 
 
 def test_player_does_not_require_flow_mode():

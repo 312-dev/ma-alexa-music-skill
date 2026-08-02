@@ -41,10 +41,11 @@ def queue_client():
     return application.test_client()
 
 
-def publish(queue_client, tracks, name=""):
-    return queue_client.post(
-        "/queue", json={"tracks": tracks, "name": name}, headers=AUTH
-    )
+def publish(queue_client, tracks, name="", start_offset_ms=None):
+    body = {"tracks": tracks, "name": name}
+    if start_offset_ms is not None:
+        body["start_offset_ms"] = start_offset_ms
+    return queue_client.post("/queue", json=body, headers=AUTH)
 
 
 # --- publishing -------------------------------------------------------------
@@ -283,3 +284,60 @@ def test_handoff_name_falls_back_when_unlabeled(queue_client):
     time.sleep(0.01)
     publish(queue_client, ["t2"], "friday night")
     assert queue_api.handoff_name() == "friday night"
+
+
+# --- the seek offset --------------------------------------------------------
+#
+# Music Assistant has no seek command for a player that does not stream through
+# it: PlayerQueues.seek re-issues play_media on the current item with an
+# offset. So the offset has to travel with the queue that publish stores, or
+# Alexa starts the republished queue at zero and the track restarts.
+
+
+def test_a_published_queue_remembers_where_to_start(queue_client):
+    token = publish(queue_client, ["t1", "t2"], "evening",
+                    90500).get_json()["content_id"].split(":", 1)[1]
+    assert queue_api.start_offset_ms(token) == 90500
+
+
+def test_a_queue_published_without_an_offset_starts_at_the_beginning(queue_client):
+    token = publish(queue_client, ["t1", "t2"]).get_json()["content_id"].split(":", 1)[1]
+    assert queue_api.start_offset_ms(token) == 0
+
+
+def test_replaying_the_same_queue_clears_a_stale_seek(queue_client):
+    """The token is derived from the track ids, so a re-publish overwrites.
+
+    That is what stops a seek from haunting every later play of the same queue.
+    """
+    tracks = ["t1", "t2"]
+    token = publish(queue_client, tracks, "", 90500).get_json()[
+        "content_id"].split(":", 1)[1]
+    assert queue_api.start_offset_ms(token) == 90500
+
+    again = publish(queue_client, tracks).get_json()["content_id"].split(":", 1)[1]
+    assert again == token, "same ids, same record"
+    assert queue_api.start_offset_ms(token) == 0
+
+
+def test_an_unknown_token_has_no_offset(queue_client):
+    assert queue_api.start_offset_ms("nope") == 0
+
+
+def test_an_expired_queue_reports_no_offset(queue_client, monkeypatch):
+    """An offset onto tracks that are gone is worse than no offset."""
+    token = publish(queue_client, ["t1"], "", 90500).get_json()[
+        "content_id"].split(":", 1)[1]
+    monkeypatch.setattr(queue_api, "_expired", lambda record: True)
+    assert queue_api.start_offset_ms(token) == 0
+
+
+def test_a_non_integer_offset_is_refused(queue_client):
+    resp = publish(queue_client, ["t1"], "", "halfway")
+    assert resp.status_code == 400
+
+
+def test_a_negative_offset_is_clamped(queue_client):
+    token = publish(queue_client, ["t1"], "", -5).get_json()[
+        "content_id"].split(":", 1)[1]
+    assert queue_api.start_offset_ms(token) == 0

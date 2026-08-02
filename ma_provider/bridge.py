@@ -42,16 +42,22 @@ class BridgeClient:
     def headers(self) -> dict[str, str]:
         return {"X-Admin-Token": self.admin_token, "Content-Type": "application/json"}
 
-    def publish_request(self, track_ids: list[str], name: str = "") -> tuple[str, dict]:
+    def publish_request(self, track_ids: list[str], name: str = "",
+                        start_offset_ms: int = 0) -> tuple[str, dict]:
         """URL and body for a queue publish."""
         return (
             f"{self.base_url}/queue",
-            {"tracks": [str(t) for t in track_ids], "name": name or ""},
+            {
+                "tracks": [str(t) for t in track_ids],
+                "name": name or "",
+                "start_offset_ms": max(0, int(start_offset_ms or 0)),
+            },
         )
 
     # -- calls ---------------------------------------------------------------
 
-    async def publish_queue(self, track_ids: list[str], name: str = "") -> str:
+    async def publish_queue(self, track_ids: list[str], name: str = "",
+                            start_offset_ms: int = 0) -> str:
         """Publish a track list, returning its contentId.
 
         Raises rather than returning a sentinel: a caller that goes on to speak
@@ -62,7 +68,7 @@ class BridgeClient:
         if not track_ids:
             raise BridgeError("refusing to publish an empty queue")
 
-        url, body = self.publish_request(track_ids, name)
+        url, body = self.publish_request(track_ids, name, start_offset_ms)
         async with self.session.post(
             url, json=body, headers=self.headers, timeout=self.timeout
         ) as resp:

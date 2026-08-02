@@ -264,12 +264,18 @@ def _fetch(song_id: str) -> dict | None:
         return None
 
 
-def publish(track_ids: list[str], name: str = "") -> dict:
+def publish(track_ids: list[str], name: str = "",
+            start_offset_ms: int = 0) -> dict:
     """Store an ordered track list and return its record.
 
     Whole song records are stored, not ids, for the reason resolve_tracks
     caches whole records: re-fetching each song per Item put Initiate seconds
     over budget. Publishing is the one moment there is time to do the lookups.
+
+    `start_offset_ms` is how far into the **first** track playback should
+    begin. It exists because Music Assistant implements seek by re-issuing
+    play_media on the current item, so the only way a seek can survive the trip
+    to Alexa is to travel with the queue that trip publishes.
     """
     ids = [str(i) for i in track_ids if str(i or "").strip()]
     token = token_for(ids)
@@ -281,6 +287,11 @@ def publish(track_ids: list[str], name: str = "") -> dict:
         "tracks": songs,
         "requested": len(ids),
         "published": time.time(),
+        # The token is derived from the track ids, so re-publishing the same
+        # queue lands on the same record and this overwrites. That is what
+        # makes the offset self-clearing: a plain play of the same queue
+        # publishes 0 and the stale seek goes with it.
+        "start_offset_ms": max(0, int(start_offset_ms or 0)),
     }
     _write(record)
     _evict()
@@ -303,6 +314,25 @@ def resolve(token: str) -> list[dict]:
     if record is None:
         return []
     return [s for s in record.get("tracks", []) if s and s.get("id")]
+
+
+def start_offset_ms(token: str) -> int:
+    """How far into the first track a published queue should start.
+
+    Zero for anything this module did not publish, which is every content id
+    that did not come from Music Assistant. Read the same way `resolve` reads,
+    so an expired queue reports no offset rather than an offset onto tracks
+    that are no longer there.
+    """
+    if token == CURRENT:
+        record = _newest()
+    else:
+        record = _read(_path(token))
+        if record is not None and _expired(record):
+            record = None
+    if record is None:
+        return 0
+    return max(0, int(record.get("start_offset_ms") or 0))
 
 
 # --------------------------------------------------------------------------
@@ -329,10 +359,16 @@ def publish_queue():
     if not all(isinstance(t, str) for t in tracks):
         return jsonify({"error": "tracks must be a non-empty list of song ids"}), 400
 
-    record = publish(tracks, str(body.get("name") or ""))
+    try:
+        offset = int(body.get("start_offset_ms") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "start_offset_ms must be an integer"}), 400
+
+    record = publish(tracks, str(body.get("name") or ""), offset)
     logger.info(
-        "published external queue %s (%d of %d tracks) %r",
+        "published external queue %s (%d of %d tracks) %r%s",
         record["token"], len(record["tracks"]), record["requested"], record["name"],
+        f" starting at {record['start_offset_ms']}ms" if record["start_offset_ms"] else "",
     )
     return jsonify(
         {

@@ -77,15 +77,22 @@ SUBSONIC_DOMAINS = ("opensubsonic", "subsonic")
 # owns its own groups and MA must not try to make more.
 SUPPORTED_FEATURES: set[ProviderFeature] = set()
 
-# Seek is absent on purpose. There is no seek in alexapy at all, and
-# Alexa.SeekController is a Video API that does not apply to speakers.
-# Declaring SEEK would give MA a scrubber that does nothing, which is worse
-# than not offering one.
+# SEEK is declared even though there is no seek in alexapy and
+# Alexa.SeekController is a Video API that does not apply to speakers. It works
+# by a different route: MA implements seek as play_media on the current item
+# with an offset, and Alexa's own Item schema carries
+# `stream.offsetInMilliseconds`, so the position rides along with the queue the
+# seek republishes. See AmperePlayer._seek_offset_ms.
+#
+# Declaring it is not what makes MA offer the scrubber, either. PlayerQueues
+# .seek never consults the feature set, so the control was always live; before
+# the offset was threaded through it silently restarted the track.
 PLAYER_FEATURES: set[PlayerFeature] = {
     PlayerFeature.PLAY_MEDIA,
     PlayerFeature.PAUSE,
     PlayerFeature.NEXT_PREVIOUS,
     PlayerFeature.VOLUME_SET,
+    PlayerFeature.SEEK,
     # ENQUEUE is declared and implemented as a no-op. Alexa is handed the whole
     # queue at play_media and advances it itself, so there is nothing to
     # enqueue; but declaring it is what stops MA from re-issuing play_media per
@@ -333,7 +340,8 @@ class AmperePlayer(Player):
         alias = str(provider.config.get_value(CONF_ALIAS) or "ampere")
         name = media.title or (items[0].name if items else "") or label
 
-        await provider.bridge.publish_queue(track_ids, name)
+        offset_ms = self._seek_offset_ms(media)
+        await provider.bridge.publish_queue(track_ids, name, offset_ms)
 
         # The published queue is claimed by phrase, not by id. There is no
         # utterance that names an arbitrary track list, so the bridge maps one
@@ -349,6 +357,30 @@ class AmperePlayer(Player):
         self._attr_elapsed_time_last_updated = time.time()
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
+
+    def _seek_offset_ms(self, media: PlayerMedia) -> int:
+        """Where in the first published track playback should start.
+
+        MA has no seek command for a player that does not stream through it.
+        `PlayerQueues.seek` calls `play_index(..., seek_position=N)`, which puts
+        the offset on the queue item's streamdetails and then calls play_media
+        exactly as an ordinary play does. Nothing in PlayerMedia carries it, so
+        the queue is where it has to be read from.
+
+        Left unread, a seek republished the queue and Alexa started it at zero:
+        the song restarted while MA's own clock showed the position dragged to,
+        and the disagreement made the next pause press look like it did
+        nothing. queue_items already slices from current_index, so the offset
+        always belongs to the track being published first.
+        """
+        queue_id = media.source_id
+        if not queue_id:
+            return 0
+        queue = self.mass.player_queues.get(queue_id)
+        item = getattr(queue, "current_item", None)
+        details = getattr(item, "streamdetails", None)
+        # Seconds as a float on MA's side, milliseconds as an int on Alexa's.
+        return max(0, int(float(getattr(details, "seek_position", 0) or 0) * 1000))
 
     async def enqueue_next_media(self, media: PlayerMedia) -> None:
         """Deliberately nothing.
