@@ -76,7 +76,7 @@ def isolated(monkeypatch, tmp_path):
     views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
     views._BINDING.update(at=0.0, value=None)
     views._UPLOAD.update(running=False, phase="", percent=None, results=None,
-                         message="", done_at=0.0, cancel=False)
+                         message="", done_at=0.0, cancel=False, auto=False)
     views.TOKENS = validate.Tokens()
     yield
 
@@ -1316,6 +1316,72 @@ def test_upload_runs_as_a_job_and_reports_progress(ui, monkeypatch):
     assert resp.status_code == 200
     assert b"location.reload()" in resp.data
     assert b"removeEventListener" in resp.data
+
+
+def test_autosync_interval_is_floored_above_the_rate_limit(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    ui.post("/setup/wizard/autosync", data={"enabled": "1", "hours": "1"},
+            headers={"HX-Request": "true"})
+    assert store.load()["auto_sync_hours"] == views.AUTO_SYNC_MIN_HOURS
+
+    ui.post("/setup/wizard/autosync", data={"enabled": "1", "hours": "24"},
+            headers={"HX-Request": "true"})
+    assert store.load()["auto_sync_hours"] == 24
+
+    ui.post("/setup/wizard/autosync", data={"hours": "24"},
+            headers={"HX-Request": "true"})     # checkbox off = disabled
+    assert store.load()["auto_sync_hours"] == 0
+
+
+def test_autosync_due_respects_interval_and_floor(ui):
+    now = 1_000_000.0
+    state = {"catalogs": {"artists": "c1"}, "auto_sync_hours": 6,
+             "last_auto_sync": 0}
+    assert views._auto_sync_due(state, now) is True
+    state["last_auto_sync"] = now - 3600
+    assert views._auto_sync_due(state, now) is False
+    # An interval below the floor behaves as the floor, not as written.
+    state["auto_sync_hours"] = 1
+    state["last_auto_sync"] = now - 2 * 3600
+    assert views._auto_sync_due(state, now) is False
+    assert views._auto_sync_due({"auto_sync_hours": 0,
+                                 "catalogs": {"a": "c"}}, now) is False
+
+
+def test_scheduled_runs_ignore_the_parting_beacon(ui):
+    views._UPLOAD.update(running=True, cancel=False, auto=True)
+    ui.post("/setup/wizard/upload/stop")
+    assert views._UPLOAD["cancel"] is False
+
+
+def test_scheduled_upload_cycles_enablement_and_skips_unchanged(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    monkeypatch.setattr(views.catalog_sync, "collect",
+                        lambda progress=None: {"artists": [{"id": "a"}]})
+    monkeypatch.setattr(views.catalog_sync, "apply_timestamps",
+                        lambda kind, entities, saved: (entities, "hash-1"))
+    monkeypatch.setattr(smapi_rest, "upload_catalog",
+                        lambda catalog_id, payload: "up-9")
+    cycled = []
+    monkeypatch.setattr(views, "_cycle_enablement", lambda sid: (
+        cycled.append(sid) or {"ok": True, "detail": "cycled"}))
+
+    views._UPLOAD.update(running=True, auto=True, cancel=False)
+    views._run_upload(auto=True)
+    assert cycled == ["amzn1.ask.skill.a"]
+    kinds = {r["kind"]: r for r in views._UPLOAD["results"]}
+    assert kinds["enablement"]["ok"] is True
+
+    # Second run with identical content: nothing uploads, nothing cycles.
+    uploads_called = []
+    monkeypatch.setattr(smapi_rest, "upload_catalog",
+                        lambda catalog_id, payload: uploads_called.append(1))
+    views._UPLOAD.update(running=True, auto=True, cancel=False)
+    views._run_upload(auto=True)
+    assert not uploads_called
+    assert cycled == ["amzn1.ask.skill.a"]
+    kinds = {r["kind"]: r for r in views._UPLOAD["results"]}
+    assert kinds["artists"]["detail"] == "unchanged, skipped"
 
 
 def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):

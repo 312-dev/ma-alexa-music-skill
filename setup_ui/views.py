@@ -837,6 +837,9 @@ def step_context(step_key: str) -> dict:
             context["existing_skills"] = _existing_music_skills()
     if step_key == "upload":
         context["upload_job"] = dict(_UPLOAD)
+        context["auto_min_hours"] = AUTO_SYNC_MIN_HOURS
+        context["auto_last_ago"] = (ago(state["last_auto_sync"])
+                                    if state.get("last_auto_sync") else "")
     if step_key == "enable":
         context["binding"] = _binding_now(state)
     return context
@@ -1239,7 +1242,8 @@ def wizard_upload():
     with _UPLOAD_LOCK:
         if not _UPLOAD["running"]:
             _UPLOAD.update(running=True, phase="starting", percent=None,
-                           results=None, message="", done_at=0.0, cancel=False)
+                           results=None, message="", done_at=0.0, cancel=False,
+                           auto=False)
             threading.Thread(target=_run_upload, daemon=True).start()
     return fragment("wizard/_upload_progress.html", job=dict(_UPLOAD),
                     back="/setup/wizard/upload")
@@ -1249,7 +1253,7 @@ class _UploadStopped(Exception):
     """The page that started the upload was left before it finished."""
 
 
-def _run_upload() -> None:
+def _run_upload(auto: bool = False) -> None:
     # The crawl owns 0-85% of the bar (it dominates wall time); the five
     # catalog uploads share the last 15%.
     def _tell(text, fraction=None):
@@ -1258,6 +1262,7 @@ def _run_upload() -> None:
         _UPLOAD["phase"] = text
         _UPLOAD["percent"] = None if fraction is None else round(fraction * 85)
 
+    uploaded_any = False
     try:
         current = store.load()
         ids = catalog_ids(current)
@@ -1272,6 +1277,13 @@ def _run_upload() -> None:
             if not catalog_id or not entities:
                 continue
             final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
+            if kind in uploads and saved.get(kind) == hashes:
+                # Nothing changed since the last accepted upload. Skipping is
+                # what makes a schedule safe: only real deltas spend one of
+                # the rate-limited upload slots.
+                results.append({"kind": kind, "ok": True,
+                                "detail": "unchanged, skipped"})
+                continue
             _UPLOAD["phase"] = f"uploading {kind} ({len(final)} entities)"
             _UPLOAD["percent"] = 85 + round(15 * index / max(1, len(collected)))
             payload = json.dumps({
@@ -1286,9 +1298,20 @@ def _run_upload() -> None:
                 continue
             saved[kind] = hashes
             uploads[kind] = upload_id
+            uploaded_any = True
             results.append({"kind": kind, "ok": True,
                             "detail": f"{len(final)} entities, upload {upload_id}"})
         store.update(catalog_hashes=saved, uploads=uploads)
+        if auto and uploaded_any:
+            # An upload unbinds the provider slot without reporting it. A
+            # human is told to cycle afterwards; a schedule has to do it
+            # itself or it would silently break voice playback while every
+            # diagnostic stays green.
+            _UPLOAD["phase"] = "cycling enablement"
+            outcome = _cycle_enablement(
+                current.get("skill_id") or os.environ.get("SKILL_ID", ""))
+            results.append({"kind": "enablement", "ok": outcome["ok"],
+                            "detail": outcome["detail"]})
         _UPLOAD["results"] = results
     except _UploadStopped:
         _UPLOAD["message"] = ("Stopped: the page was left before the upload "
@@ -1302,17 +1325,76 @@ def _run_upload() -> None:
 
 
 _UPLOAD = {"running": False, "phase": "", "percent": None, "results": None,
-           "message": "", "done_at": 0.0, "cancel": False}
+           "message": "", "done_at": 0.0, "cancel": False, "auto": False}
 _UPLOAD_LOCK = threading.Lock()
+
+# The floor under the schedule interval. Amazon rate-limits music catalog
+# uploads per catalog per day; four runs a day stays under that ceiling, so
+# with this floor the limit is unreachable by construction. The diff check
+# in _run_upload means most scheduled runs upload nothing anyway.
+AUTO_SYNC_MIN_HOURS = 6
+
+
+def _auto_sync_due(state: dict, now: float) -> bool:
+    hours = int(state.get("auto_sync_hours") or 0)
+    if hours <= 0 or not state.get("catalogs"):
+        return False
+    hours = max(AUTO_SYNC_MIN_HOURS, hours)
+    return now - (state.get("last_auto_sync") or 0) >= hours * 3600
+
+
+def _auto_sync_loop() -> None:
+    while True:
+        time.sleep(60)
+        try:
+            state = store.load()
+            if not _auto_sync_due(state, time.time()):
+                continue
+            if not smapi_rest.connected():
+                continue
+            with _UPLOAD_LOCK:
+                if _UPLOAD["running"]:
+                    continue  # a manual run owns the job; try next minute
+                _UPLOAD.update(running=True, phase="starting (scheduled)",
+                               percent=None, results=None, message="",
+                               done_at=0.0, cancel=False, auto=True)
+            store.update(last_auto_sync=time.time())
+            _run_upload(auto=True)
+        except Exception:
+            import logging
+            logging.getLogger("ma-music-skill").exception("auto sync failed")
+
+
+_AUTO_SYNC_STARTED = threading.Event()
+
+
+def start_auto_sync() -> None:
+    if _AUTO_SYNC_STARTED.is_set():
+        return
+    _AUTO_SYNC_STARTED.set()
+    threading.Thread(target=_auto_sync_loop, daemon=True).start()
+
+
+@bp.post("/wizard/autosync")
+def wizard_autosync():
+    enabled = bool(request.form.get("enabled"))
+    try:
+        hours = int(request.form.get("hours") or 0)
+    except ValueError:
+        hours = 0
+    hours = max(AUTO_SYNC_MIN_HOURS, hours) if enabled else 0
+    store.update(auto_sync_hours=hours)
+    return fragment("wizard/_upload.html", upload_job=dict(_UPLOAD),
+                    **wizard_context())
 
 
 @bp.post("/wizard/upload/stop")
 def wizard_upload_stop():
     """The page's parting beacon. Leaving the upload page abandons the job:
     the running thread sees the flag at its next progress tick and stops
-    without recording anything."""
+    without recording anything. Scheduled runs are not the page's to stop."""
     with _UPLOAD_LOCK:
-        if _UPLOAD["running"]:
+        if _UPLOAD["running"] and not _UPLOAD.get("auto"):
             _UPLOAD["cancel"] = True
     return "", 204
 

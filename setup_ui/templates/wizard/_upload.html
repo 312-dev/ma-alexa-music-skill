@@ -42,3 +42,37 @@
      hx-swap="innerHTML"></div>
 <p><a href="/setup/wizard/ingestion" class="btn" data-variant="outline"
       hx-get="/setup/wizard/ingestion" hx-target="#ingestion">Check ingestion</a></p>
+
+<h3>Automatic sync</h3>
+<p class="quiet">
+  Rebuilds and uploads on a schedule. Only catalogs whose content changed are
+  uploaded, and any scheduled run that uploaded finishes by cycling enablement
+  itself, so a sync cannot silently unbind voice playback.
+</p>
+<form method="post" action="/setup/wizard/autosync"
+      hx-post="/setup/wizard/autosync" hx-target="#step-body">
+  <div role="group" class="field">
+    <label for="as-hours">Hours between runs</label>
+    <input id="as-hours" name="hours" type="number"
+           min="{{ auto_min_hours }}" step="1"
+           value="{{ state.auto_sync_hours or 24 }}">
+    <p class="quiet">Minimum {{ auto_min_hours }}: that caps runs at four a
+      day, under Amazon's per-catalog upload limit, so the rate limit cannot
+      be hit. Anything lower is raised to the floor.</p>
+  </div>
+  <div role="group" class="field">
+    <label>
+      <input type="checkbox" name="enabled" value="1"
+             {% if state.auto_sync_hours %}checked{% endif %}>
+      Sync automatically
+    </label>
+  </div>
+  <button type="submit" class="btn" data-variant="secondary">Save schedule</button>
+</form>
+{% if state.auto_sync_hours %}
+<p class="quiet">
+  <span class="pill ok">scheduled</span> Every {{ state.auto_sync_hours }}
+  hours{% if auto_last_ago %}; the last scheduled run started
+  {{ auto_last_ago }}{% endif %}.
+</p>
+{% endif %}

@@ -69,6 +69,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logring.attach()  # after basicConfig: a prior root handler would no-op it
 logger = logging.getLogger("ma-music-skill")
 
+setup_ui.views.start_auto_sync()
+
 app = Flask(__name__)
 
 # Queue handoff for Music Assistant, which composes queues this service has no
