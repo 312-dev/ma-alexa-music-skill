@@ -388,34 +388,57 @@ def test_the_utterance_names_the_kind_of_thing_it_wants():
     assert "playlist on whole apartment" in grouped
 
 
-def test_a_group_is_started_from_outside_itself():
-    """Telling a member to play on its own group silently never initiates.
+def test_a_group_is_started_by_one_of_its_own_members():
+    """A member is a perfectly good place to send the command.
 
-    Measured against real hardware: the content resolves, Initiate is never
-    sent, and Alexa says only "having trouble playing that". The identical
-    utterance from a device outside the group started four Echoes at once.
+    The only constraint is that the thing spoken to is a real Echo: a Whole
+    Home Audio group is a cluster with no dialog interface of its own. An
+    earlier version required a speaker from outside the group, on a measurement
+    taken while the binding detector was re-provisioning the skill underneath
+    live sessions and breaking attempts indiscriminately. A member is preferred
+    so Alexa's confirmation lands in a room the music is about to play in.
     """
     provider = _provider_module()
 
     speakers = {"MEM_A": object(), "MEM_B": object(), "OUTSIDER": object()}
     members = ["MEM_A", "MEM_B"]
 
-    assert provider._group_speaker(speakers, members) == "OUTSIDER"
+    assert provider._group_speaker(speakers, members) == "MEM_A"
 
 
 def test_the_group_speaker_choice_is_stable():
     """Discovery runs repeatedly; a different speaker each time is a race."""
     provider = _provider_module()
 
-    speakers = {"Z": object(), "A": object(), "M": object(), "MEM": object()}
-    members = ["MEM"]
+    speakers = {"Z": object(), "A": object(), "M": object(), "OUT": object()}
+    members = ["Z", "A", "M"]
     assert provider._group_speaker(speakers, members) == "A"
     assert provider._group_speaker(dict(reversed(list(speakers.items()))), members) == "A"
 
 
-def test_a_group_containing_every_speaker_falls_back_to_a_member():
-    """Better a player that cannot start than no player at all; the caller warns."""
+def test_a_group_containing_every_speaker_is_startable():
+    """The case the outside-only rule wrongly declared broken.
+
+    A house whose group holds every Echo it owns is the common case, not an
+    edge one, and it starts fine.
+    """
     provider = _provider_module()
 
     speakers = {"MEM_A": object(), "MEM_B": object()}
     assert provider._group_speaker(speakers, ["MEM_A", "MEM_B"]) == "MEM_A"
+
+
+def test_a_member_that_cannot_host_the_skill_is_not_spoken_to():
+    """clusterMembers can name a device that cannot run a music skill."""
+    provider = _provider_module()
+
+    speakers = {"CAPABLE": object(), "OUT": object()}
+    assert provider._group_speaker(speakers, ["NO_SKILL", "CAPABLE"]) == "CAPABLE"
+
+
+def test_a_group_of_only_incapable_members_still_gets_a_speaker():
+    """Never index an empty list; any real Echo is better than a crash."""
+    provider = _provider_module()
+
+    speakers = {"OUT_B": object(), "OUT_A": object()}
+    assert provider._group_speaker(speakers, ["NO_SKILL"]) == "OUT_A"

@@ -517,13 +517,6 @@ class AmpereAlexaProvider(PlayerProvider):
                 continue
             name = raw.get("accountName") or "Alexa group"
             spoken_to = _group_speaker(speakers, members)
-            if spoken_to in members:
-                self.logger.warning(
-                    "group %s has no speaker outside it, so its command has to "
-                    "go to one of its own members; Alexa refuses that and "
-                    "playback will not start",
-                    name,
-                )
             await self._publish(
                 f"{self.instance_id}:{raw['serialNumber']}",
                 _device(raw),
@@ -705,22 +698,27 @@ async def _load_cookie(login: AlexaLogin) -> dict[str, str] | None:
 def _group_speaker(speakers: dict[str, AlexaDevice], members: list[str]) -> str:
     """Pick the Echo that will be told to start a group.
 
-    A speaker group has no dialog interface, so the command goes to a device
-    and names the group in the sentence. That device must be **outside** the
-    group. Measured 2026-08-02: telling a member to play on a group it belongs
-    to resolves the content and then silently never initiates, so the speaker
-    says "having trouble playing that" and nothing in the logs explains why.
-    The same utterance from a device outside the group started all four at
-    once.
+    The constraint is only that the thing spoken to has to be a real Echo. A
+    Whole Home Audio group is a cluster, not a device, and has no dialog
+    interface of its own, so the command goes to a speaker and names the group
+    in the sentence. Any speaker will do, **including one of the group's own
+    members**.
 
-    Sorted rather than first-seen, because discovery runs repeatedly and a
-    speaker that moves between passes is a race nobody would find. Falls back
-    to a member when every capable speaker is inside the group: a player that
-    cannot start is still worth showing over one that does not exist, and the
-    caller warns about it.
+    An earlier version of this required a speaker from outside the group, on
+    the strength of a member-initiated attempt that resolved content and then
+    never initiated. That measurement is withdrawn: it was taken while the
+    binding detector was re-provisioning the skill underneath live sessions,
+    which broke attempts indiscriminately. Requiring an outsider was worse than
+    wrong, it made a group containing every Echo in the house look unstartable
+    when it starts fine.
+
+    Prefers a member so that Alexa's spoken confirmation lands in a room the
+    music is about to play in, rather than surprising a different one. Sorted
+    rather than first-seen, because discovery runs repeatedly and a speaker
+    that moves between passes is a race nobody would find.
     """
-    outside = sorted(s for s in speakers if s not in members)
-    return outside[0] if outside else members[0]
+    inside = sorted(s for s in members if s in speakers)
+    return inside[0] if inside else sorted(speakers)[0]
 
 
 def _first_phrase(value: Any, fallback: str) -> str:
