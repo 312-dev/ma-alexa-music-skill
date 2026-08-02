@@ -52,7 +52,59 @@
 </article>
 {% endif %}
 
+{% if scheduler and not scheduler.armed and scheduler.misses %}
+<article class="loud">
+  <h3>The binding is degraded and re-cycling did not fix it</h3>
+  <p>
+    A search reached this bridge and never turned into playback, so the skill
+    was re-provisioned and enabled again {{ scheduler.cycled_ago }}. Since
+    then {{ scheduler.misses }} more
+    {{ 'search has' if scheduler.misses == 1 else 'searches have' }} missed,
+    which means the cause is not the usual binding decay. Nothing further will
+    be cycled automatically until playback is seen working again.
+  </p>
+  <p><small>Check the catalog ingestion below and the
+    <a href="/setup/logs">logs</a>. The last thing to suspect is the directive
+    handlers: a miss means Amazon stopped asking, not that the answer was
+    wrong.</small></p>
+</article>
+{% endif %}
+
 {% include "_binding.html" %}
+
+{% if scheduler %}
+<article>
+  <header><strong>Scheduler</strong></header>
+  <table>
+    <tbody>
+      <tr><th>Catalog sync</th>
+        <td>{% if scheduler.sync_hours %}
+              every {{ scheduler.sync_hours }} hours, last ran
+              {{ scheduler.sync_last }}, next {{ scheduler.sync_due }}
+            {% else %}<span class="pill idle">off</span>
+              <a href="/setup/wizard/upload">turn it on</a>{% endif %}</td></tr>
+      <tr><th>Binding keep-alive</th>
+        <td>{% if scheduler.keepalive_due %}
+              re-cycles when the binding is over
+              {{ scheduler.keepalive_hours }} hours old and nothing is
+              playing, next {{ scheduler.keepalive_due }}
+            {% else %}<span class="pill idle">idle</span>
+              Nothing to keep alive until the skill is enabled.{% endif %}</td></tr>
+      <tr><th>Miss detector</th>
+        <td>{% if scheduler.armed %}<span class="pill ok">armed</span>
+              Will re-cycle once if a search fails to reach playback.
+            {% else %}<span class="pill warn">waiting for proof</span>
+              Cycled {{ scheduler.cycled_ago }}; holding off until playback is
+              observed working again.{% endif %}</td></tr>
+    </tbody>
+  </table>
+  <footer><small class="quiet">
+    The keep-alive prevents the decay on a clock. The detector catches what
+    that clock is too slow for, and fires at most once per outage so a cause
+    it cannot fix is not retried forever.
+  </small></footer>
+</article>
+{% endif %}
 
 <article>
   <header><strong>Last request received from Amazon</strong></header>

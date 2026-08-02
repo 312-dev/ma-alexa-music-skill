@@ -18,6 +18,23 @@
       {{ binding.cycled_ago }}{% endif %}.
     {% endif %}
   </p>
+  {% if health and health.searches %}
+  <p>
+    {% if health.reached == health.searches %}
+      <span class="pill ok">reaching playback</span>
+    {% elif health.miss %}
+      <span class="pill bad">not reaching playback</span>
+    {% else %}
+      <span class="pill warn">intermittent</span>
+    {% endif %}
+    {{ health.reached }} of the last {{ health.searches }} searches went on to
+    start playback.
+    {% if health.miss %}
+      The most recent one did not, which is what a decayed binding looks like
+      from here: Alexa found the content and then never asked for it.
+    {% endif %}
+  </p>
+  {% endif %}
   {% if result %}
   <p>{% if result.ok %}<span class="pill ok">done</span>
      {% else %}<span class="pill bad">failed</span>{% endif %}

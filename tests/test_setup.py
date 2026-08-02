@@ -1424,6 +1424,86 @@ def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
     assert store.load().get("uploads") in (None, {})
 
 
+def test_the_status_page_says_what_the_scheduler_will_do_and_when(ui, monkeypatch):
+    """A process whose whole job is acting while nobody watches must say so.
+
+    Before this the scheduler logged only to a ring buffer that a restart
+    empties, so "when did the keep-alive last run" could be answered only by
+    catching it in the act.
+    """
+    _all_steps_done(monkeypatch)
+    store.update(enabled_at=time.time(), auto_sync_hours=12,
+                 last_auto_sync=time.time() - 3600)
+    body = ui.get("/setup/status").data.decode()
+    assert "Scheduler" in body
+    assert "every 12 hours" in body
+    assert "Binding keep-alive" in body
+    assert "armed" in body
+
+
+def test_the_status_page_calls_out_a_binding_a_cycle_could_not_fix(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    store.update(reactive_armed=False, reactive_misses=4,
+                 reactive_cycled_at=time.time() - 900)
+    body = ui.get("/setup/status").data.decode()
+    assert "re-cycling did not fix it" in body
+    assert "4 more" in body
+
+
+def test_the_cycle_endpoint_answers_json_for_a_caller_that_is_not_a_browser(
+        ui, monkeypatch):
+    """Home Assistant calls this a couple of minutes before the wake alarm.
+
+    Pre-emption is the only way to guarantee a fresh binding at one named
+    instant; neither the keep-alive clock nor the miss detector can promise
+    that, and the alarm-driven routine is the moment nobody retries.
+    """
+    _all_steps_done(monkeypatch)
+    monkeypatch.setattr(smapi_rest, "delete_enablement", lambda sid: None)
+    monkeypatch.setattr(smapi_rest, "set_enablement", lambda sid: None)
+    monkeypatch.setattr(smapi_rest, "get_manifest",
+                        lambda sid: {"manifest": {"apis": {}}})
+    monkeypatch.setattr(smapi_rest, "update_manifest", lambda sid, m: None)
+
+    resp = ui.post("/setup/skill/cycle")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["enabled_at"] > 0
+
+
+def test_the_cycle_endpoint_reports_failure_with_a_non_200(ui, monkeypatch):
+    """A caller scheduling around this has to be able to tell it did not work."""
+    _all_steps_done(monkeypatch)
+
+    def refuse(sid):
+        raise smapi_rest.SmapiError("nope")
+
+    monkeypatch.setattr(smapi_rest, "get_manifest",
+                        lambda sid: {"manifest": {"apis": {}}})
+    monkeypatch.setattr(smapi_rest, "update_manifest", lambda sid, m: None)
+    monkeypatch.setattr(smapi_rest, "delete_enablement", lambda sid: None)
+    monkeypatch.setattr(smapi_rest, "set_enablement", refuse)
+
+    resp = ui.post("/setup/skill/cycle")
+    assert resp.status_code == 503
+    assert resp.get_json()["ok"] is False
+
+
+def test_the_health_endpoint_exposes_the_binding_measurement(ui, monkeypatch):
+    _all_steps_done(monkeypatch)
+    store.update(reactive_armed=False, reactive_misses=2)
+    body = ui.get("/setup/skill/health").get_json()
+    assert body["armed"] is False
+    assert body["misses_since_cycle"] == 2
+    assert body["degraded"] is True
+
+
+def test_the_admin_plane_still_guards_the_cycle_endpoint(client):
+    """It runs SMAPI against the operator's Amazon account, header or nothing."""
+    assert client.post("/setup/skill/cycle").status_code == 401
+
+
 def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
     _all_steps_done(monkeypatch)
     calls = []

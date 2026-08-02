@@ -17,8 +17,10 @@ import pathlib
 import socket
 import threading
 import time
+from datetime import datetime, timezone
 
-from flask import Blueprint, make_response, redirect, render_template, request
+from flask import (Blueprint, jsonify, make_response, redirect,
+                   render_template, request)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import catalog_sync
@@ -204,6 +206,20 @@ def ago(when: float) -> str:
     return f"{delta // 86400} days ago"
 
 
+def soon(delta: float) -> str:
+    """The mirror of ago, for something that has not happened yet."""
+    seconds = int(delta)
+    if seconds <= 0:
+        return "due now"
+    if seconds < 60:
+        return f"in {seconds} seconds"
+    if seconds < 3600:
+        return f"in {seconds // 60} minutes"
+    if seconds < 86400:
+        return f"in {seconds // 3600} hours"
+    return f"in {seconds // 86400} days"
+
+
 def last_requests(limit: int = 4) -> list[dict]:
     """The newest inbound captures.
 
@@ -381,7 +397,41 @@ def status_context(force: bool = False) -> dict:
         "checked_ago": ago(_SMAPI_CACHE["at"]) if _SMAPI_CACHE["at"] else "never",
         "alias": current.get("alias", ""),
         "binding": _binding_now(current),
+        "health": _binding_health(),
+        "scheduler": scheduler_context(current),
         "state": current,
+    }
+
+
+def scheduler_context(state: dict) -> dict:
+    """What the background thread is going to do, and when.
+
+    The scheduler was previously invisible: it logged to a ring buffer that a
+    restart empties, so "when did the keep-alive last run" could only be
+    answered by catching it in the act. For a process whose whole job is to
+    act while nobody is watching, that is the wrong default.
+    """
+    now = time.time()
+    hours = int(state.get("auto_sync_hours") or 0)
+    sync_due = 0.0
+    if hours:
+        hours = max(AUTO_SYNC_MIN_HOURS, hours)
+        sync_due = (state.get("last_auto_sync") or 0) + hours * 3600
+    keepalive_due = 0.0
+    if state.get("enabled") and state.get("skill_id"):
+        keepalive_due = ((state.get("enabled_at") or 0)
+                         + BINDING_KEEPALIVE_HOURS * 3600)
+    return {
+        "sync_hours": hours,
+        "keepalive_hours": BINDING_KEEPALIVE_HOURS,
+        "sync_last": (ago(state["last_auto_sync"])
+                      if state.get("last_auto_sync") else "never"),
+        "sync_due": soon(sync_due - now) if sync_due else "",
+        "keepalive_due": soon(keepalive_due - now) if keepalive_due else "",
+        "armed": bool(state.get("reactive_armed", True)),
+        "cycled_ago": (ago(state["reactive_cycled_at"])
+                       if state.get("reactive_cycled_at") else ""),
+        "misses": int(state.get("reactive_misses") or 0),
     }
 
 
@@ -921,7 +971,8 @@ def skill_enable():
         current.get("skill_id") or os.environ.get("SKILL_ID", ""))
     fresh = store.load()
     return fragment("_binding.html", result=result, state=fresh,
-                    binding=_binding_now(fresh, force=True))
+                    binding=_binding_now(fresh, force=True),
+                    health=_binding_health())
 
 
 @bp.post("/skill/disable")
@@ -941,7 +992,52 @@ def skill_disable():
             result = {"ok": False, "detail": _rest_error(exc)}
     fresh = store.load()
     return fragment("_binding.html", result=result, state=fresh,
-                    binding=_binding_now(fresh, force=True))
+                    binding=_binding_now(fresh, force=True),
+                    health=_binding_health())
+
+
+@bp.post("/skill/cycle")
+def skill_cycle():
+    """Cycle on demand, for a caller that is not a browser.
+
+    The point of this route is pre-emption. The highest-stakes moment for this
+    skill is a scheduled one: an alarm-driven routine asking for music into a
+    room where nobody is going to retry. Neither the keep-alive clock nor the
+    reactive detector can guarantee a fresh binding at one named instant, and
+    both are cheaper to skip than to make precise. So the caller that already
+    knows when that instant is gets to say so. Home Assistant calls this over
+    the tailnet a couple of minutes before the wake alarm, with X-Admin-Token.
+
+    Answers JSON rather than a fragment because nothing here renders it.
+    """
+    current = store.load()
+    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
+    result = _cycle_enablement(skill_id)
+    fresh = store.load()
+    body = {
+        "ok": result["ok"],
+        "detail": result["detail"],
+        "enabled_at": fresh.get("enabled_at") or 0,
+    }
+    return jsonify(body), (200 if result["ok"] else 503)
+
+
+@bp.get("/skill/health")
+def skill_health():
+    """The binding measured from real traffic, as JSON.
+
+    Same numbers the status page shows. Exposed separately so a monitor can
+    alert on a degraded binding without scraping HTML.
+    """
+    current = store.load()
+    health = _binding_health()
+    return jsonify({
+        **health,
+        "armed": bool(current.get("reactive_armed", True)),
+        "misses_since_cycle": int(current.get("reactive_misses") or 0),
+        "degraded": (not current.get("reactive_armed", True)
+                     and int(current.get("reactive_misses") or 0) > 0),
+    })
 
 
 @bp.get("/wizard")
@@ -1376,6 +1472,128 @@ def _recent_traffic(max_age: float = 1200.0) -> bool:
     return time.time() - newest < max_age
 
 
+# The two directives that prove a binding. A search arriving means Alexa
+# routed to this skill; an Initiate arriving means the provider slot actually
+# resolved to it. The gap between those two is where the decay lives.
+SEARCH_DIRECTIVE = "Alexa.Media.Search.GetPlayableContent"
+INITIATE_DIRECTIVE = "Alexa.Media.Playback.Initiate"
+
+# How long a search may go unanswered before it counts as a miss. Real pairs
+# land about two seconds apart; a minute is far past any plausible slow path
+# and keeps a search that is merely in flight from being called a failure.
+BINDING_GRACE_SECONDS = 60.0
+
+
+def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
+    """Recent searches and initiates, oldest first.
+
+    Read from the capture filenames alone. The name carries a sortable UTC
+    stamp and the directive, so the whole history is available without opening
+    a single file.
+    """
+    try:
+        entries = [
+            e for e in os.scandir(log_dir())
+            if e.name.endswith(".json")
+            and (SEARCH_DIRECTIVE in e.name or INITIATE_DIRECTIVE in e.name)
+        ]
+    except OSError:
+        return []
+    rows = []
+    for entry in entries:
+        try:
+            rows.append((entry.stat().st_mtime,
+                         SEARCH_DIRECTIVE if SEARCH_DIRECTIVE in entry.name
+                         else INITIATE_DIRECTIVE))
+        except OSError:
+            continue
+    rows.sort()
+    return rows[-limit:]
+
+
+def _binding_health(limit: int = 20, now: float | None = None) -> dict:
+    """Did recent searches actually reach playback.
+
+    This is the only honest measure of the binding there is. Amazon's own
+    enablement status reports True throughout the failure, the search resolves
+    against the catalog and is answered 200, and Initiate simply never comes.
+    So the question is asked of our own traffic instead: for each search, did
+    an Initiate follow it before the next search did.
+    """
+    stamp = time.time() if now is None else now
+    events = _binding_events()
+    pairs = []
+    for index, (when, kind) in enumerate(events):
+        if kind != SEARCH_DIRECTIVE:
+            continue
+        following = events[index + 1] if index + 1 < len(events) else None
+        if following is None and stamp - when < BINDING_GRACE_SECONDS:
+            continue  # still in flight, not yet an answer either way
+        pairs.append({"at": when,
+                      "reached": bool(following
+                                      and following[1] == INITIATE_DIRECTIVE)})
+    recent = pairs[-limit:]
+    initiates = [w for w, kind in events if kind == INITIATE_DIRECTIVE]
+    newest = recent[-1] if recent else None
+    return {
+        "searches": len(recent),
+        "reached": sum(1 for p in recent if p["reached"]),
+        "miss": bool(newest and not newest["reached"]),
+        "miss_at": newest["at"] if newest and not newest["reached"] else 0.0,
+        "last_initiate": initiates[-1] if initiates else 0.0,
+    }
+
+
+def _reactive_check(state: dict, now: float, log) -> None:
+    """Cycle once when a search fails to reach playback, then wait for proof.
+
+    The breaker exists because a cycle is not guaranteed to be the fix. If the
+    cause is something else, an unbounded reactor would cycle on every failed
+    request and churn the enablement against Amazon's rate limits for nothing.
+    So one attempt per outage, and re-arming requires evidence from a device,
+    never Amazon's own acknowledgement of the cycle: a 200 there proves
+    nothing, which is the trap this entire failure mode lives in.
+    """
+    health = _binding_health(now=now)
+    armed = bool(state.get("reactive_armed", True))
+    cycled_at = float(state.get("reactive_cycled_at") or 0.0)
+
+    if not armed and health["last_initiate"] > cycled_at:
+        store.update(reactive_armed=True, reactive_misses=0)
+        log.info("binding detector: playback recovered, re-armed")
+        return
+
+    if not health["miss"]:
+        return
+
+    if not armed:
+        misses = int(state.get("reactive_misses") or 0) + 1
+        store.update(reactive_misses=misses, reactive_last_miss=health["miss_at"])
+        log.warning("binding detector: still degraded, %d search(es) have "
+                    "missed since the cycle at %s; a re-cycle is not the fix "
+                    "for this one", misses, iso_utc(cycled_at))
+        return
+
+    if not (state.get("skill_id") or os.environ.get("SKILL_ID", "")):
+        return
+    if not smapi_rest.connected():
+        return
+
+    log.warning("binding detector: a search never reached playback, "
+                "cycling once")
+    outcome = _cycle_enablement(
+        state.get("skill_id") or os.environ.get("SKILL_ID", ""))
+    store.update(reactive_armed=False, reactive_cycled_at=time.time(),
+                 reactive_misses=0, reactive_last_miss=health["miss_at"])
+    log.info("binding detector: %s", outcome["detail"])
+
+
+def iso_utc(when: float) -> str:
+    if not when:
+        return "never"
+    return datetime.fromtimestamp(when, timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
 def _auto_sync_loop() -> None:
     import logging
     log = logging.getLogger("ma-music-skill")
@@ -1400,6 +1618,14 @@ def _auto_sync_loop() -> None:
                 outcome = _cycle_enablement(
                     state.get("skill_id") or os.environ.get("SKILL_ID", ""))
                 log.info("binding keep-alive: %s", outcome["detail"])
+                continue
+
+            # The reactive half. The keep-alive above prevents the decay it
+            # knows about, on a clock derived from one observation; this
+            # catches whatever that clock is too slow for. It deliberately
+            # runs on a miss rather than on quiet, so it is the one path here
+            # that may cycle during a session: the session is already broken.
+            _reactive_check(state, now, log)
         except Exception:
             log.exception("auto sync failed")
 
