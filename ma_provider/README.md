@@ -56,19 +56,19 @@ docker run -d --name music-assistant \
   ghcr.io/music-assistant/server:2.9.10
 ```
 
-### Restarting the container is not enough to load new provider code
+### If a change appears not to have taken effect, cycle the provider
 
-Measured 2026-08-02, the hard way, after several changes were reported as
-deployed and were not running. Rewriting the bind-mounted files and restarting
-Music Assistant re-registers the players and logs `Loaded player provider
-Ampere`, which looks exactly like a successful reload and is not one.
+Unresolved, 2026-08-02. A change deployed by rewriting the bind-mounted files
+and restarting Music Assistant appeared not to be running, and disabling and
+re-enabling the provider in MA's own settings made it take effect. A later
+change, deployed exactly the same way, **was** live after a plain restart, so
+"a restart never reloads" is not the rule.
 
-**Disable the provider in Music Assistant and re-enable it.** That is what
-actually re-reads the code.
-
-Anything measured against a restart alone is measuring the previous build, so
-when a fix appears to have no effect, cycle the provider before believing the
-result. This one cost several rounds of chasing a bug that was already fixed.
+Whatever the real mechanism, disable-and-re-enable is the cheap thing to try
+before concluding that a fix did not work. Do not trust `Loaded player provider
+Ampere` in the log as evidence the new code is running: it appears either way.
+The reliable check is to have the change log something that only the new build
+could log.
 
 Compose:
 
@@ -175,17 +175,23 @@ The fixed phrase is what is implemented. Two honest costs:
 `NextCommand`, `PreviousCommand`, `PauseCommand`, `PlayCommand` and volume, all
 through `alexapy`.
 
-**Seek is not implemented and is not declared.** There is no seek in `alexapy`
+**Seek works, but not through any seek command.** There is no seek in `alexapy`
 at all, and `Alexa.SeekController` is a Video API (TV, streaming device, games
-console) that does not apply to a speaker. Declaring `PlayerFeature.SEEK` would
-give MA a scrubber that silently does nothing, so the feature is left out of
-the player's supported features instead.
+console) that does not apply to a speaker. It works by republishing the queue
+with a start offset instead; see [Seek](#seek-the-offset-rides-with-the-queue).
+
+Declaring `PlayerFeature.SEEK` is not what exposes the scrubber, either.
+`PlayerQueues.seek` never consults the feature set, so the control was live
+while the feature was undeclared, and dragging it silently restarted the track.
 
 ### Speaker groups
 
 An Alexa speaker group has **no dialog interface**: sending it a text command
 does nothing at all. So a group player sends its command to one of its member
-Echoes and names the group in the sentence. That works, and it is better than
+Echoes and names the group in the sentence. Any real Echo will do, including a
+member of the group itself; an earlier version required a speaker from outside
+the group, which was wrong and made a group holding every Echo in the house
+look unstartable. That works, and it is better than
 the "preferred speakers" workaround usually recommended for this, which is a
 static per-room binding you change by hand in the Alexa app. Confirmed:
 `ask ampere to play music assistant on whole apartment` took four idle Echoes
@@ -197,6 +203,64 @@ to playing at once.
 `ask <alias> to ...` names the skill outright, which leaves the trailing
 `on <target>` free to be read as a target. That is how one sentence both picks
 the provider and distributes to four speakers.
+
+### A group must not claim to be powered
+
+MA decides whether a group owns its members in `Player.__final_active_group`:
+a group whose `powered` is `True` captures them outright, and only a group
+whose `powered` is *not* `True` falls through to `is_active_session`. A captured
+member is hidden from the player picker.
+
+So a group sets `powered` to `None`, not `True`, and answers `is_active_session`
+from its own playback state. Setting it `True` (which is right for a plain
+Echo) made every Echo in Whole Apartment vanish from the picker permanently,
+while still appearing under Settings > Players. **That gap is the diagnostic**:
+a player missing from the picker but present in settings is being hidden for
+being *owned*, not for being unavailable.
+
+`is_active_session` returns true only while **playing**, deliberately against
+MA's guidance that a group should also hold its members while paused. That
+guidance assumes a group the user can put down, and MA offers this player no
+stop control, only pause; holding through pause meant holding until something
+else started, which is the same permanent disappearance by a slower route.
+
+### What a cluster device actually reports
+
+Settled 2026-08-02 after three contradictory claims, one of them in this
+codebase's own docstring. A speaker group's `serialNumber` **does** answer
+`/api/np/player`, and reports real state:
+
+```
+group Whole Apartment reports 'PAUSED' -> paused (holding members: False)
+```
+
+It is polled like any other device. What it will not accept is a text command,
+which is a separate limitation and the reason a group's utterance goes to a
+member instead.
+
+An empty payload from a poll is not a report of idleness and must not be
+treated as one; only an explicit `IDLE` means idle. Reading empty as idle reset
+the group on every poll and discarded the position.
+
+### Seek: the offset rides with the queue
+
+MA has no seek command for a player that does not stream through it.
+`PlayerQueues.seek` never consults the feature set at all: it calls
+`play_index(..., seek_position=N)`, which puts the offset on the queue item's
+streamdetails and feeds MA's own `AudioBuffer`, then calls `play_media` exactly
+as an ordinary play does. Ampere has no reader for that buffer, so before this
+was handled a seek simply republished the queue and Alexa started it from zero:
+the song restarted while MA's clock showed the position dragged to.
+
+Alexa's `Item` schema carries `stream.offsetInMilliseconds`, so the position
+travels with the queue the seek republishes. Read the offset from the item
+addressed by `media.queue_item_id`, **not** from `queue.current_item`:
+`play_index` loads the item first and assigns `current_item` afterwards, so a
+seek can read the previous item and find no offset. That failed one seek in a
+run of otherwise correct ones.
+
+Only the first item carries the offset. A `GetNextItem` that inherited it would
+drop the same interval off every remaining track.
 
 ## Known wart: once Alexa is playing, Alexa owns the position
 
