@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import socket
 import threading
@@ -37,6 +38,8 @@ bp = Blueprint(
     static_folder="static",
     static_url_path="/static",
 )
+
+logger = logging.getLogger("ma-music-skill.setup")
 
 TOKENS = validate.Tokens()
 
@@ -1410,6 +1413,12 @@ def _run_upload(auto: bool = False) -> None:
                               "finished. Nothing was recorded; run it again "
                               "when you are ready.")
     except Exception as exc:
+        # Logged as well as shown, because the dict is the only other record
+        # and it is read by one page. A run started from a browser tab that is
+        # then closed, or from curl, failed here in complete silence: the whole
+        # library crawl ran, hit the container's memory ceiling, and left
+        # nothing behind but a log that stopped mid-crawl.
+        logger.exception("catalog upload failed")
         _UPLOAD["message"] = f"Could not read the library: {exc}"
     finally:
         _UPLOAD["running"] = False
@@ -1591,8 +1600,7 @@ def iso_utc(when: float) -> str:
 
 
 def _auto_sync_loop() -> None:
-    import logging
-    log = logging.getLogger("ma-music-skill")
+    log = logger
     while True:
         time.sleep(60)
         try:

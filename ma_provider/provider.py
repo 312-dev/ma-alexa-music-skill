@@ -323,7 +323,13 @@ class AmperePlayer(Player):
                 "bridge streams from"
             )
 
-        label = str(provider.config.get_value(CONF_HANDOFF_PHRASE) or "music assistant")
+        # The setting is a comma separated list so a phrase that collides with
+        # something else on the account can be moved off without giving up the
+        # old one, which Alexa may still be holding. The bridge accepts any of
+        # them; only one can be said, and it is the first.
+        label = _first_phrase(
+            provider.config.get_value(CONF_HANDOFF_PHRASE), "music assistant"
+        )
         alias = str(provider.config.get_value(CONF_ALIAS) or "ampere")
         name = media.title or (items[0].name if items else "") or label
 
@@ -686,6 +692,16 @@ async def _load_cookie(login: AlexaLogin) -> dict[str, str] | None:
         return None  # a corrupt jar is a fresh login, not a crash
     cookies = login._get_cookies_from_session()
     return cast("dict[str, str]", cookies) if cookies else None
+
+
+def _first_phrase(value: Any, fallback: str) -> str:
+    """The one phrase to say, out of a comma separated list of accepted ones.
+
+    Saying the raw setting would utter the whole list, which resolves to
+    nothing at all. The bridge accepts every entry; only the first is spoken.
+    """
+    parts = [p.strip() for p in str(value or "").split(",") if p.strip()]
+    return parts[0] if parts else fallback
 
 
 def _is_group(raw: dict[str, Any]) -> bool:

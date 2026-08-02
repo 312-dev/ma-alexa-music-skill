@@ -223,3 +223,148 @@ def test_group_detection():
     assert provider._is_group({"deviceFamily": "WHA"})
     assert not provider._is_group({"deviceFamily": "ECHO"})
     assert not provider._is_group({})
+
+
+# --- rediscovery ------------------------------------------------------------
+
+
+class _FakePlayers:
+    """Just enough of MA's PlayerController to see which branch was taken."""
+
+    def __init__(self, existing=None):
+        self._existing = existing
+        self.registered = []
+
+    def get_player(self, player_id, raise_unavailable=False):
+        return self._existing
+
+    async def register_or_update(self, player):
+        self.registered.append(player)
+
+
+class _FakeMass:
+    def __init__(self, players):
+        self.players = players
+
+
+def _device(provider, serial="S1"):
+    device = provider.AlexaDevice()
+    device.device_serial_number = serial
+    device._cluster_members = []
+    return device
+
+
+def test_a_rediscovered_player_is_refreshed_not_replaced():
+    """Handing a fresh Player to register_or_update un-registers it.
+
+    That method swaps the object into the controller's dict and returns
+    without re-running registration, so the replacement never gets
+    `set_initialized()`. `all_players` filters on exactly that, which is what
+    the UI and the whole API read: every player silently disappeared while
+    still sitting in the dict.
+    """
+    provider = _provider_module()
+
+    refreshed = {}
+
+    class _Existing(provider.AmperePlayer):
+        def __init__(self):
+            self.is_group = False
+            self.updated = 0
+
+        def refresh(self, device, name, *, speaker=None, member_ids=None):
+            refreshed.update(device=device, name=name, speaker=speaker,
+                             member_ids=member_ids)
+
+        def update_state(self, *a, **k):
+            self.updated += 1
+
+    existing = _Existing()
+    players = _FakePlayers(existing)
+    stand_in = type("P", (), {"mass": _FakeMass(players)})()
+
+    device = _device(provider)
+    asyncio.run(provider.AmpereAlexaProvider._publish(
+        stand_in, "p1", device, "Kitchen Echo"))
+
+    assert players.registered == [], "must not re-register an existing player"
+    assert refreshed["name"] == "Kitchen Echo"
+    assert existing.updated == 1
+
+
+def test_a_player_seen_for_the_first_time_is_registered():
+    """Only the branch is under test, so the Player itself is a stub.
+
+    MA's Player.__init__ writes a default player config through the whole
+    config controller. Standing that up would make this a test of MA rather
+    than of which branch `_publish` takes.
+    """
+    provider = _provider_module()
+
+    built = []
+
+    class _Stub:
+        def __init__(self, prov, player_id, device, name, **kwargs):
+            self.player_id = player_id
+            self.name = name
+            self.kwargs = kwargs
+            built.append(self)
+
+    players = _FakePlayers(None)
+    stand_in = type("P", (), {"mass": _FakeMass(players)})()
+    device = _device(provider)
+
+    real = provider.AmperePlayer
+    provider.AmperePlayer = _Stub
+    try:
+        asyncio.run(provider.AmpereAlexaProvider._publish(
+            stand_in, "p1", device, "Kitchen Echo", is_group=True,
+            member_ids=["m1"]))
+    finally:
+        provider.AmperePlayer = real
+
+    assert len(players.registered) == 1
+    assert players.registered[0] is built[0]
+    assert built[0].player_id == "p1"
+    assert built[0].name == "Kitchen Echo"
+    assert built[0].kwargs["is_group"] is True
+    assert built[0].kwargs["member_ids"] == ["m1"]
+
+
+def test_refresh_takes_the_new_name_and_members_and_leaves_the_rest():
+    """A rediscovery can rename a group or change its members, nothing else."""
+    provider = _provider_module()
+
+    player = provider.AmperePlayer.__new__(provider.AmperePlayer)
+    player.is_group = True
+    player.group_name = "Old Name"
+    player._titles_to_items = {"a": "b"}
+
+    device = _device(provider, "S2")
+    speaker = _device(provider, "S3")
+    player.refresh(device, "Whole Apartment", speaker=speaker,
+                   member_ids=["m1", "m2"])
+
+    assert player.group_name == "Whole Apartment"
+    assert player._attr_name == "Whole Apartment"
+    assert player.device is device
+    assert player.speaker is speaker
+    assert player._attr_group_members == ["m1", "m2"]
+    # The queue's title index belongs to playback, not to discovery.
+    assert player._titles_to_items == {"a": "b"}
+
+
+def test_only_the_first_handoff_phrase_is_spoken():
+    """The setting is a list of phrases the bridge accepts, not one phrase.
+
+    Uttering the raw setting says the commas out loud and resolves to nothing,
+    which is a silent failure: Amazon answers the speaker, not the bridge, so
+    no log anywhere records it.
+    """
+    provider = _provider_module()
+
+    assert provider._first_phrase("ampere queue, music assistant", "x") == "ampere queue"
+    assert provider._first_phrase("  music assistant  ", "x") == "music assistant"
+    assert provider._first_phrase("", "fallback") == "fallback"
+    assert provider._first_phrase(None, "fallback") == "fallback"
+    assert provider._first_phrase(",, ,", "fallback") == "fallback"
