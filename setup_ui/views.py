@@ -1478,31 +1478,54 @@ def _recent_traffic(max_age: float = 1200.0) -> bool:
     return newest is not None and time.time() - newest < max_age
 
 
-# The two directives that prove a binding. A search arriving means Alexa
-# routed to this skill; an Initiate arriving means the provider slot actually
-# resolved to it. The gap between those two is where the decay lives.
+# The directives that prove a binding. A search arriving means Alexa routed to
+# this skill; an Initiate arriving means the provider slot actually resolved to
+# it. The gap between those two is where the decay lives.
 SEARCH_DIRECTIVE = "Alexa.Media.Search.GetPlayableContent"
 INITIATE_DIRECTIVE = "Alexa.Media.Playback.Initiate"
+
+# GetNextItem only arrives at a track boundary of a session this skill is
+# already serving, so it is proof of a live binding just as strong as an
+# Initiate. It was excluded at first for being the bulk of the traffic, which
+# confused "says nothing about which search reached playback" with "says
+# nothing about the binding". It answers the second question dispositively.
+PLAYING_DIRECTIVE = "Alexa.Audio.PlayQueue.GetNextItem"
+PROOF_DIRECTIVES = (INITIATE_DIRECTIVE, PLAYING_DIRECTIVE)
 
 # How long a search may go unanswered before it counts as a miss. Real pairs
 # land about two seconds apart; a minute is far past any plausible slow path
 # and keeps a search that is merely in flight from being called a failure.
 BINDING_GRACE_SECONDS = 60.0
 
+# How many searches in a row must miss before a cycle is worth attempting.
+#
+# One is not enough, measured 2026-08-02. A voice transfer between speakers
+# emits a TRACK-level search to re-describe the playing item and never emits an
+# Initiate, because Amazon re-forms the speaker cluster in its own audio layer
+# and simply re-pulls the existing stream URL with a Range request. A single
+# superseded or cancelled utterance looks the same. Both are normal, and the
+# detector cycled the skill on both, which is worse than doing nothing: the
+# cycle lands mid-session and is itself the thing that breaks playback.
+#
+# The real outage produced three misses in a row with no playback of any kind
+# between them, so two is enough to separate the shapes.
+REACTIVE_MISS_THRESHOLD = 2
 
-def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
-    """Recent searches and initiates, oldest first.
+
+def _binding_events(limit: int = 400) -> list[tuple[float, str]]:
+    """Recent searches and proof-of-playback directives, oldest first.
 
     Read from the capture filenames alone. The name carries a sortable UTC
     stamp and the directive, so lexical order is chronological order and the
     whole history is available for one scandir and no stat calls at all. This
     is the same technique app.prune_captures uses, for the same reason.
     """
+    wanted = (SEARCH_DIRECTIVE, *PROOF_DIRECTIVES)
     try:
         names = sorted(
             e.name for e in os.scandir(captures.log_dir())
             if e.name.endswith(".json")
-            and (SEARCH_DIRECTIVE in e.name or INITIATE_DIRECTIVE in e.name)
+            and any(directive in e.name for directive in wanted)
         )
     except OSError:
         return []
@@ -1511,8 +1534,8 @@ def _binding_events(limit: int = 200) -> list[tuple[float, str]]:
         when = captures.capture_time(name)
         if when is None:
             continue  # a name we did not write proves nothing about binding
-        rows.append((when, SEARCH_DIRECTIVE if SEARCH_DIRECTIVE in name
-                     else INITIATE_DIRECTIVE))
+        kind = next(d for d in wanted if d in name)
+        rows.append((when, kind))
     return rows
 
 
@@ -1536,16 +1559,26 @@ def _binding_health(limit: int = 20, now: float | None = None) -> dict:
             continue  # still in flight, not yet an answer either way
         pairs.append({"at": when,
                       "reached": bool(following
-                                      and following[1] == INITIATE_DIRECTIVE)})
+                                      and following[1] in PROOF_DIRECTIVES)})
     recent = pairs[-limit:]
-    initiates = [w for w, kind in events if kind == INITIATE_DIRECTIVE]
+    played = [w for w, kind in events if kind in PROOF_DIRECTIVES]
     newest = recent[-1] if recent else None
+
+    # Trailing run only. An older miss that has since been followed by a search
+    # that reached playback is history, not an outage.
+    consecutive = 0
+    for pair in reversed(recent):
+        if pair["reached"]:
+            break
+        consecutive += 1
+
     return {
         "searches": len(recent),
         "reached": sum(1 for p in recent if p["reached"]),
         "miss": bool(newest and not newest["reached"]),
         "miss_at": newest["at"] if newest and not newest["reached"] else 0.0,
-        "last_initiate": initiates[-1] if initiates else 0.0,
+        "consecutive_misses": consecutive,
+        "last_initiate": played[-1] if played else 0.0,
     }
 
 
@@ -1571,6 +1604,14 @@ def _reactive_check(state: dict, now: float, log) -> None:
     if not health["miss"]:
         return
 
+    # Counted once per search, not once per check. The miss is identified by
+    # the instant it happened, so a tick that re-reads the same unanswered
+    # search adds nothing. Without this the count was really a count of
+    # elapsed minutes: ten reported misses from one real one, measured
+    # 2026-08-02 over a window with no searches in it at all.
+    if health["miss_at"] <= float(state.get("reactive_last_miss") or 0.0):
+        return
+
     if not armed:
         misses = int(state.get("reactive_misses") or 0) + 1
         store.update(reactive_misses=misses, reactive_last_miss=health["miss_at"])
@@ -1579,13 +1620,20 @@ def _reactive_check(state: dict, now: float, log) -> None:
                     "for this one", misses, iso_utc(cycled_at))
         return
 
+    if health["consecutive_misses"] < REACTIVE_MISS_THRESHOLD:
+        store.update(reactive_last_miss=health["miss_at"])
+        log.info("binding detector: a search missed playback, waiting for a "
+                 "second before calling it an outage (a voice transfer looks "
+                 "exactly like this and is not one)")
+        return
+
     if not (state.get("skill_id") or os.environ.get("SKILL_ID", "")):
         return
     if not smapi_rest.connected():
         return
 
-    log.warning("binding detector: a search never reached playback, "
-                "cycling once")
+    log.warning("binding detector: %d searches in a row never reached "
+                "playback, cycling once", health["consecutive_misses"])
     outcome = _cycle_enablement(
         state.get("skill_id") or os.environ.get("SKILL_ID", ""))
     store.update(reactive_armed=False, reactive_cycled_at=time.time(),

@@ -20,6 +20,7 @@ import smapi_rest
 
 SEARCH = views.SEARCH_DIRECTIVE
 INITIATE = views.INITIATE_DIRECTIVE
+PLAYING = views.PLAYING_DIRECTIVE
 
 
 @pytest.fixture(autouse=True)
@@ -105,10 +106,25 @@ def test_the_real_outage_shape_is_read_correctly(isolated):
     assert health["miss"] is False, "the newest search did reach playback"
 
 
-def test_health_ignores_directives_that_prove_nothing(isolated):
-    """GetNextItem is the bulk of the traffic and says nothing about binding."""
+def test_a_track_boundary_proves_the_binding_as_well_as_an_initiate(isolated):
+    """GetNextItem only arrives for a session this skill is already serving.
+
+    It was excluded at first for being the bulk of the traffic. That confused
+    two questions: it does not say which search reached playback, but it says
+    the binding is alive, which is the only thing the detector acts on.
+    """
     write_capture(isolated, 300, SEARCH)
-    write_capture(isolated, 200, "Alexa.Audio.PlayQueue.GetNextItem")
+    write_capture(isolated, 200, PLAYING)
+    health = views._binding_health()
+    assert health["miss"] is False
+    assert health["reached"] == 1
+    assert health["last_initiate"] > 0, "playback observed, whatever named it"
+
+
+def test_health_ignores_directives_that_prove_nothing(isolated):
+    """A directive that is neither a search nor evidence of audio is noise."""
+    write_capture(isolated, 300, SEARCH)
+    write_capture(isolated, 200, "Alexa.Media.Playback.Pause")
     health = views._binding_health()
     assert health["miss"] is True
 
@@ -185,7 +201,8 @@ def armed_skill(monkeypatch):
     return cycles
 
 
-def test_a_miss_triggers_exactly_one_cycle(isolated, armed_skill):
+def test_a_run_of_misses_triggers_exactly_one_cycle(isolated, armed_skill):
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     log = FakeLog()
     views._reactive_check(store.load(), time.time(), log)
@@ -195,12 +212,40 @@ def test_a_miss_triggers_exactly_one_cycle(isolated, armed_skill):
     assert after["reactive_cycled_at"] > 0
 
 
+def test_a_single_miss_waits_for_a_second_opinion(isolated, armed_skill):
+    """The regression that ruined an evening of measurements.
+
+    A voice transfer between speakers emits a TRACK-level search to re-describe
+    the playing item and never emits an Initiate, because Amazon re-forms the
+    speaker cluster in its own audio layer and re-pulls the existing stream URL
+    with a Range request. Measured 2026-08-02: the detector read that as a dead
+    binding and cycled the skill one second after a successful Initiate, while
+    an Echo was mid-stream. The cycle was itself the outage.
+    """
+    write_capture(isolated, 300, SEARCH)
+    log = FakeLog()
+    views._reactive_check(store.load(), time.time(), log)
+    assert armed_skill == [], "one unanswered search is not an outage"
+    assert store.load()["reactive_armed"] is True
+
+
+def test_a_miss_that_playback_followed_is_not_part_of_a_run(isolated, armed_skill):
+    """The run has to be trailing. Old misses that recovered are history."""
+    write_capture(isolated, 500, SEARCH)
+    write_capture(isolated, 400, SEARCH)
+    write_capture(isolated, 398, INITIATE)
+    write_capture(isolated, 300, SEARCH)
+    views._reactive_check(store.load(), time.time(), FakeLog())
+    assert armed_skill == [], "only the newest miss is outstanding"
+
+
 def test_further_misses_do_not_cycle_again(isolated, armed_skill):
     """A cause the cycle cannot fix must not be retried on every request.
 
     Without this the reactor would churn the enablement against Amazon's rate
     limits for as long as the real fault lasted.
     """
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     log = FakeLog()
     views._reactive_check(store.load(), time.time(), log)
@@ -211,7 +256,23 @@ def test_further_misses_do_not_cycle_again(isolated, armed_skill):
     views._reactive_check(store.load(), time.time(), log)
 
     assert len(armed_skill) == 1, "one attempt per outage"
-    assert store.load()["reactive_misses"] == 2
+    assert store.load()["reactive_misses"] == 1, "one search, not one per tick"
+
+
+def test_a_miss_is_counted_once_however_often_it_is_read(isolated, armed_skill):
+    """The count is of searches, not of elapsed minutes.
+
+    Measured 2026-08-02: over ten minutes in which no search arrived at all,
+    the detector reported the miss count climbing from one to ten, because
+    every tick re-read the same unanswered search and added to the total.
+    """
+    write_capture(isolated, 400, SEARCH)
+    write_capture(isolated, 300, SEARCH)
+    log = FakeLog()
+    for _ in range(6):
+        views._reactive_check(store.load(), time.time(), log)
+    assert store.load()["reactive_misses"] == 0, "nothing new has missed"
+    assert len(armed_skill) == 1
 
 
 def test_it_re_arms_only_on_observed_playback(isolated, armed_skill):
@@ -221,6 +282,7 @@ def test_it_re_arms_only_on_observed_playback(isolated, armed_skill):
     reports enabled throughout. Only an Initiate landing after the attempt is
     evidence the provider slot is really bound.
     """
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     log = FakeLog()
     views._reactive_check(store.load(), time.time(), log)
@@ -241,6 +303,7 @@ def test_it_re_arms_only_on_observed_playback(isolated, armed_skill):
 def test_an_initiate_from_before_the_cycle_does_not_re_arm(isolated, armed_skill):
     """Stale evidence is not evidence. The Initiate has to postdate the attempt."""
     write_capture(isolated, 4000, INITIATE)
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     log = FakeLog()
     views._reactive_check(store.load(), time.time(), log)
@@ -261,6 +324,7 @@ def test_it_does_nothing_without_a_skill(isolated, monkeypatch):
     cycles = []
     monkeypatch.setattr(views, "_cycle_enablement",
                         lambda sid: cycles.append(sid))
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     views._reactive_check(store.load(), time.time(), FakeLog())
     assert cycles == []
@@ -272,6 +336,7 @@ def test_it_does_nothing_while_disconnected_from_amazon(isolated, monkeypatch):
     cycles = []
     monkeypatch.setattr(views, "_cycle_enablement",
                         lambda sid: cycles.append(sid))
+    write_capture(isolated, 400, SEARCH)
     write_capture(isolated, 300, SEARCH)
     views._reactive_check(store.load(), time.time(), FakeLog())
     assert cycles == []
