@@ -1,0 +1,13 @@
+<nav aria-label="Progress" class="steps" id="steprail"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
+  <ol>
+    {% for row in rows %}
+    <li class="{{ 'done' if row.done else '' }}{{ ' current' if row.index == step.index else '' }}">
+      {% if row.reachable or row.done %}
+      <a class="step" href="/setup/wizard/{{ row.key }}"><span class="step-num">{{ row.number }}</span><span class="step-label">{{ row.title }}</span></a>
+      {% else %}
+      <span class="step locked"><span class="step-num">{{ row.number }}</span><span class="step-label">{{ row.title }}</span></span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</nav>

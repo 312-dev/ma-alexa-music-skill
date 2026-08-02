@@ -1069,7 +1069,8 @@ def test_each_step_offers_back_and_continue(ui, monkeypatch):
 
 def test_continue_is_disabled_on_an_unfinished_step(ui):
     body = ui.get("/setup/wizard/server").data.decode()
-    assert '<button class="btn" disabled>Continue</button>' in body
+    assert 'title="Complete this step to unlock Continue."' in body
+    assert '>Continue</a>' not in body
 
 
 def test_wizard_alias_step_prefills_the_default(ui, monkeypatch):
@@ -1438,6 +1439,44 @@ def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
     assert "not bound" in body
 
 
+def test_ingestion_success_unlocks_continue_without_a_reload(ui, monkeypatch):
+    # The polled panel observing voice ready must (1) seed the step gate's
+    # cache so done flips immediately and (2) swap the rail and stepnav
+    # out of band so Continue goes live with no page reload.
+    _all_steps_done(monkeypatch)
+    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    body = ui.get("/setup/wizard/ingestion",
+                  headers={"HX-Request": "true"}).data.decode()
+    assert 'hx-swap-oob="outerHTML"' in body
+    assert 'id="stepnav"' in body
+    assert '>Continue</a>' in body
+    assert views.wizard_steps._INGESTION["ok"] is True
+
+    # Ingestion still pending: no out of band swap rides along.
+    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
+        "ingestionSteps": [{"name": "ER_INGESTION", "status": "IN_PROGRESS"}]})
+    body = ui.get("/setup/wizard/ingestion",
+                  headers={"HX-Request": "true"}).data.decode()
+    assert "hx-swap-oob" not in body
+
+
+def test_playlists_shuffle_only_when_the_setting_is_on(cfg):
+    import app as bridge
+    assert bridge.shuffle_by_default("pl:x") is False
+    cfg.post("/setup/stations", data={
+        "after_content": "stop", "radio_artists": "12",
+        "radio_tracks_per_artist": "12", "shuffle_playlists": "1"})
+    assert store.load()["shuffle_playlists"] is True
+    assert bridge.shuffle_by_default("pl:x") is True
+    assert bridge.shuffle_by_default("al:x") is False   # albums never default on
+
+    cfg.post("/setup/stations", data={
+        "after_content": "stop", "radio_artists": "12",
+        "radio_tracks_per_artist": "12"})
+    assert bridge.shuffle_by_default("pl:x") is False
+
+
 def test_logs_page_shows_the_ring_tail_and_captures(ui, anon):
     assert anon.get("/setup/logs").status_code == 401
     logging.getLogger("ma-music-skill").info("ring probe line 4711")
@@ -1487,7 +1526,7 @@ def test_continue_is_disabled_while_an_upload_runs(ui, monkeypatch):
     _all_steps_done(monkeypatch)
     views._UPLOAD.update(running=True, phase="reading the library")
     body = ui.get("/setup/wizard/upload").data.decode()
-    assert '<button class="btn" disabled>Continue</button>' in body
+    assert 'title="An upload is running.' in body
     assert '>Continue</a>' not in body
 
 

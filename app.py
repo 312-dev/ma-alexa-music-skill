@@ -948,7 +948,9 @@ def generic_response(payload_version: str = "3.0") -> Response:
 
 # Asking for an artist and getting the first track of their earliest album,
 # every single time, is not what anyone means. Collections shuffle by default;
-# albums and playlists keep their order, because their order is the point.
+# albums keep their order, because their order is the point. Playlists sit in
+# between (some are ordered mixtapes, some are just buckets), so theirs is a
+# saved setting, off unless turned on.
 #
 # This has to be a default rather than a reading of the request: Alexa sends
 # `shuffle: false` on every fresh Initiate, so "the user turned it off" and
@@ -959,7 +961,10 @@ SHUFFLE_BY_DEFAULT = {"ar", "gen", "star", "rnd", "rad"}
 
 
 def shuffle_by_default(content_id: str) -> bool:
-    return content_id.partition(":")[0] in SHUFFLE_BY_DEFAULT
+    prefix = content_id.partition(":")[0]
+    if prefix == "pl":
+        return bool(_saved_settings().get("shuffle_playlists"))
+    return prefix in SHUFFLE_BY_DEFAULT
 
 
 def warm_continuation(content_id: str) -> None:

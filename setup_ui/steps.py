@@ -153,6 +153,21 @@ def _ingestion_complete(state: dict, max_age: float = 60.0) -> bool:
     return ok
 
 
+def mark_ingestion_ok(state: dict) -> None:
+    """Seed the ingestion cache from a fresh external observation.
+
+    The ingestion panel just fetched all five verdicts; making the step gate
+    re-fetch them within its cache window would leave Continue locked for up
+    to a minute after the panel already showed voice ready."""
+    uploads = state.get("uploads") or {}
+    catalogs = state.get("catalogs") or {}
+    pairs = [(catalogs[k], u) for k, u in uploads.items() if catalogs.get(k)]
+    if not pairs:
+        return
+    sig = ",".join(f"{c}:{u}" for c, u in sorted(pairs))
+    _INGESTION.update(at=time.time(), sig=sig, ok=True)
+
+
 def _upload_done(state: dict) -> bool:
     return bool(state.get("uploads")) and _ingestion_complete(state)
 

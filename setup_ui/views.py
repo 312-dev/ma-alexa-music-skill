@@ -596,12 +596,14 @@ def station_context() -> dict:
             "after_content": bridge.effective_after_content(),
             "radio_artists": bridge.effective_radio_artists(),
             "radio_tracks_per_artist": bridge.effective_radio_tracks_per_artist(),
+            "shuffle_playlists": bridge.shuffle_by_default("pl:probe"),
         },
         "saved": {
             "after_content": current.get("after_content") or bridge.AFTER_CONTENT,
             "radio_artists": current.get("radio_artists") or bridge.RADIO_ARTISTS,
             "radio_tracks_per_artist": (current.get("radio_tracks_per_artist")
                                         or bridge.RADIO_TRACKS_PER_ARTIST),
+            "shuffle_playlists": bool(current.get("shuffle_playlists")),
         },
     }
 
@@ -634,6 +636,7 @@ def stations_save():
         radio_artists=positive("radio_artists", bridge.RADIO_ARTISTS),
         radio_tracks_per_artist=positive("radio_tracks_per_artist",
                                          bridge.RADIO_TRACKS_PER_ARTIST),
+        shuffle_playlists=bool(request.form.get("shuffle_playlists")),
     )
     # Pools already cached were built under the old numbers and would pin a
     # station to its old shape until the cache turned over on its own.
@@ -1441,6 +1444,20 @@ def wizard_ingestion():
             state, detail = "failed", _rest_error(exc)
         rows.append({"kind": kind, "id": catalog_id, "state": state,
                      "detail": detail, "er": er, "slu": slu, "top": top})
+    all_ready = bool(rows) and all(r["state"] == "ready" for r in rows)
+    if all_ready:
+        # The panel just observed success; the step gate must agree NOW, not
+        # after its cache expires, or Continue stays locked until a manual
+        # page reload.
+        wizard_steps.mark_ingestion_ok(current)
+    if all_ready and request.headers.get("HX-Request"):
+        # Swap the rail and the Continue button along with the panel, so the
+        # unlock lands without a page reload.
+        ctx = step_context("upload")
+        return (render_template("wizard/_ingestion.html", rows=rows,
+                                **wizard_context())
+                + render_template("wizard/_rail.html", oob=True, **ctx)
+                + render_template("wizard/_stepnav.html", oob=True, **ctx))
     return fragment("wizard/_ingestion.html", rows=rows, **wizard_context())
 
 

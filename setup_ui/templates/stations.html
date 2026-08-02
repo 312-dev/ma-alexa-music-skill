@@ -41,6 +41,19 @@
     </p>
   </div>
 
+  <div role="group" class="field">
+    <label>
+      <input type="checkbox" name="shuffle_playlists" value="1"
+             {% if saved.shuffle_playlists %}checked{% endif %}>
+      Shuffle playlists by default
+    </label>
+    <p class="quiet">
+      Off, a playlist plays in its own order, which suits an ordered mixtape.
+      On, a fresh "play playlist X" starts shuffled, like artists and genres
+      do; the Alexa app's shuffle control still overrides either way.
+    </p>
+  </div>
+
   <button type="submit" class="btn">Save</button>
 </form>
 
@@ -51,6 +64,7 @@
       <tr><th>After content</th><td class="mono">{{ live.after_content }}</td></tr>
       <tr><th>Station artists</th><td class="mono">{{ live.radio_artists }}</td></tr>
       <tr><th>Tracks per artist</th><td class="mono">{{ live.radio_tracks_per_artist }}</td></tr>
+      <tr><th>Shuffle playlists</th><td class="mono">{{ 'on' if live.shuffle_playlists else 'off' }}</td></tr>
     </tbody>
   </table>
   <footer><small class="quiet">
