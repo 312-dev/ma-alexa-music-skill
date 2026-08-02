@@ -83,6 +83,14 @@
   --amp-well: #EDF1F6;
   --amp-field-bg: #FBFCFE;
   --amp-sidebar-width: 15rem;
+
+  /* Icons are masks, not images, so they take their color from whatever uses
+     them and need no second copy for the dark scheme. Both are drawn on the
+     same 24px grid at stroke width 2, which is what keeps them looking like
+     one set beside 600-weight text. Defined once here, outside either scheme
+     block, because a shape has no color to switch. */
+  --amp-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --amp-help: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M9.09 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
 }
 
 /* --- tokens: dark scheme ("dashboard") --------------------------------------
@@ -522,6 +530,11 @@ body.bare {
   font-weight: 700; margin-bottom: 1rem;
 }
 .bare .card h1 { font-size: 1.25rem; }
+/* The stacked-form spacing is scoped to .content, and this card is not one, so
+   the submit button sat flush against whatever followed it. */
+.bare .card form { margin-block: .9rem; }
+.bare .card form:first-of-type { margin-top: 0; }
+.bare .card > :last-child { margin-bottom: 0; }
 
 /* --- page header ------------------------------------------------------------ */
 
@@ -700,11 +713,57 @@ nav.stepnav li:last-child { margin-left: auto; }
   padding: .65rem .85rem;
   margin-bottom: .9rem;
 }
+/* Basecoat sets summary to inline-flex and hides the native marker, which left
+   these with no affordance at all and a hit area only as wide as the title.
+   Full-width flex row instead, with the chevron pinned to the trailing edge. */
 :is(.well, .content details:not([class])) > summary {
+  display: flex;
+  align-items: center;
   cursor: pointer;
   font-weight: 600;
   margin-bottom: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
 }
+:is(.well, .content details:not([class])) > summary::after {
+  content: "";
+  flex: none;
+  /* auto pushes it to the trailing edge; the row is flex, so this is the gap
+     from the title as well. No padding here: box-sizing is border-box, so
+     padding would eat the width and shrink the glyph instead of offsetting it. */
+  margin-left: auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  background-color: currentColor;
+  opacity: .65;
+  /* One icon, recolored by currentColor, rotated for state. Stroke width 2 to
+     sit correctly beside the 600-weight summary text. */
+  -webkit-mask: var(--amp-chevron) center / contain no-repeat;
+  mask: var(--amp-chevron) center / contain no-repeat;
+  transition: transform .18s cubic-bezier(.2, 0, 0, 1), opacity .18s ease-out;
+}
+:is(.well, .content details:not([class])) > summary:hover::after { opacity: 1; }
+:is(.well, .content details:not([class]))[open] > summary::after {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.well, .content details:not([class])) > summary::after { transition: none; }
+}
+
+/* A disclosure that answers a question rather than revealing data. The mark
+   says "help" before the sentence is read, which is what makes it worth the
+   pixels on a sign-in screen someone reaches while already stuck. */
+.well.help > summary::before {
+  content: "";
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-right: .5rem;
+  background-color: var(--amp-accent);
+  -webkit-mask: var(--amp-help) center / contain no-repeat;
+  mask: var(--amp-help) center / contain no-repeat;
+}
+
 /* Inline metadata in a summary (timestamps, pills) keeps its distance from
    the title text. */
 summary > :is(.quiet, .pill) { margin-left: .55rem; }
