@@ -87,6 +87,7 @@ curl -s -H "X-Admin-Token: $ADMIN_TOKEN" \
   "reached": 7,
   "miss": true,
   "miss_at": 1785686320.6,
+  "consecutive_misses": 3,
   "last_initiate": 1785682322.6,
   "armed": true,
   "misses_since_cycle": 0,
@@ -96,6 +97,11 @@ curl -s -H "X-Admin-Token: $ADMIN_TOKEN" \
 
 `reached` well below `searches` means searches are arriving and never turning
 into playback. The same ratio is on the Status page under Skill binding.
+
+`consecutive_misses` is the one to alert on, not `miss`. A single miss is
+routine: moving audio between speakers produces exactly one unanswered search,
+because Amazon handles the move in its own audio layer and never asks the skill
+to start anything. A run of them is the real signal.
 
 **Do not chase the response payload.** The bridge is answering correctly; that
 is not the variable. Do not trust the enablement status either, which reports

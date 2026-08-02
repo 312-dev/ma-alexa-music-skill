@@ -43,8 +43,11 @@ side and is not observable from here:
 
 - a keep-alive re-provisions the skill every `BINDING_KEEPALIVE_HOURS`
   (default 4) while nothing is playing, and
-- a detector cycles once when a search is seen not reaching playback, then waits
-  for real evidence of recovery before it will try again.
+- a detector cycles once when **two or more searches in a row** are seen not
+  reaching playback, then waits for real evidence of recovery before it will try
+  again. Two, not one: a voice transfer between speakers legitimately produces a
+  single unanswered search, and cycling on that breaks the playback it was meant
+  to protect.
 
 The Status page shows how many recent searches reached playback. **That ratio is
 the only honest health signal**, because every other indicator reads green

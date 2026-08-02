@@ -120,7 +120,7 @@ Two are meant to be called by something other than a browser:
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/setup/skill/health` | GET | Binding health as JSON, for a monitor. `{searches, reached, miss, miss_at, last_initiate, armed, misses_since_cycle, degraded}` |
+| `/setup/skill/health` | GET | Binding health as JSON, for a monitor. `{searches, reached, miss, miss_at, consecutive_misses, last_initiate, armed, misses_since_cycle, degraded}` |
 | `/setup/skill/cycle` | POST | Re-provision and re-enable the skill. Answers `{ok, detail, enabled_at}`, or 503 if the cycle failed |
 
 `/setup/skill/cycle` exists so a cycle can be scripted. Nothing is expected to

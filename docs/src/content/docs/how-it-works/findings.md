@@ -181,15 +181,37 @@ the API's answer as confirmation will report success while the skill stays dead.
 
 The only honest measure is your own inbound traffic: for each
 `Alexa.Media.Search.GetPlayableContent`, did an `Alexa.Media.Playback.Initiate`
-follow it before the next search did. The bridge counts exactly that ratio and
-shows it on the Status page. Two mechanisms act on it:
+or an `Alexa.Audio.PlayQueue.GetNextItem` follow it before the next search did.
+`GetNextItem` counts because it only arrives at a track boundary of a session
+this skill is already serving, so it proves the binding as surely as an
+`Initiate` does. The bridge counts exactly that ratio and shows it on the Status
+page. Two mechanisms act on it:
 
 - **A keep-alive** re-provisions when the enablement is older than
   `BINDING_KEEPALIVE_HOURS` (default 4) and nothing is currently playing.
-- **A miss detector** cycles once when a search fails to reach playback, then
-  **disarms until an `Initiate` is actually observed**. One attempt per outage.
-  Without that breaker, a cause a cycle cannot fix would churn the enablement
-  against Amazon's rate limits on every failed request.
+- **A miss detector** cycles once when **two or more searches in a row** fail to
+  reach playback, then **disarms until playback is actually observed**. One
+  attempt per outage. Without that breaker, a cause a cycle cannot fix would
+  churn the enablement against Amazon's rate limits on every failed request.
+
+:::danger[A single unanswered search is not an outage]
+This is the expensive one, and it was learned by shipping the wrong version
+first. A voice transfer between speakers emits one search and no `Initiate`, by
+design, because Amazon never asks the skill to start anything (see
+[Moving audio between rooms](#moving-audio-between-rooms-never-reaches-the-skill)).
+A superseded or cancelled utterance looks identical.
+
+A detector that cycles on one miss will therefore re-provision the skill in the
+middle of healthy playback, which **breaks the session it was trying to
+protect**. Measured here: a cycle fired one second after a successful `Initiate`
+while an Echo was mid-stream. Every failure that evening clustered around a
+cycle, and none recurred once the threshold was raised. An unbounded reactor
+does not merely waste rate limit, it manufactures the outage it detects.
+
+Count misses by the instant the search happened, too. Counting per check
+interval instead reported ten misses across a window in which no search arrived
+at all.
+:::
 
 :::caution[Read the ratio from filenames, not mtimes]
 If you build something similar: order the captures by their filename timestamp,
@@ -271,3 +293,38 @@ work, is the right shape.
 About 115 MB per listening hour at MP3 256 kbit/s, whether one Echo is playing or
 four in the same group. Alexa fetches the stream once and distributes it locally.
 Confirmed from bridge logs while four Echoes played.
+
+Starting a **group** does fetch twice within a few seconds, on two different
+tracks. That is Alexa buffering the next track to keep the group in sync, not
+per-device pulling: it does not scale with member count. Starting a single
+speaker fetches once.
+
+### Moving audio between rooms never reaches the skill
+
+Saying "move the music to the kitchen" produces **no directive at all**. Not a
+search, not an `Initiate`, nothing. Amazon re-forms the speaker cluster inside
+its own audio layer and has the new master re-request the URL the previous one
+was already playing:
+
+```
+22:31:50  GET /stream/5YQ3odIi.../...  200  6146115   studio starts the track
+22:31:56  GET /stream/5YQ3odIi.../...  200    81389   probe
+22:31:59  GET /stream/5YQ3odIi.../...  206  5908871   kitchen joins mid-track
+```
+
+A probe, then a `Range` request, on an **unchanged URL**. Observed in both
+directions.
+
+That makes three properties of a signed stream URL load-bearing for multi-room
+rather than incidental, and none of them are visible as a multi-room feature
+when you are looking at the streaming code:
+
+1. **Not bound to whichever device asked first.** The second Echo presents the
+   identical URL. Anything that pinned a URL to a session or a client address
+   would break room-to-room moves and nothing else.
+2. **`Range` forwarded, `206` and `Content-Range` preserved.** Answering `200`
+   with the whole file restarts the song in every room.
+3. **Valid far longer than a track.** A move near the end of a long track
+   re-requests a URL minted when the track began. Ampere signs for 12 hours.
+
+Ampere pins all three in `tests/test_security.py` for that reason.
