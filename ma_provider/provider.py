@@ -191,6 +191,22 @@ VOLUME_RETRY_SPREAD = 2.0
 # would deliberately seek to.
 END_OF_TRACK_MS = 3000
 
+# Making a transport command stick. Longer than the volume equivalent because
+# a transport change travels further: Alexa has to act on it and the device has
+# to report back, where a volume is applied locally. Measured, a pause shows up
+# about 1.6s after it is asked for, so three seconds is comfortably past the
+# point where "not yet" and "not at all" stop looking alike.
+TRANSPORT_CONFIRM_SECONDS = 3.0
+TRANSPORT_ATTEMPTS = 3
+
+# What Alexa calls each of the states we ask for. Sets rather than single
+# values because Alexa reports the same intent under several names and which
+# one arrives depends on how playback ended: an interrupted stream and a
+# deliberate pause are both a pause as far as anyone listening is concerned.
+PLAYING_STATES = frozenset({"PLAYING"})
+PAUSED_STATES = frozenset({"PAUSED", "INTERRUPTED"})
+STOPPED_STATES = frozenset({"IDLE", "STOPPED", "FINISHED", "PAUSED"})
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -418,6 +434,10 @@ class AmperePlayer(Player):
     _volume_confirm: asyncio.Task | None = None
     # The same for a play command, which Amazon drops in the same way.
     _play_confirm: asyncio.Task | None = None
+    # And for pause, stop and play, which the conformance suite found Amazon
+    # dropping too. Class level for the same reason as the rest: a player built
+    # any other way must not arrive one attribute short.
+    _transport_confirm: asyncio.Task | None = None
     # A one-off catch-up poll after a control, so the correction to an
     # optimistic answer does not wait for the ten second cycle.
     _resync: asyncio.Task | None = None
@@ -748,18 +768,103 @@ class AmperePlayer(Player):
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
         self._resync_soon()
+        self._confirm_transport("play", PLAYING_STATES, self.state_api.play)
 
     async def pause(self) -> None:
         await self._timed("pause", self.state_api.pause())
         self._attr_playback_state = PlaybackState.PAUSED
         self.update_state()
         self._resync_soon()
+        self._confirm_transport("pause", PAUSED_STATES, self.state_api.pause)
 
     async def stop(self) -> None:
         await self.state_api.stop()
         self._attr_playback_state = PlaybackState.IDLE
         self._attr_current_media = None
         self.update_state()
+        self._confirm_transport("stop", STOPPED_STATES, self.state_api.stop)
+
+    # -- making a transport command stick ------------------------------------
+    #
+    # Amazon accepts a command, answers success, and sometimes does nothing.
+    # That was found first for volume, where a change needed sending twice, and
+    # the live conformance suite then found the same thing in three more
+    # places: a group pause is lost roughly one time in three and the speaker
+    # returns to playing on its own; a stop settles on paused rather than idle;
+    # a track change moves and then reverts. Four symptoms, one mechanism.
+    #
+    # So this is the volume confirm loop with the volume taken out of it. Same
+    # three properties that make a retry loop safe rather than a nuisance: it
+    # stops the moment the speaker agrees, a newer command cancels it outright
+    # so it can never fight a person, and it is bounded and says so when it
+    # gives up.
+
+    def _confirm_transport(self, what: str, wanted: frozenset[str],
+                           send: Any) -> None:
+        """Check a transport command landed, and repeat it if it did not."""
+        if self._transport_confirm is not None:
+            # A newer command supersedes an older one rather than racing it.
+            # This is also what stops the loop arguing with the operator: press
+            # play while a pause is still converging and the pause gives up.
+            self._transport_confirm.cancel()
+        self._transport_confirm = asyncio.create_task(
+            self._converge_transport(what, wanted, send))
+
+    async def _converge_transport(self, what: str, wanted: frozenset[str],
+                                  send: Any) -> None:
+        try:
+            for attempt in range(1, TRANSPORT_ATTEMPTS + 1):
+                await asyncio.sleep(TRANSPORT_CONFIRM_SECONDS)
+
+                observed = await self._reported_transport_state()
+                if observed is None:
+                    # Alexa told us nothing rather than told us "no". A group
+                    # answers with no playerInfo at all while its members are
+                    # audibly playing, so silence here is not evidence of
+                    # anything and resending on it would be guessing loudly.
+                    self.logger.debug(
+                        "%s: cannot tell whether %s landed", self.name, what)
+                    return
+
+                if observed in wanted:
+                    if attempt > 1:
+                        self.logger.info("%s: %s landed on attempt %s",
+                                         self.name, what, attempt)
+                    return
+
+                if attempt == TRANSPORT_ATTEMPTS:
+                    self.logger.warning(
+                        "%s: %s did not stick after %s attempts (Alexa reports "
+                        "%s)", self.name, what, attempt, observed)
+                    return
+
+                self.logger.info(
+                    "%s: %s did not stick (Alexa reports %s); resending "
+                    "(%s of %s)", self.name, what, observed, attempt,
+                    TRANSPORT_ATTEMPTS - 1)
+                await send()
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - a retry must not raise
+            self.logger.debug("%s confirm failed: %s", what, err)
+
+    async def _reported_transport_state(self) -> str | None:
+        """What Alexa says this player is doing, or None for "it did not say".
+
+        The distinction matters more than the value. An empty payload is not a
+        claim that nothing is playing -- it is what a speaker group answers
+        with while its members are audibly playing -- and treating that as
+        "stopped" is what would turn this loop into something that fights a
+        working speaker.
+        """
+        try:
+            raw = await self.state_api.get_state()
+        except Exception:  # noqa: BLE001 - unreachable is not disagreement
+            return None
+        info = (raw or {}).get("playerInfo") or {}
+        if not info:
+            return None
+        return str(info.get("state") or "").upper() or None
 
     async def next_track(self) -> None:
         await self._timed("next", self.state_api.next())
