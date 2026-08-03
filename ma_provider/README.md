@@ -56,19 +56,43 @@ docker run -d --name music-assistant \
   ghcr.io/music-assistant/server:2.9.10
 ```
 
-### If a change appears not to have taken effect, cycle the provider
+### Only a restart reloads provider code, and one restart is enough
 
-Unresolved, 2026-08-02. A change deployed by rewriting the bind-mounted files
-and restarting Music Assistant appeared not to be running, and disabling and
-re-enabling the provider in MA's own settings made it take effect. A later
-change, deployed exactly the same way, **was** live after a plain restart, so
-"a restart never reloads" is not the rule.
+Resolved 2026-08-03, after a day of guessing at it. MA imports a provider
+through `helpers/util.py`:
 
-Whatever the real mechanism, disable-and-re-enable is the cheap thing to try
-before concluding that a fix did not work. Do not trust `Loaded player provider
-Ampere` in the log as evidence the new code is running: it appears either way.
-The reliable check is to have the change log something that only the new build
-could log.
+```python
+@lru_cache
+def _get_provider_module(domain):
+    return importlib.import_module(f".{domain}", "music_assistant.providers")
+```
+
+Two layers of caching over one import. Disabling and re-enabling the provider,
+or calling `config/providers/reload`, re-runs `setup()` against the module
+object that is already in memory. **Neither can pick up an edited file.** Only
+a fresh process re-reads the source, and a fresh process always does.
+
+So the ritual is: write the files, restart Music Assistant once. The earlier
+belief that a disable/enable cycle was doing the reloading was an artifact of
+testing it during a period when the bind mount pointed at a path that did not
+exist, which made every method look equally ineffective.
+
+`tools/deploy_provider.sh` is that ritual: rsync, one `nomad alloc restart`,
+then wait for the provider to report its build and fail if it is the wrong one.
+
+### Trust the build stamp, not the load message
+
+`Loaded player provider Ampere` appears whether or not the code is the code you
+wrote. So the provider logs a digest of its own source at load:
+
+```
+ampere provider build b033778ee608
+```
+
+`tools/build_stamp.py` computes the same digest over a working copy. If they
+match, the box is running this checkout. If they do not, nothing else observed
+about the deployment means anything, and every wrong conclusion drawn on
+2026-08-02 traces back to not being able to answer that question.
 
 Compose:
 

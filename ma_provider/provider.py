@@ -26,7 +26,9 @@ providers are configured for the same account they share the stored session.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import pathlib
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -110,6 +112,26 @@ POLL_INTERVAL = 10
 # is sent to it, and hiding it takes a working speaker off the list. Three
 # misses at POLL_INTERVAL is half a minute of silence, which is a real fault.
 POLL_FAILURES_BEFORE_UNAVAILABLE = 3
+
+
+def build_stamp() -> str:
+    """A short digest of this provider's own source files.
+
+    The most expensive class of confusion in this project has not been wrong
+    code, it has been *right code that was not running*: a bind mount onto a
+    path that did not exist, a container that came back without re-reading, an
+    edit that never left the laptop. None of those raise anything, and every
+    one of them presents as "the fix did not work".
+
+    So the provider says which build it is at load. `tools/build_stamp.py`
+    computes the same digest over a working copy, and the two either match or
+    the deployment is not what was written.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(pathlib.Path(__file__).parent.glob("*.py")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 async def setup(
@@ -677,6 +699,7 @@ class AmpereAlexaProvider(PlayerProvider):
     bridge: BridgeClient
 
     async def handle_async_init(self) -> None:
+        self.logger.info("ampere provider build %s", build_stamp())
         self._discovery_lock = asyncio.Lock()
         self.bridge = BridgeClient(
             base_url=str(self.config.get_value(CONF_BRIDGE_URL) or ""),
