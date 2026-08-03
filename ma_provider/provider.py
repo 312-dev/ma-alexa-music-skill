@@ -185,6 +185,12 @@ VOLUME_TOLERANCE = 2
 # still feels immediate.
 VOLUME_RETRY_SPREAD = 2.0
 
+# How close to the end of a track a resume position has to be before it is
+# treated as "this already finished" rather than as somewhere to resume from.
+# Three seconds is longer than any rounding and shorter than anything a person
+# would deliberately seek to.
+END_OF_TRACK_MS = 3000
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -704,7 +710,29 @@ class AmperePlayer(Player):
 
         details = getattr(item, "streamdetails", None)
         # Seconds as a float on MA's side, milliseconds as an int on Alexa's.
-        return max(0, int(float(getattr(details, "seek_position", 0) or 0) * 1000))
+        offset = max(0, int(float(getattr(details, "seek_position", 0) or 0) * 1000))
+
+        # Never start a track at its own end. An offset within a few seconds of
+        # the duration is not a resume, it is a track that already finished,
+        # and handing it to Alexa produces the least diagnosable failure this
+        # provider has: the queue is published, the utterance is spoken, Alexa
+        # starts the song at the last second of it, the song ends immediately,
+        # and the operator sees a long pause followed by a stopped player. Every
+        # log line on the way says success.
+        #
+        # Observed 2026-08-03 with an offset of 256000 on a 256 second track,
+        # caused by a stale position that has since been fixed at its source.
+        # The guard stays because the source is not the interesting part: any
+        # bad position produces this, and starting from the top is a harmless
+        # wrong answer where starting from the end is not.
+        duration = getattr(media, "duration", None) or 0
+        if duration and offset >= (duration * 1000) - END_OF_TRACK_MS:
+            self.logger.info(
+                "%s: ignoring a resume position of %.0fs into a %.0fs track "
+                "and starting from the beginning", self.name,
+                offset / 1000, duration)
+            return 0
+        return offset
 
     async def enqueue_next_media(self, media: PlayerMedia) -> None:
         """Deliberately nothing.
@@ -987,6 +1015,32 @@ class AmperePlayer(Player):
             self._attr_playback_state = PlaybackState.PLAYING
         elif state == "PAUSED":
             self._attr_playback_state = PlaybackState.PAUSED
+
+        # Only if this event is about the track Music Assistant thinks is
+        # playing. A position is meaningless without knowing what it is a
+        # position *in*, and this handler previously wrote whatever arrived
+        # onto the current item.
+        #
+        # What that cost, measured 2026-08-03: a now-playing event carrying a
+        # finished track's position set elapsed_time to the full length of the
+        # song. Music Assistant resumes a queue from elapsed_time, so the next
+        # press of play republished the queue with `stream.offsetInMilliseconds`
+        # at 256000 on a 256 second track. Alexa started it at the very end,
+        # the track finished instantly, and what the operator saw was ten
+        # seconds of nothing followed by a paused player with no position.
+        #
+        # Matching on the title because it is the only identity the two sides
+        # share, which is the same constraint `_queue_item_for` works under.
+        info = data.get("infoText")
+        reported_title = (info or {}).get("title") if isinstance(info, dict) else None
+        current = self._attr_current_media
+        current_title = getattr(current, "title", "") if current else ""
+        if current_title and reported_title:
+            if str(reported_title).lower() not in _queue_item_titles(current):
+                self.logger.debug(
+                    "%s: ignoring a position for %r while playing %r",
+                    self.name, reported_title, current_title)
+                return
 
         progress = data.get("progress")
         if not isinstance(progress, dict):
