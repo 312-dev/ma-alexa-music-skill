@@ -29,6 +29,7 @@ import asyncio
 import hashlib
 import os
 import pathlib
+import secrets
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -79,6 +80,7 @@ CONF_PUBLIC_BASE = "public_base"
 CONF_SUBSONIC_URL = "subsonic_url"
 CONF_SUBSONIC_USER = "subsonic_user"
 CONF_SUBSONIC_PASSWORD = "subsonic_password"
+CONF_SIGNING_KEY = "signing_key"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -187,7 +189,7 @@ async def get_config_entries(
                 "does not fail here: it fails later as audio that will not "
                 "play, with nothing in any log to say why."
             ),
-            required=True,
+            required=False,
             depends_on=CONF_SERVE_ENDPOINT,
             depends_on_value=True,
             requires_reload=True,
@@ -203,7 +205,7 @@ async def get_config_entries(
                 "because Amazon fetches audio through Ampere rather than "
                 "directly."
             ),
-            required=True,
+            required=False,
             depends_on=CONF_SERVE_ENDPOINT,
             depends_on_value=True,
             requires_reload=True,
@@ -212,7 +214,7 @@ async def get_config_entries(
             key=CONF_SUBSONIC_USER,
             type=ConfigEntryType.STRING,
             label="Music server username",
-            required=True,
+            required=False,
             depends_on=CONF_SERVE_ENDPOINT,
             depends_on_value=True,
             requires_reload=True,
@@ -221,7 +223,7 @@ async def get_config_entries(
             key=CONF_SUBSONIC_PASSWORD,
             type=ConfigEntryType.SECURE_STRING,
             label="Music server password",
-            required=True,
+            required=False,
             depends_on=CONF_SERVE_ENDPOINT,
             depends_on_value=True,
             requires_reload=True,
@@ -822,6 +824,31 @@ class AmpereAlexaProvider(PlayerProvider):
     login: AlexaLogin
     bridge: BridgeClient
 
+    def _signing_key(self) -> str:
+        """The key that signs stream URLs, OAuth tokens and queue ids.
+
+        Generated once and kept in this provider's own config, because it has
+        to survive a restart. It signs URLs Amazon holds for hours: a key that
+        changed on reload would 403 Alexa partway through a queue it was
+        already playing, unlink the account, and give a republished queue a new
+        id that orphans the one Alexa is holding.
+
+        Not a visible setting. There is nothing for anyone to decide here, and
+        a field inviting someone to change it is a field inviting them to break
+        every URL currently in flight.
+        """
+        stored = self.mass.config.get_raw_provider_config_value(
+            self.instance_id, CONF_SIGNING_KEY
+        )
+        if stored:
+            return str(stored)
+        minted = secrets.token_hex(32)
+        self.mass.config.set_raw_provider_config_value(
+            self.instance_id, CONF_SIGNING_KEY, minted, encrypted=True
+        )
+        self.logger.info("generated a signing key for this Ampere instance")
+        return minted
+
     async def handle_async_init(self) -> None:
         self.logger.info("ampere provider build %s", build_stamp())
         self._discovery_lock = asyncio.Lock()
@@ -847,6 +874,7 @@ class AmpereAlexaProvider(PlayerProvider):
             subsonic_url=str(self.config.get_value(CONF_SUBSONIC_URL) or ""),
             subsonic_user=str(self.config.get_value(CONF_SUBSONIC_USER) or ""),
             subsonic_password=str(self.config.get_value(CONF_SUBSONIC_PASSWORD) or ""),
+            signing_key=self._signing_key(),
         )
 
         self.webserver: AmpereWebServer | None = None

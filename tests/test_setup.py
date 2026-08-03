@@ -1047,7 +1047,8 @@ def _all_steps_done(monkeypatch):
                  enabled=True)
 
 
-def test_the_wizard_resumes_at_the_first_unfinished_step(ui):
+def test_the_wizard_resumes_at_the_first_unfinished_step(ui, monkeypatch):
+    monkeypatch.delenv("SUBSONIC_URL", raising=False)
     resp = ui.get("/setup/wizard")
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/wizard/server")
@@ -1072,7 +1073,11 @@ def test_each_step_offers_back_and_continue(ui, monkeypatch):
     assert "/setup/wizard/skill" in body    # continue
 
 
-def test_continue_is_disabled_on_an_unfinished_step(ui):
+def test_continue_is_disabled_on_an_unfinished_step(ui, monkeypatch):
+    # Explicitly unfinished. The suite now sets a music server by default,
+    # because subsonic.configured() gates real behaviour elsewhere, so a test
+    # about an incomplete step has to say which step is incomplete.
+    monkeypatch.delenv("SUBSONIC_URL", raising=False)
     body = ui.get("/setup/wizard/server").data.decode()
     assert 'title="Complete this step to unlock Continue."' in body
     assert '>Continue</a>' not in body

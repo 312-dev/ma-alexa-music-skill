@@ -29,6 +29,11 @@ os.environ.setdefault("MA_CACHE_DIR", os.path.join(_TMP, "mastream"))
 # Off by default, so publishing a queue in a test does not try to reach a Music
 # Assistant that is not there. The cache's own suite turns it back on.
 os.environ.setdefault("MA_CACHE_PREFETCH", "0")
+# Never actually fetched: every Subsonic call is replaced by the fake library
+# below. It is set because `subsonic.configured()` gates real behaviour now,
+# including whether the endpoint agrees to serve at all, and a suite whose
+# music server looks unconfigured would exercise the wrong branch throughout.
+os.environ.setdefault("SUBSONIC_URL", "http://navidrome.test")
 os.environ.setdefault("SUBSONIC_USER", "tester")
 os.environ.setdefault("SUBSONIC_PASSWORD", "not-a-real-password")
 os.environ.setdefault("OAUTH_CLIENT_ID", "ma-alexa")

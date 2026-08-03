@@ -85,7 +85,27 @@ from . import stream_ref
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
 ICON_DIR = pathlib.Path(os.environ.get("ICON_DIR", "/app/icons"))
 
+# Signs every stream and art URL Amazon holds, every OAuth token the linked
+# account carries, and every published queue id.
+#
+# The random fallback is a development convenience and nothing more. Three
+# modules each generated their own, so with no SIGNING_KEY set they did not
+# even agree with each other, and all three changed on every restart. In a
+# container with an env var that never happened. Inside Music Assistant there
+# is no env var, so it would have happened on every restart: Alexa would get a
+# 403 partway through a queue it was already playing, the linked account would
+# come apart, and a republished queue would be handed a new id.
+#
+# `set_signing_key` is how the one persisted key reaches all three.
 SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
+
+
+def set_signing_key(key: bytes) -> None:
+    """Use one key everywhere that signs something."""
+    global SIGNING_KEY
+    SIGNING_KEY = key
+    oauth.SIGNING_KEY = key
+    queue_api.SIGNING_KEY = key
 
 # The public HTTPS origin Amazon reaches this service on. No default: every
 # stream and art URL Amazon fetches is built from it, so a wrong value does not
@@ -114,7 +134,7 @@ PUBLIC_BASE_HELP = (
 
 def configure(public_base: str = "", storage_path: str = "",
               subsonic_url: str = "", subsonic_user: str = "",
-              subsonic_password: str = "") -> None:
+              subsonic_password: str = "", signing_key: str = "") -> None:
     """Supply settings that do not come from the environment.
 
     Music Assistant holds its own configuration and does not hand providers an
@@ -134,6 +154,9 @@ def configure(public_base: str = "", storage_path: str = "",
 
     subsonic.configure(subsonic_url, subsonic_user, subsonic_password)
 
+    if signing_key:
+        set_signing_key(signing_key.encode())
+
     if storage_path:
         root = pathlib.Path(storage_path)
         LOG_DIR = root / "captures"
@@ -147,6 +170,28 @@ def require_public_base() -> None:
     """Refuse to serve without somewhere for Amazon to fetch assets from."""
     if not PUBLIC_BASE:
         raise RuntimeError(PUBLIC_BASE_HELP)
+
+
+def missing_settings() -> list[str]:
+    """What is still unset that serving the endpoint would need.
+
+    Checked here rather than by marking the config entries required, because
+    Music Assistant refuses to load a provider whose required entries are
+    empty, and `depends_on` does not relax that. Marking them required made an
+    unconfigured Alexa endpoint remove every Echo player from MA, which is a
+    working feature that does not depend on any of these.
+
+    So MA is told they are optional and the thing that serves decides. The
+    provider stays up either way and the log names exactly what is missing.
+    """
+    missing = []
+    if not PUBLIC_BASE:
+        missing.append("public base URL")
+    if not subsonic.BASE:
+        missing.append("music server URL")
+    if not subsonic.USER:
+        missing.append("music server username")
+    return missing
 
 # How long a stream URL stays valid. Amazon defaults to ~60s when validUntil is
 # omitted, which is far too short; we set it explicitly and generously.

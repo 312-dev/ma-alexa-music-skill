@@ -335,6 +335,26 @@ async def test_a_busy_port_does_not_take_the_provider_down(monkeypatch, caplog):
         held.close()
 
 
+async def test_an_unconfigured_instance_does_not_serve_and_says_why(monkeypatch, caplog):
+    """MA is told these settings are optional, so the server checks them.
+
+    Marking them required made MA refuse to load the whole provider, which
+    removed every Echo player over an Alexa endpoint nobody had configured yet.
+    """
+    import logging
+
+    monkeypatch.setattr(core, "PUBLIC_BASE", "")
+    server = webserver.AmpereWebServer(
+        logging.getLogger("test-ampere-unset"), port=0, host="127.0.0.1")
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert await server.start() is False
+        assert "public base URL" in caplog.text
+        assert "Echo players keep working" in caplog.text
+    finally:
+        await server.stop()
+
+
 async def test_a_free_port_reports_that_it_is_serving():
     """The other half of the same signal, since the provider branches on it."""
     import logging

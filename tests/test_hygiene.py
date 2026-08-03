@@ -356,3 +356,48 @@ def test_importing_the_package_has_no_side_effects():
         "importing this package must not do anything, because the import "
         "happens inside Music Assistant's process:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_one_signing_key_reaches_everything_that_signs():
+    """Three modules sign things and they must agree.
+
+    Each read SIGNING_KEY independently and fell back to `os.urandom(32)`
+    separately, so with nothing set they did not even agree with each other.
+    That never showed in a container with the variable set. Inside Music
+    Assistant there is no environment, so the fallback would have fired on
+    every restart: a 403 partway through a queue Alexa was already playing, a
+    linked account coming apart, and a republished queue getting a new id that
+    orphans the one Alexa holds.
+    """
+    from ma_provider import oauth, queue_api
+
+    original = app_module.SIGNING_KEY
+    try:
+        app_module.set_signing_key(b"a-key-every-module-must-share")
+        assert app_module.SIGNING_KEY == b"a-key-every-module-must-share"
+        assert oauth.SIGNING_KEY == app_module.SIGNING_KEY
+        assert queue_api.SIGNING_KEY == app_module.SIGNING_KEY
+    finally:
+        app_module.set_signing_key(original)
+
+
+def test_a_signature_survives_the_key_being_reapplied():
+    """What the persisted key actually buys: URLs outlive a restart.
+
+    Signing, re-applying the same key as a fresh process would, and verifying
+    is the closest a unit test gets to "Alexa came back for track nine an hour
+    later".
+    """
+    original = app_module.SIGNING_KEY
+    try:
+        app_module.set_signing_key(b"stable-across-restarts")
+        _url, expires = app_module.signed_url("stream", "t1")
+        signature = app_module.sign("stream", "t1", expires)
+
+        app_module.set_signing_key(b"stable-across-restarts")
+        assert app_module.verify("stream", "t1", expires, signature) is True
+
+        app_module.set_signing_key(b"a-different-key-entirely")
+        assert app_module.verify("stream", "t1", expires, signature) is False
+    finally:
+        app_module.set_signing_key(original)
