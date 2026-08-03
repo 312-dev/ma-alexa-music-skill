@@ -166,6 +166,19 @@ VOLUME_QUEUE_DELAY = 1.5
 # burst of confirms, which all fire together after a group volume change.
 VOLUME_READ_TTL = 1.0
 
+# How many times a volume is checked before giving up. One send plus two
+# resends. Measured on a four speaker group: two members took the first send,
+# one took the first resend, one took neither, so a single retry does not
+# converge. Each attempt costs a check and only the speakers still wrong send
+# anything, so the cost of the extra attempts is paid only where it is needed.
+VOLUME_ATTEMPTS = 3
+
+# How far a speaker may settle from what it was asked for and still count as
+# having taken it. Measured on an Echo Studio, which quantises: asked for 18 it
+# reports 17, for 65 it reports 67, for 76 it reports 77. Requiring equality
+# turns that into a permanent failure no resend can fix.
+VOLUME_TOLERANCE = 2
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -764,42 +777,83 @@ class AmperePlayer(Player):
         self._volume_confirm = asyncio.create_task(self._confirm_volume(wanted))
 
     async def _confirm_volume(self, wanted: int) -> None:
-        """Did the speaker take it. If not, say it once more.
+        """Keep asking until the speaker actually has this volume.
 
-        Only once. A retry per poll would fight a person who has since turned
-        the dial themselves, and the point here is one user action producing
-        one volume change, not a loop that insists.
+        A loop rather than a single resend, because one resend does not
+        converge: measured 2026-08-03 on a four speaker group, two members took
+        the first send, one took the resend, and one took neither. Amazon
+        accepts a volume command, returns success, and sometimes does nothing,
+        and it does so often enough that a single retry leaves a speaker
+        visibly wrong.
+
+        Three things make a loop safe here, and without all three it would be
+        the "retry per poll" this deliberately was not:
+
+        - It stops the moment the speaker agrees, so a working change costs one
+          check and no resends at all.
+        - It abandons immediately if `_volume_wanted` has changed, which is
+          what happens when the operator moves the slider again. The loop can
+          never fight a person.
+        - It is bounded. After VOLUME_ATTEMPTS it gives up and says so, rather
+          than insisting forever at a speaker that is refusing for some reason
+          this cannot see.
+
+        **Retries are sent uncoalesced.** The first send is batched with the
+        rest of a group fan-out, which is what keeps a group volume change to
+        one request. But measured, a batch is exactly where commands go
+        missing: four members sent as separate requests applied four times out
+        of four, while the same four coalesced into one behavior dropped some.
+        So the cheap path is tried first and the correction is sent on its own,
+        which costs one request per speaker that actually needs it rather than
+        one per speaker every time.
         """
         try:
-            await asyncio.sleep(VOLUME_CONFIRM_SECONDS)
-            if self._volume_wanted != wanted:
-                return  # superseded by a newer request
+            for attempt in range(1, VOLUME_ATTEMPTS + 1):
+                await asyncio.sleep(VOLUME_CONFIRM_SECONDS)
+                if self._volume_wanted != wanted:
+                    return  # superseded by a newer request, or by the operator
 
-            # Not from get_state. Two reasons, and the first was a plain bug:
-            # this read `raw["volume"]` where the payload nests it under
-            # `playerInfo`, as `poll` correctly does, so `reported` was always
-            # None and the check never passed. Every volume change resent
-            # itself two seconds later, doubling the traffic to an API that
-            # rate limits.
-            #
-            # Fixing the path alone would not have been enough. Amazon only
-            # reports volume inside `playerInfo`, which is empty on an idle
-            # speaker, so a confirm for anything not currently playing could
-            # never have succeeded either. The account-wide volume endpoint
-            # answers for idle devices, and is cached for a moment so several
-            # players confirming at once share one request.
-            reported = await self.provider_instance.current_volume(
-                self.device.device_serial_number)
+                # Not from get_state. Two reasons, and the first was a plain
+                # bug: this read `raw["volume"]` where the payload nests it
+                # under `playerInfo`, as `poll` correctly does, so `reported`
+                # was always None and the check never passed. Every volume
+                # change resent itself, doubling traffic to an API that rate
+                # limits.
+                #
+                # Fixing the path alone would not have been enough. Amazon only
+                # reports volume inside `playerInfo`, which is empty on an idle
+                # speaker, so a confirm for anything not currently playing
+                # could never have succeeded either. The account-wide endpoint
+                # answers for idle devices, and is cached for a moment so
+                # several players confirming at once share one request.
+                reported = await self.provider_instance.current_volume(
+                    self.device.device_serial_number)
 
-            if reported == wanted:
-                self._volume_wanted = None
-                return
+                # Close enough, not equal. Some speakers quantise: an Echo
+                # Studio asked for 18 settles at 17, for 65 at 67, and for 76
+                # at 77, every time. Demanding equality makes those a
+                # permanent failure that no number of resends can fix, and the
+                # loop then spends its whole budget and warns about a speaker
+                # that did exactly what it was told.
+                if reported is not None and abs(reported - wanted) <= VOLUME_TOLERANCE:
+                    if attempt > 1:
+                        self.logger.info(
+                            "%s is at %s%% after %s attempts",
+                            self.name, reported, attempt)
+                    self._volume_wanted = None
+                    return
 
-            self._volume_resent = True
-            self.logger.info("%s did not take %s%% (reported %s); sending again",
-                             self.name, wanted, reported)
-            await self.state_api.set_volume(
-                wanted / 100, queue_delay=VOLUME_QUEUE_DELAY)
+                if attempt == VOLUME_ATTEMPTS:
+                    self.logger.warning(
+                        "%s would not take %s%% after %s attempts (still %s)",
+                        self.name, wanted, attempt, reported)
+                    return
+
+                self._volume_resent = True
+                self.logger.info(
+                    "%s did not take %s%% (reported %s); resending (%s of %s)",
+                    self.name, wanted, reported, attempt, VOLUME_ATTEMPTS - 1)
+                await self.state_api.set_volume(wanted / 100, queue_delay=0)
         except asyncio.CancelledError:
             raise
         except Exception as err:
