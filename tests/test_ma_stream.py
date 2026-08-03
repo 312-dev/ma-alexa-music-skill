@@ -249,3 +249,54 @@ def test_an_open_ended_range_runs_to_the_end(client, app, buffered):
 
     assert resp.status_code == 206
     assert resp.data == whole[5000:]
+
+
+def test_an_unbuffered_plain_fetch_streams_through_rather_than_waiting(
+    client, app, monkeypatch, tmp_path
+):
+    """A first fetch needs audio now, not correctness about ranges it did not ask for.
+
+    Buffering a track takes about five seconds. Waiting for it would put that
+    much silence in front of the first track of a queue, in the one case where
+    publishing did not get far enough ahead. So the audio is proxied straight
+    through and the buffer fills behind it.
+    """
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "empty")
+    monkeypatch.setattr(mastream_cache, "ENABLED", True)
+    expires, sig = _signed(app)
+
+    with mock.patch.object(mastream_cache, "ensure") as ensure, \
+            mock.patch.object(mastream_cache, "prefetch") as prefetch, \
+            mock.patch.object(app_module, "_proxy") as proxy:
+        proxy.return_value = ("", 200)
+        client.get(f"/mastream/{REF}/{expires}/{sig}")
+
+    ensure.assert_not_called()
+    prefetch.assert_called_once_with([REF])
+    proxy.assert_called_once()
+
+
+def test_a_range_on_an_unbuffered_track_waits_for_the_buffer(
+    client, app, monkeypatch, tmp_path
+):
+    """The scrub and the room-to-room move.
+
+    Here an answer from byte zero is not a slow answer, it is a wrong one, so
+    this is the request that pays the wait.
+    """
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "empty2")
+    monkeypatch.setattr(mastream_cache, "ENABLED", True)
+    expires, sig = _signed(app)
+
+    with mock.patch.object(mastream_cache, "ensure") as ensure:
+        ensure.return_value = None
+        with mock.patch.object(app_module, "_proxy") as proxy:
+            proxy.return_value = ("", 200)
+            client.get(f"/mastream/{REF}/{expires}/{sig}",
+                       headers={"Range": "bytes=1000-"})
+
+    ensure.assert_called_once_with(REF)

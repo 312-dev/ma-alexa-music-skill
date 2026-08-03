@@ -1674,15 +1674,30 @@ def mastream(ref: str, expires: int, sig: str):
     if not stream_ref.is_ref(ref):
         return jsonify({"error": "not a Music Assistant reference"}), 400
 
-    if buffered := mastream_cache.ensure(ref):
-        return send_file(buffered, mimetype="audio/mpeg", conditional=True)
+    ranged = request.headers.get("Range")
 
-    if rng := request.headers.get("Range"):
-        logger.warning(
-            "Alexa sent %s for an unbuffered Music Assistant track; that "
-            "source cannot answer a range and will serve from the beginning",
-            rng,
-        )
+    # A plain fetch of a track that is not buffered yet is streamed straight
+    # through, and the buffer is filled behind it. Waiting would be correct and
+    # is what a range request does, but a first fetch does not need a range: it
+    # needs audio now. Measured, the head of a queue is normally already
+    # buffered because publishing runs ahead of the utterance, and this covers
+    # the case where it is not without putting five seconds of silence in front
+    # of the first track.
+    #
+    # A ranged request does wait. That is the scrub and the room-to-room move,
+    # where an answer from byte zero is not a slow answer but a wrong one.
+    buffered = mastream_cache.path_for(ref)
+    if ranged or buffered.exists():
+        if complete := mastream_cache.ensure(ref):
+            return send_file(complete, mimetype="audio/mpeg", conditional=True)
+        if ranged:
+            logger.warning(
+                "Alexa sent %s for a Music Assistant track that could not be "
+                "buffered; serving from the beginning instead", ranged,
+            )
+    else:
+        mastream_cache.prefetch([ref])
+
     return _proxy(f"{MA_STREAM_BASE}{stream_ref.stream_path(ref)}", "audio/mpeg")
 
 
