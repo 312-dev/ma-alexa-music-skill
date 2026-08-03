@@ -88,6 +88,22 @@ if [[ "$GOT" != "$WANT" ]]; then
   exit 1
 fi
 
-COUNT=$("${SSH[@]}" "docker logs --since 5m app-$A 2>&1" |
-  sed 's/\x1b\[[0-9;]*m//g' | grep -coE 'registered: ampere--[^ ]+' || true)
+# Waited for, not counted once. Discovery is an Amazon round trip that lands a
+# second or two after the provider logs its build, so counting immediately
+# reported zero players on a deploy where all ten came up fine. A verification
+# step that says "0 players" when there are ten is worse than none: it trains
+# the reader to ignore the one line that would tell them the deploy broke
+# playback.
+COUNT=0
+for _ in $(seq 1 24); do
+  COUNT=$("${SSH[@]}" "docker logs --since 5m app-$A 2>&1" |
+    sed 's/\x1b\[[0-9;]*m//g' | grep -coE 'registered: ampere--[^ ]+' || true)
+  [[ "$COUNT" -gt 0 ]] && break
+  sleep 5
+done
+
+if [[ "$COUNT" -eq 0 ]]; then
+  echo "==> FAILED: build $GOT is running but no players registered" >&2
+  exit 1
+fi
 echo "==> running build $GOT, $COUNT players registered"
