@@ -6,3 +6,13 @@ pytest>=8
 # Music Assistant, which is the whole point of the framework-free core.
 aiohttp>=3.9
 pytest-aiohttp>=1.0
+
+# The config-entry model, so the setup rail (ma_provider/wizard.py) is tested
+# rather than skipped. Without it the code that decides whether an operator can
+# finish setup at all is the least covered code in the project, which is how a
+# form that hides the button you need ships unnoticed.
+#
+# Only the models package. The Music Assistant server itself is not a
+# reasonable test dependency, so the handful of tests that genuinely need it
+# still skip.
+music-assistant-models>=1.1.129

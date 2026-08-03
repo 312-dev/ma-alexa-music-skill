@@ -57,6 +57,7 @@ from .stream_ref import encode_ref, is_live
 from .stream_route import MediaStreamRoute
 from .utterance import custom_command, sanitize
 from .webserver import DEFAULT_PORT, AmpereWebServer
+from . import wizard
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ConfigValueType, ProviderConfig
@@ -163,7 +164,30 @@ async def get_config_entries(
     action: str | None = None,
     values: dict[str, ConfigValueType] | None = None,
 ) -> tuple[ConfigEntry, ...]:
-    """Return config entries for setting up this provider."""
+    """Return config entries for setting up this provider.
+
+    Two halves. First the ordinary settings, which are the same fields the
+    standalone deployment reads from its environment. Then the setup rail: the
+    eight numbered steps that register a skill with Amazon, which used to be a
+    web wizard of its own and is now a group of entries per step.
+
+    An action runs before the form is rebuilt, so a button's effect is already
+    visible in the step it belongs to by the time the page comes back.
+    """
+    values = values or {}
+    if action:
+        # Blocking: SMAPI is a series of HTTPS round trips and the library
+        # crawl is Subsonic calls. MA calls this from the event loop, so it
+        # goes to a worker thread rather than stalling playback for everyone.
+        await asyncio.to_thread(
+            wizard.run, action, dict(values),
+            str(values.get(CONF_PUBLIC_BASE) or core.PUBLIC_BASE or ""),
+        )
+
+    return (*_settings_entries(), *await asyncio.to_thread(wizard.entries))
+
+
+def _settings_entries() -> tuple[ConfigEntry, ...]:
     return (
         ConfigEntry(
             key=CONF_SERVE_ENDPOINT,

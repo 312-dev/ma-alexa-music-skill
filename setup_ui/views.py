@@ -515,27 +515,14 @@ def status_refresh():
 # --- endpoint validation ----------------------------------------------------
 
 
-def run_checks(base: str) -> list[dict]:
-    rows = [validate.check_scheme(base)]
-    later = ("Resolves to a public address", "TLS handshake and certificate",
-             "GET /healthz over the public URL", "POST /music with a real directive")
-    if not rows[0]["ok"]:
-        rows += [validate.check(name, None, "Skipped: fix PUBLIC_BASE first.")
-                 for name in later]
-        return rows
-    rows.append(validate.check_address(base))
-    rows.append(validate.check_tls(base))
-    rows.append(validate.check_healthz(base))
-    rows.append(validate.check_music_post(base))
-    return rows
-
-
 def endpoint_context() -> dict:
     base = public_base()
-    rows = run_checks(base)
-    passed = all(row["ok"] for row in rows)
-    cert_type = next((r["note"] for r in rows if r["name"].startswith("TLS")), "")
-    store.update(endpoint_ok=passed, cert_type=cert_type)
+    # The checks and the verdict both live in setup_ops now; what is left here
+    # is assembling the context the template wants around them.
+    outcome = setup_ops.check_endpoint(base)
+    rows = outcome.rows
+    passed = outcome.ok
+    cert_type = store.load().get("cert_type") or ""
     token = request.args.get("token") or ""
     return {
         "public_base": base,

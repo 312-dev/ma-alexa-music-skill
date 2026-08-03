@@ -30,7 +30,16 @@ class Step:
 
 
 def _music_server_done(state: dict) -> bool:
-    return bool(os.environ.get("SUBSONIC_URL") or state.get("subsonic_url"))
+    """Whether a music server is configured, asked of the module that uses it.
+
+    Read from SUBSONIC_URL directly until Music Assistant started supplying it
+    through `core.configure` instead. The variable is empty there, so a fully
+    working music server left step one showing as unfinished, which blocks
+    every step after it: the whole form would have been unreachable.
+    """
+    from . import subsonic
+
+    return bool(subsonic.configured() or state.get("subsonic_url"))
 
 
 _TRAFFIC = {"at": 0.0, "ok": False}

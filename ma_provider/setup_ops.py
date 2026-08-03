@@ -113,6 +113,50 @@ def probe_music_server() -> Outcome:
     return Outcome(True, f"{len(songs)} {noun} for a sample search")
 
 
+def check_endpoint(public_base: str) -> Outcome:
+    """Prove Amazon can reach this service, before telling Amazon it can.
+
+    Every check here corresponds to a failure that produced no error message
+    anywhere: a public base pointing at a tailnet address, a wildcard
+    certificate declared as Trusted, a reverse proxy that answered GET and
+    quietly dropped the POST body. Amazon reports none of them. It simply
+    never calls, and the skill sits there looking created.
+
+    The verdict is written to the state file, because the skill step refuses
+    to run until this has passed. That gate is the point: a manifest pointing
+    at an endpoint Amazon cannot reach is accepted, and the failure surfaces
+    much later as a skill that answers nothing.
+    """
+    from . import setup_validate as validate
+
+    rows = [validate.check_scheme(public_base)]
+    later = ("Resolves to a public address", "TLS handshake and certificate",
+             "GET /healthz over the public URL", "POST /music with a real directive")
+    if rows[0]["ok"]:
+        rows.append(validate.check_address(public_base))
+        rows.append(validate.check_tls(public_base))
+        rows.append(validate.check_healthz(public_base))
+        rows.append(validate.check_music_post(public_base))
+    else:
+        rows += [validate.check(name, None, "Skipped: fix the public base URL "
+                                            "first.") for name in later]
+
+    passed = all(row["ok"] for row in rows)
+    cert_type = next((r["note"] for r in rows if r["name"].startswith("TLS")), "")
+    store.update(endpoint_ok=passed, cert_type=cert_type)
+    return Outcome(
+        passed,
+        "Amazon can reach this service." if passed else
+        "Not reachable yet. Fix the failures below and check again.",
+        # The rows are passed through as the checks wrote them, diagnostics
+        # and all. Reshaping them to this module's three fields threw away the
+        # status line and headers that say which layer actually answered,
+        # which is the only thing that distinguishes a CDN rule from an
+        # outage.
+        rows,
+    )
+
+
 def manifest_verdict(skill: str, tries: int = 8, delay: float = 1.5) -> str:
     """Wait out the async manifest validation that follows skill creation.
 

@@ -1054,7 +1054,7 @@ def _all_steps_done(monkeypatch):
 
 
 def test_the_wizard_resumes_at_the_first_unfinished_step(ui, monkeypatch):
-    monkeypatch.delenv("SUBSONIC_URL", raising=False)
+    monkeypatch.setattr(app_module.subsonic, "BASE", "")
     resp = ui.get("/setup/wizard")
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/wizard/server")
@@ -1082,8 +1082,11 @@ def test_each_step_offers_back_and_continue(ui, monkeypatch):
 def test_continue_is_disabled_on_an_unfinished_step(ui, monkeypatch):
     # Explicitly unfinished. The suite now sets a music server by default,
     # because subsonic.configured() gates real behaviour elsewhere, so a test
-    # about an incomplete step has to say which step is incomplete.
-    monkeypatch.delenv("SUBSONIC_URL", raising=False)
+    # about an incomplete step has to say which step is incomplete. Cleared on
+    # the module rather than in the environment: the step asks subsonic
+    # whether it is configured, and subsonic stopped reading the variable when
+    # Music Assistant started supplying the value directly.
+    monkeypatch.setattr(app_module.subsonic, "BASE", "")
     body = ui.get("/setup/wizard/server").data.decode()
     assert 'title="Complete this step to unlock Continue."' in body
     assert '>Continue</a>' not in body
