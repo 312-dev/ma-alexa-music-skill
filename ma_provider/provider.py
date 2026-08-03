@@ -199,13 +199,18 @@ END_OF_TRACK_MS = 3000
 TRANSPORT_CONFIRM_SECONDS = 3.0
 TRANSPORT_ATTEMPTS = 3
 
+# How long after a stop a PLAYING report is treated as an artefact rather than
+# as a new session. Alexa emits one while buffering a Subsonic handover, and
+# believing it cancelled the stop that had just been issued.
+STOP_SETTLE_SECONDS = 12.0
+
 # What Alexa calls each of the states we ask for. Sets rather than single
 # values because Alexa reports the same intent under several names and which
 # one arrives depends on how playback ended: an interrupted stream and a
 # deliberate pause are both a pause as far as anyone listening is concerned.
 PLAYING_STATES = frozenset({"PLAYING"})
 PAUSED_STATES = frozenset({"PAUSED", "INTERRUPTED"})
-STOPPED_STATES = frozenset({"IDLE", "STOPPED", "FINISHED", "PAUSED"})
+IDLE_STATES = frozenset({"IDLE", "STOPPED", "FINISHED"})
 
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
@@ -438,6 +443,17 @@ class AmperePlayer(Player):
     # dropping too. Class level for the same reason as the rest: a player built
     # any other way must not arrive one attribute short.
     _transport_confirm: asyncio.Task | None = None
+    # When this player was last deliberately stopped, and last asked to play.
+    #
+    # Two timestamps rather than one boolean, because a boolean cannot order
+    # itself. Push events, polls and commands all set this from different
+    # tasks, and a flag raced: a group pause read as idle because a stop's flag
+    # had not been cleared yet, while a subsonic stop read as paused because a
+    # buffering PLAYING event had cleared it early. Comparing the two moments
+    # asks the question that actually matters -- which happened last -- instead
+    # of relying on every writer to have run in the right order.
+    _stopped_at = 0.0
+    _played_at = 0.0
     # A one-off catch-up poll after a control, so the correction to an
     # optimistic answer does not wait for the ten second cycle.
     _resync: asyncio.Task | None = None
@@ -658,6 +674,7 @@ class AmperePlayer(Player):
         await self._timed("run_custom", self.api.run_custom(text))
 
         self._attr_current_media = media
+        self._played_at = time.monotonic()
         self._attr_elapsed_time = 0
         self._attr_elapsed_time_last_updated = time.time()
         self._attr_playback_state = PlaybackState.PLAYING
@@ -768,6 +785,7 @@ class AmperePlayer(Player):
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
         self._resync_soon()
+        self._played_at = time.monotonic()
         self._confirm_transport("play", PLAYING_STATES, self.state_api.play)
 
     async def pause(self) -> None:
@@ -775,14 +793,60 @@ class AmperePlayer(Player):
         self._attr_playback_state = PlaybackState.PAUSED
         self.update_state()
         self._resync_soon()
+        self._played_at = time.monotonic()
         self._confirm_transport("pause", PAUSED_STATES, self.state_api.pause)
 
     async def stop(self) -> None:
         await self.state_api.stop()
+        # Remembered, because Alexa cannot express it. A music skill queue that
+        # has been stopped reports PAUSED, exactly as a paused one does: there
+        # is no third state to read, so every poll and every push after a stop
+        # says "paused" and overwrites IDLE within seconds. Measured by the
+        # conformance suite on five of six cells -- audio does stop, and Music
+        # Assistant settles on paused anyway, which leaves a stopped speaker
+        # looking like a paused one and MA's pause watchdog unarmed.
+        #
+        # Resending stop cannot fix that, because nothing was dropped. The
+        # intent is what has to survive, so it is held here and consulted when
+        # a reported PAUSED is turned into a state.
+        self._stopped_at = time.monotonic()
         self._attr_playback_state = PlaybackState.IDLE
         self._attr_current_media = None
         self.update_state()
-        self._confirm_transport("stop", STOPPED_STATES, self.state_api.stop)
+        # Still confirmed, but against silence rather than against a word.
+        # Alexa reports a stopped queue as PAUSED and a dropped stop as
+        # PLAYING, so only the latter is worth resending; treating PAUSED as
+        # failure would retry a command that already worked, and treating it as
+        # success on its own left a dropped stop with nothing to repeat it.
+        self._confirm_transport(
+            "stop", PAUSED_STATES | IDLE_STATES, self.state_api.stop)
+
+    def _playback_state_for(self, reported: str) -> PlaybackState | None:
+        """Turn what Alexa says into what this player should report.
+
+        The one piece of interpretation between the two: PAUSED means paused,
+        unless this player was deliberately stopped and has not played since,
+        in which case it still means stopped.
+        """
+        state = (reported or "").upper()
+        if state in PLAYING_STATES:
+            # A report of PLAYING is only taken as evidence that a stop is over
+            # once the stop has had a moment to settle. Alexa emits a spurious
+            # PLAYING while it buffers a Subsonic handover, and taken at face
+            # value that cancelled a stop issued a second earlier -- which is
+            # how a stopped speaker went back to reporting paused. Later
+            # reports are believed, because a play started by voice reaches
+            # this provider no other way.
+            if time.monotonic() - self._stopped_at > STOP_SETTLE_SECONDS:
+                self._played_at = time.monotonic()
+                return PlaybackState.PLAYING
+            return PlaybackState.IDLE
+        if state in PAUSED_STATES:
+            stopped = self._stopped_at > self._played_at
+            return PlaybackState.IDLE if stopped else PlaybackState.PAUSED
+        if state in IDLE_STATES:
+            return PlaybackState.IDLE
+        return None
 
     # -- making a transport command stick ------------------------------------
     #
@@ -1094,13 +1158,10 @@ class AmperePlayer(Player):
             self._attr_volume_muted = muted
 
     def _push_player_state(self, event: push_events.PushEvent) -> None:
-        state = str(event.payload.get("audioPlayerState") or "")
-        if state == "PLAYING":
-            self._attr_playback_state = PlaybackState.PLAYING
-        elif state in ("INTERRUPTED", "PAUSED"):
-            self._attr_playback_state = PlaybackState.PAUSED
-        elif state in ("FINISHED", "IDLE", "STOPPED"):
-            self._attr_playback_state = PlaybackState.IDLE
+        resolved = self._playback_state_for(
+            str(event.payload.get("audioPlayerState") or ""))
+        if resolved is not None:
+            self._attr_playback_state = resolved
 
     def _push_now_playing(self, event: push_events.PushEvent) -> None:
         """The event that carries the position, which is the point of all this.
@@ -1115,11 +1176,17 @@ class AmperePlayer(Player):
         other way.
         """
         data = event.now_playing
-        state = str(data.get("playerState") or "")
-        if state == "PLAYING":
-            self._attr_playback_state = PlaybackState.PLAYING
-        elif state == "PAUSED":
-            self._attr_playback_state = PlaybackState.PAUSED
+        # The third place that turned an Alexa state string into a playback
+        # state, and the one that kept undoing a stop. The poll and the player
+        # state event were routed through `_playback_state_for` together; this
+        # was missed, so a stop reached idle and a now-playing event a few
+        # seconds later put it back to paused. Measured: stop said
+        # "reached idle=True; state 5.5s later =paused" on four of six cells.
+        #
+        # Three independent opinions about what Alexa meant is two too many.
+        resolved = self._playback_state_for(str(data.get("playerState") or ""))
+        if resolved is not None:
+            self._attr_playback_state = resolved
 
         # Only if this event is about the track Music Assistant thinks is
         # playing. A position is meaningless without knowing what it is a
@@ -1291,11 +1358,12 @@ class AmperePlayer(Player):
 
         state = (info.get("state") or "").upper()
         before = self._attr_playback_state
-        self._attr_playback_state = {
-            "PLAYING": PlaybackState.PLAYING,
-            "PAUSED": PlaybackState.PAUSED,
-            "IDLE": PlaybackState.IDLE,
-        }.get(state, PlaybackState.IDLE)
+        # Through the same interpretation the push path uses, so a stop does
+        # not survive on one and get overwritten on the other. This is the
+        # whole of the difference between them; anything else here would be a
+        # second, quieter opinion about what Alexa meant.
+        self._attr_playback_state = (
+            self._playback_state_for(state) or PlaybackState.IDLE)
 
         # Logged because a group's state decides whether its members are hidden
         # from the player picker, and every theory about what a cluster device
