@@ -135,6 +135,33 @@ POLL_INTERVAL = 10
 PUSH_POLL_INTERVAL_SUPERVISED = 60
 PUSH_POLL_INTERVAL_UNSUPERVISED = 30
 
+# How long alexapy waits before sending a volume command, so that several
+# arriving together become one request to Amazon.
+#
+# **Left at alexapy's default of 1.5 seconds, deliberately, after trying 0.3
+# and being rate limited within minutes.**
+#
+# The delay is most of the latency of a volume change: measured 2026-08-03 the
+# call took 1.68s, of which 1.5s was this sleep and 0.18s was Amazon, and the
+# push event describing the change arrived 0.16s after that. Lowering it took
+# the call to 0.48s, which felt exactly as much better as it sounds.
+#
+# Then Amazon started answering with TooManyRequests and backing off 1.1s, then
+# 2s, then 4s, and a volume_set that had been 0.48s took 7.99s. Everything else
+# went with it, because the state poll uses the same API.
+#
+# The reason is what this window is actually for, which is not what it looks
+# like. It is not debouncing a slider drag. Changing the volume of a speaker
+# *group* makes Music Assistant call volume_set once per member, and during the
+# sleep alexapy collects those into `_sequence_queue` and sends them as ONE
+# behavior. Whole Apartment is four speakers, so the window is the difference
+# between one request and four, every time. Shortening it multiplies every
+# group volume change by its member count.
+#
+# So the 1.5s is the price of a group volume change being one request. Push
+# cannot help here either way: this delay happens before anything is sent.
+VOLUME_QUEUE_DELAY = 1.5
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -712,7 +739,9 @@ class AmperePlayer(Player):
         """
         wanted = max(0, min(100, volume_level))
         # alexapy takes 0..1 and multiplies by 100 on the way out.
-        await self._timed("volume_set", self.state_api.set_volume(wanted / 100))
+        await self._timed(
+            "volume_set",
+            self.state_api.set_volume(wanted / 100, queue_delay=VOLUME_QUEUE_DELAY))
         self._attr_volume_level = wanted
         self._volume_wanted = wanted
         self._volume_asked_at = time.time()
@@ -750,7 +779,8 @@ class AmperePlayer(Player):
             self._volume_resent = True
             self.logger.info("%s did not take %s%% (reported %s); sending again",
                              self.name, wanted, reported)
-            await self.state_api.set_volume(wanted / 100)
+            await self.state_api.set_volume(
+                wanted / 100, queue_delay=VOLUME_QUEUE_DELAY)
         except asyncio.CancelledError:
             raise
         except Exception as err:
@@ -870,12 +900,28 @@ class AmperePlayer(Player):
         if not isinstance(progress, dict):
             return
         elapsed = progress.get("mediaProgress")
-        if isinstance(elapsed, (int, float)):
-            self._attr_elapsed_time = float(elapsed) / 1000.0
-            # Amazon's clock, not ours, when it gave one. MA extrapolates the
-            # position from this timestamp, so using local time would add the
-            # delivery delay to every reading.
-            self._attr_elapsed_time_last_updated = event.at or time.time()
+        if not isinstance(elapsed, (int, float)):
+            return
+
+        # A paused session keeps reporting the position it stopped at, and on
+        # startup the stream replays the current state of every device on the
+        # account. Applying that to a player that is not playing is what put
+        # the scrubber halfway through a track nobody had started: the position
+        # was real, it just belonged to a session from hours ago.
+        if self._attr_playback_state != PlaybackState.PLAYING:
+            return
+
+        self._attr_elapsed_time = float(elapsed) / 1000.0
+        # Local time, not Amazon's.
+        #
+        # This was `event.at` on the reasoning that it avoids adding delivery
+        # delay to the reading. That was a bad trade. Delivery is under a tenth
+        # of a second, while the two clocks are on different machines and
+        # nothing keeps them in step; Music Assistant extrapolates the position
+        # forward from this timestamp, so any skew becomes a scrubber that is
+        # permanently wrong by the size of the skew, and a clock that is ahead
+        # makes it run into the future.
+        self._attr_elapsed_time_last_updated = time.time()
 
     def use_push_poll_interval(self, slow: bool) -> None:
         """Slow the poll while push is delivering, restore it when it is not.
