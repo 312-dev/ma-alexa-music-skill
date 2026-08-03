@@ -38,6 +38,82 @@ PROXY_PATH = "/ampere/auth/proxy/"
 POST_PATH = "/ampere/auth/proxy/ap/signin/*"
 
 
+# Amazon serves one page holding two forms, and which panel is expanded is
+# decided by its own JavaScript from the path. alexapy starts the login at
+# `/ap/register`, so an existing customer is shown "Create account" first.
+#
+# That is not merely untidy. alexapy's autofill matches inputs by `name`, and
+# both forms have inputs named `email` and `password`, so the account password
+# is filled into the *create account* form as well. The primary button on that
+# panel then reads CREATE YOUR AMAZON ACCOUNT, and pressing it is a plausible
+# thing for someone to do when it is the only button on screen.
+REGISTER_FORM = "ap_register_form"
+SIGNIN_PATH = "/ap/signin"
+
+
+async def _prefer_signin_page(proxy: Any, login: Any, logger: Any) -> None:
+    """Start the login on the sign-in panel, and defuse the other one.
+
+    Two independent measures, because the first cannot be verified from here.
+    Which panel Amazon expands is chosen client side, so a server-side fetch of
+    either path returns the same markup and proves nothing; only a browser can
+    settle it. The second measure therefore has to stand on its own.
+
+    1. Point the proxy at `/ap/signin` rather than `/ap/register`, carrying the
+       PKCE query across unchanged. The query is what makes this an
+       authorization request at all: yarl's `with_path` drops it, and losing it
+       turns the whole flow into an ordinary sign-in that mints no token.
+
+    2. Empty the create-account form on every page that has one, so the
+       password is not sitting in it whichever panel opens. Nothing is removed:
+       deleting the form outright would be tidier and would also break the
+       script that toggles between the two.
+    """
+    from yarl import URL
+
+    try:
+        start = URL(str(login.start_url))
+        await proxy.change_host_url(
+            start.with_path(SIGNIN_PATH).with_query(start.query)
+        )
+    except Exception as err:  # noqa: BLE001 - a nicer landing page is optional
+        logger.debug("could not redirect the login page: %s", type(err).__name__)
+
+    # change_host_url resets stored data, so alexapy's autofill is put back
+    # rather than assumed to have survived, and ours is added after it: dicts
+    # preserve insertion order, so this runs on the filled html and not before.
+    existing = dict(getattr(proxy, "modifiers", {}) or {})
+    existing.setdefault("autofill", _noop)
+    existing["ampere_clear_register_form"] = _clear_register_form
+    proxy.modifiers = existing
+
+
+def _noop(html: str) -> str:
+    return html
+
+
+def _clear_register_form(html: str) -> str:
+    """Take the prefilled credentials back out of the create-account form."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:  # pragma: no cover - bs4 arrives with alexapy
+        return html
+
+    if REGISTER_FORM not in html:
+        return html
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        form = soup.find("form", id=REGISTER_FORM)
+        if form is None:
+            return html
+        for tag in form.find_all("input"):
+            if tag.get("name") in ("email", "password", "customerName"):
+                tag["value"] = ""
+        return str(soup)
+    except Exception:  # noqa: BLE001 - never break the login over cosmetics
+        return html
+
+
 async def sign_in(
     mass: MusicAssistant,
     auth: push_auth.PushAuth,
@@ -103,6 +179,7 @@ async def sign_in(
     base = mass.webserver.base_url.rstrip("/")
     proxy_url = f"{base}{PROXY_PATH}"
     proxy = AlexaProxy(login, proxy_url)
+    await _prefer_signin_page(proxy, login, logger)
     finished = False
 
     async def handler(request: web.Request) -> Any:
