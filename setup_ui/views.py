@@ -30,8 +30,13 @@ from ma_provider import core as bridge
 from ma_provider import smapi_rest
 from ma_provider import subsonic
 
-from . import (captures, qr, smapi, state as store,
-               steps as wizard_steps, validate)
+from ma_provider import setup_captures as captures
+from ma_provider import setup_smapi as smapi
+from ma_provider import setup_state as store
+from ma_provider import setup_steps as wizard_steps
+from ma_provider import setup_validate as validate
+
+from . import qr
 
 bp = Blueprint(
     "setup", __name__,

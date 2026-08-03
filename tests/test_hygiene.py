@@ -21,6 +21,7 @@ import time
 import pytest
 
 from ma_provider import core as app_module
+from ma_provider import core as core_module
 from ma_provider import queuestate
 from conftest import directive
 
@@ -472,3 +473,36 @@ def test_the_admin_plane_is_closed_when_no_token_was_supplied():
                                            {"X-Admin-Token": ""}) is False
     finally:
         app_module.ADMIN_TOKEN = before
+
+
+def test_one_directory_answer_reaches_everything_that_reads_it(tmp_path):
+    """Configuring the storage path must move every reader, not most of them.
+
+    Four modules keep state under it and each used to derive its own location
+    from its own environment variable. That agreed for as long as they all
+    read the same variable and stopped agreeing the moment Music Assistant
+    supplied a path instead. The failure is quiet in the worst way: the wizard
+    writes a setting to one file and the thing that acts on it reads another,
+    so the setting simply appears not to work.
+    """
+    from ma_provider import mastream_cache, queue_api, queuestate
+    from ma_provider import setup_captures, setup_state, smapi_rest
+
+    before = (core_module.LOG_DIR, queuestate.STATE_DIR, queue_api.STATE_DIR,
+              mastream_cache.CACHE_DIR, setup_state.STATE_DIR)
+    try:
+        app_module.configure(storage_path=str(tmp_path))
+
+        for path in (core_module.LOG_DIR, queuestate.STATE_DIR,
+                     queue_api.STATE_DIR, mastream_cache.CACHE_DIR,
+                     setup_state.STATE_DIR, smapi_rest.state_dir()):
+            assert tmp_path in path.parents or path == tmp_path, path
+
+        # Read through the accessors the running code actually calls, not the
+        # globals: an accessor that rebuilds the path itself is exactly the
+        # bug this test exists to catch.
+        assert setup_captures.log_dir() == core_module.LOG_DIR
+        assert setup_state.path().parent == tmp_path
+    finally:
+        (core_module.LOG_DIR, queuestate.STATE_DIR, queue_api.STATE_DIR,
+         mastream_cache.CACHE_DIR, setup_state.STATE_DIR) = before

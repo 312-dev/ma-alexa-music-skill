@@ -15,9 +15,9 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from ma_provider import smapi_rest
+from . import smapi_rest
 
-from . import captures
+from . import setup_captures as captures
 
 
 @dataclass(frozen=True)

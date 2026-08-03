@@ -19,9 +19,14 @@ import pytest
 
 import app as flask_module
 from ma_provider import core as app_module
+from ma_provider import core as _core
+from ma_provider import setup_state as _setup_state
 from setup_ui import bp as setup_bp
 from ma_provider import smapi_rest
-from setup_ui import qr, smapi, state as store, validate, views
+from ma_provider import setup_smapi as smapi
+from ma_provider import setup_state as store
+from ma_provider import setup_validate as validate
+from setup_ui import qr, views
 
 # The parent wires this up in app.py. Registering once here keeps the suite
 # independent of whether that has happened yet.
@@ -39,7 +44,7 @@ HEADERS = {"X-Admin-Token": ADMIN}
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
     """No sockets, no subprocesses, no shared state between tests."""
-    monkeypatch.setenv("SETUP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(_setup_state, "STATE_DIR", pathlib.Path(tmp_path / "state"))
     monkeypatch.setenv("ADMIN_TOKEN", ADMIN)
     monkeypatch.setenv("PUBLIC_BASE", "https://ampere.example.com")
 
@@ -197,7 +202,7 @@ def test_status_shows_the_last_request_from_amazon(ui):
 
 
 def test_status_says_so_when_amazon_has_never_called(ui, monkeypatch, tmp_path):
-    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "empty"))
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(tmp_path / "empty"))
     body = ui.get("/setup/status").data.decode()
     assert "nothing yet" in body
     assert "not calling this bridge" in body
@@ -681,7 +686,7 @@ def test_state_survives_a_round_trip():
 
 
 def test_state_tolerates_an_unwritable_directory(monkeypatch):
-    monkeypatch.setenv("SETUP_STATE_DIR", "/proc/nowhere")
+    monkeypatch.setattr(_setup_state, "STATE_DIR", pathlib.Path("/proc/nowhere"))
     assert store.load()["alias"] == ""
     assert store.save({"alias": "x"}) is False
 
@@ -1277,7 +1282,7 @@ def test_a_vanished_skill_undoes_the_step_and_offers_repair(ui, monkeypatch):
 
 def test_a_lookup_blip_does_not_undo_the_skill_step(monkeypatch):
     """Only a definitive 404 counts as gone; a 500 or timeout must not."""
-    from setup_ui import steps as wizard_steps
+    from ma_provider import setup_steps as wizard_steps
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
     monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: (_ for _ in ()).throw(
         smapi_rest.SmapiError("GET failed: 500", status=500)))
@@ -1369,28 +1374,28 @@ def test_binding_keepalive_staleness_and_traffic_guard(ui, monkeypatch, tmp_path
     assert views._binding_stale({"enabled": True}, now) is False
 
     # No captures: no active session, keep-alive may run.
-    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "empty"))
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(tmp_path / "empty"))
     assert views._recent_traffic() is False
     # A fresh capture marks an active session, which must block the cycle.
     live = tmp_path / "live"
     live.mkdir()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     (live / f"{stamp}-Alexa.Audio.PlayQueue.GetNextItem.json").write_text("{}")
-    monkeypatch.setenv("CAPTURE_DIR", str(live))
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(live))
     assert views._recent_traffic() is True
     # An old one does not.
     old = tmp_path / "old"
     old.mkdir()
     (old / "20200101T000000000000-Alexa.Audio.PlayQueue.GetNextItem.json"
      ).write_text("{}")
-    monkeypatch.setenv("CAPTURE_DIR", str(old))
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(old))
     assert views._recent_traffic() is False
     # A name this service did not write falls back to mtime, which errs
     # toward "playing" rather than risking a cycle mid-song.
     odd = tmp_path / "odd"
     odd.mkdir()
     (odd / "stray.json").write_text("{}")
-    monkeypatch.setenv("CAPTURE_DIR", str(odd))
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(odd))
     assert views._recent_traffic() is True
 
 
@@ -1769,8 +1774,8 @@ def captures_dir(tmp_path, monkeypatch):
     The suite-wide CAPTURE_DIR accumulates files from other tests, some of
     which carry signature headers, so evidence tests must not share it.
     """
-    from setup_ui import steps
-    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "captures"))
+    from ma_provider import setup_steps as steps
+    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(tmp_path / "captures"))
     (tmp_path / "captures").mkdir()
     steps._TRAFFIC.update(at=0.0, ok=False)  # bypass the 60s cache
     yield tmp_path / "captures"
@@ -1782,7 +1787,7 @@ def _capture(directory, name: str, headers: dict):
 
 
 def test_signed_amazon_traffic_satisfies_the_endpoint_step(captures_dir):
-    from setup_ui import steps
+    from ma_provider import setup_steps as steps
     _capture(captures_dir, "sig.json",
              {"Signature-256": "x", "SignatureCertChainUrl": "y"})
     assert steps._endpoint_done({}) is True
@@ -1790,13 +1795,13 @@ def test_signed_amazon_traffic_satisfies_the_endpoint_step(captures_dir):
 
 def test_an_unsigned_capture_proves_nothing(captures_dir):
     """Local smoke tests write captures too, and must not unlock the step."""
-    from setup_ui import steps
+    from ma_provider import setup_steps as steps
     _capture(captures_dir, "nosig.json", {"User-Agent": "curl"})
     assert steps._endpoint_done({}) is False
 
 
 def test_no_captures_at_all_is_not_proof(captures_dir):
-    from setup_ui import steps
+    from ma_provider import setup_steps as steps
     assert steps._endpoint_done({}) is False
 
 
@@ -1807,7 +1812,7 @@ def test_a_scrub_does_not_make_ancient_traffic_look_current(captures_dir):
     signed directive from a year ago must not start counting as proof that
     Amazon can reach this deployment today.
     """
-    from setup_ui import steps
+    from ma_provider import setup_steps as steps
     _capture(captures_dir, "20250101T120000000000-Alexa.Media.Playback.Initiate.json",
              {"Signature-256": "x", "SignatureCertChainUrl": "y"})
     os.utime(captures_dir / "20250101T120000000000-Alexa.Media.Playback.Initiate.json",
@@ -1823,5 +1828,5 @@ def test_a_scrub_does_not_make_ancient_traffic_look_current(captures_dir):
 
 
 def test_the_stored_flag_still_counts(captures_dir):
-    from setup_ui import steps
+    from ma_provider import setup_steps as steps
     assert steps._endpoint_done({"endpoint_ok": True}) is True

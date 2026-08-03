@@ -66,6 +66,7 @@ from . import mdns
 from . import oauth
 from . import queue_api
 from . import queuestate
+from . import setup_state
 from . import signature
 from . import smapi_rest
 from . import subsonic
@@ -190,6 +191,7 @@ def configure(public_base: str = "", storage_path: str = "",
         queue_api.STATE_DIR = root / "queuestate" / "external"
         mastream_cache.CACHE_DIR = root / "mastream"
         smapi_rest.set_state_dir(root)
+        setup_state.STATE_DIR = root
 
 
 def require_public_base() -> None:
@@ -330,8 +332,14 @@ def _saved_settings() -> dict:
 
     Read on the hot path (continuation decisions per queue request), so it must
     cost a stat rather than a parse when nothing has changed.
+
+    The path is asked of the module that owns the file rather than rebuilt
+    from a directory and a filename. Rebuilding it worked for as long as both
+    computations read the same environment variable, and stopped the moment
+    Music Assistant supplied a storage path instead: the wizard would write
+    settings that this, reading a different path, would never see.
     """
-    path = smapi_rest.state_dir() / "setup-state.json"
+    path = setup_state.path()
     try:
         mtime = path.stat().st_mtime
     except OSError:

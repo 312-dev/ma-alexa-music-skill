@@ -13,6 +13,12 @@ import pathlib
 
 FILENAME = "setup-state.json"
 
+# Where the file lives. Overridden by `core.configure` when Music Assistant
+# supplies a storage path, because the default is an absolute path chosen for a
+# container this service owned and inside MA it resolves to MA's own storage
+# root, next to library.db.
+STATE_DIR: pathlib.Path | None = None
+
 DEFAULTS = {
     "alias": "",
     "skill_id": "",
@@ -40,6 +46,8 @@ DEFAULTS = {
 
 
 def path() -> pathlib.Path:
+    if STATE_DIR is not None:
+        return STATE_DIR / FILENAME
     return pathlib.Path(os.environ.get("SETUP_STATE_DIR", "/data")) / FILENAME
 
 

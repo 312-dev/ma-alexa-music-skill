@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from setup_ui import state as store, views
+from ma_provider import setup_state as store
+from setup_ui import views
 from ma_provider import smapi_rest
 
 SEARCH = views.SEARCH_DIRECTIVE
@@ -25,8 +26,14 @@ PLAYING = views.PLAYING_DIRECTIVE
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    monkeypatch.setenv("SETUP_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("CAPTURE_DIR", str(tmp_path / "captures"))
+    # The directories, not the environment variables that used to name them.
+    # Music Assistant supplies no environment and moves both under its own
+    # storage path, so these are now module state that `core.configure` sets
+    # and setting the variables here would isolate nothing.
+    from ma_provider import core, setup_state
+
+    monkeypatch.setattr(core, "LOG_DIR", tmp_path / "captures")
+    monkeypatch.setattr(setup_state, "STATE_DIR", tmp_path / "state")
     monkeypatch.setenv("SKILL_ID", "")
     (tmp_path / "captures").mkdir()
     return tmp_path

@@ -29,7 +29,18 @@ STAMP = re.compile(r"^(\d{8}T\d{12})-")
 
 
 def log_dir() -> pathlib.Path:
-    return pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
+    """Where captures are, asked of the module that writes them.
+
+    Read from the environment directly until it had two readers in two
+    processes. Inside Music Assistant the directory moves under Ampere's own
+    storage path, and a second copy of the default would have this module
+    listing an empty directory forever while `core` wrote captures elsewhere.
+    Nothing about that looks like a fault: the wizard would simply report that
+    Amazon has never called.
+    """
+    from . import core
+
+    return core.LOG_DIR
 
 
 def capture_time(name: str) -> float | None:
