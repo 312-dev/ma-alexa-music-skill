@@ -82,7 +82,20 @@ class AmpereWebServer:
 
     # -- lifecycle ----------------------------------------------------------
 
-    async def start(self) -> None:
+    async def start(self) -> bool:
+        """Raise the listener. Returns whether it is actually serving.
+
+        A busy port does not take the provider down with it. The obvious thing
+        is to let the OSError propagate, but this port is one another process
+        can legitimately hold: during a migration off the standalone
+        deployment, and for as long as a rollback leaves it running, both want
+        the same number.
+
+        Failing the whole provider there would also remove every Echo from
+        Music Assistant, which is a working feature that has nothing to do with
+        whether a socket is free. So the bind failure is loud and specific, the
+        provider keeps its players, and the log says exactly what to do.
+        """
         self._pool = ThreadPoolExecutor(
             max_workers=POOL_SIZE, thread_name_prefix="ampere-web"
         )
@@ -92,11 +105,31 @@ class AmpereWebServer:
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, host=self.host, port=self.port)
-        await self._site.start()
+        try:
+            await self._site.start()
+        except OSError as err:
+            self.logger.error(
+                "Ampere could not bind port %s (%s). Something else is already "
+                "listening, most likely a standalone Ampere deployment. Stop it, "
+                "or set a different endpoint port in this provider's settings. "
+                "Echo players keep working; the Alexa endpoint is not being "
+                "served from Music Assistant.",
+                self.port, err,
+            )
+            self._site = None
+            await self._runner.cleanup()
+            self._runner = None
+            return False
+
         self.logger.info("Ampere endpoint listening on port %s", self.port)
 
         # Optional, and a no-op unless MDNS is set.
         await self._in_thread(core.advertise, self.port)
+        return True
+
+    @property
+    def serving(self) -> bool:
+        return self._site is not None
 
     async def stop(self) -> None:
         """Take the listener down with the provider that raised it.

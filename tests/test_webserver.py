@@ -301,3 +301,49 @@ async def test_both_adapters_shape_a_directive_alike(aio, client):
     for part in ("namespace", "name", "payloadVersion"):
         assert flask_body["header"][part] == aio_body["header"][part]
     assert flask_body["payload"] == aio_body["payload"]
+
+
+# --- a busy port ------------------------------------------------------------
+
+
+async def test_a_busy_port_does_not_take_the_provider_down(monkeypatch, caplog):
+    """The migration state, and the rollback state, both have two listeners.
+
+    Letting the OSError propagate would fail the whole provider and remove
+    every Echo from Music Assistant, which has nothing to do with whether a
+    socket is free. start() reports the failure instead of raising it.
+    """
+    import logging
+    import socket
+
+    held = socket.socket()
+    held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    held.bind(("127.0.0.1", 0))
+    held.listen(1)
+    port = held.getsockname()[1]
+
+    server = webserver.AmpereWebServer(
+        logging.getLogger("test-ampere-busy"), port=port, host="127.0.0.1")
+    try:
+        with caplog.at_level(logging.ERROR):
+            started = await server.start()
+        assert started is False
+        assert server.serving is False
+        assert "could not bind" in caplog.text
+    finally:
+        await server.stop()
+        held.close()
+
+
+async def test_a_free_port_reports_that_it_is_serving():
+    """The other half of the same signal, since the provider branches on it."""
+    import logging
+
+    server = webserver.AmpereWebServer(
+        logging.getLogger("test-ampere-free"), port=0, host="127.0.0.1")
+    try:
+        assert await server.start() is True
+        assert server.serving is True
+    finally:
+        await server.stop()
+        assert server.serving is False

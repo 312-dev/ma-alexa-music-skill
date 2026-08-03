@@ -778,10 +778,20 @@ class AmpereAlexaProvider(PlayerProvider):
         # run Music Assistant, and pointing at one is what turning this off
         # means.
         self.webserver: AmpereWebServer | None = None
+        serving = False
         if self.config.get_value(CONF_SERVE_ENDPOINT, True):
             port = int(self.config.get_value(CONF_ENDPOINT_PORT) or DEFAULT_PORT)
             self.webserver = AmpereWebServer(self.logger, port=port)
-            await self.webserver.start()
+            serving = await self.webserver.start()
+
+        # Publish where the endpoint actually is, which is not the same as
+        # where it was configured to be. A published queue is a file on disk,
+        # and the process that answers Alexa is the one that has to be able to
+        # read it. If this process is not serving the endpoint then some other
+        # deployment is, with its own state directory, and a local publish
+        # would write a queue nobody can resolve: Alexa would be told to play a
+        # contentId that, to the service answering, does not exist.
+        if serving:
             # No HTTP hop to a service that is us. See LocalBridge for what
             # that removes besides the round trip.
             self.bridge = LocalBridge(executor=self.webserver._pool)
