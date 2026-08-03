@@ -648,35 +648,22 @@ def _group(provider, state=None):
     return player
 
 
-def test_an_idle_group_does_not_hold_its_members():
-    """The bug: every Echo in Whole Apartment vanished from the picker.
+def test_a_group_never_holds_its_members_whatever_it_is_doing():
+    """Capture protects an MA-formed sync session. There is not one here.
 
-    They stayed listed under Settings > Players, which is the tell: MA was not
-    hiding them for being unavailable, it was hiding them for being owned.
-    """
-    provider = _provider_module()
-    assert _group(provider).is_active_session is False
-
-
-def test_a_playing_group_does_hold_its_members():
-    provider = _provider_module()
-    from music_assistant_models.enums import PlaybackState
-
-    assert _group(provider, PlaybackState.PLAYING).is_active_session is True
-
-
-def test_a_paused_group_releases_its_members():
-    """Against MA's guidance, and on purpose.
-
-    MA says a group should hold its members while paused. That assumes a group
-    the user can put down; MA offers this player no stop control, only pause.
-    A group that held its members while paused held them until something else
-    started, so every Echo in it was permanently missing from the picker.
+    An Alexa Whole Home Audio group is Amazon's: Amazon assembles it, Amazon
+    dissolves it, and a command sent to a member is a request Amazon knows how
+    to service. Two earlier versions held members while playing-or-paused and
+    then while playing, and each one deleted every Echo in the house from the
+    player picker for as long as the group was in that state, while leaving
+    them visible under Settings > Players.
     """
     provider = _provider_module()
     from music_assistant_models.enums import PlaybackState
 
-    assert _group(provider, PlaybackState.PAUSED).is_active_session is False
+    for state in (PlaybackState.IDLE, PlaybackState.PLAYING,
+                  PlaybackState.PAUSED):
+        assert _group(provider, state).is_active_session is False, state
 
 
 def test_a_plain_echo_never_holds_anything():
@@ -932,3 +919,23 @@ def test_no_queue_at_all_is_not_a_crash():
         player_queues=SimpleNamespace(items=explode))
 
     assert player._queue_item_for("My Way") is None
+
+
+def test_the_polled_media_names_the_queue_it_belongs_to():
+    """MA will not believe a queue_item_id without a matching source_id.
+
+    PlayerQueues._parse_player_current_item_id requires both, and its fallbacks
+    parse a Sonos uri or an MA stream url, neither of which an ampere:// uri
+    can look like. Without source_id the queue index never advances and MA goes
+    on showing whatever track the queue was holding when it arrived.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+
+    player._apply_state({"state": "PLAYING",
+                         "infoText": {"title": "My Way"},
+                         "progress": {"mediaProgress": 1000}})
+
+    media = player._attr_current_media
+    assert media.source_id == "p1", "must equal the player id, which keys the queue"
+    assert media.queue_item_id == "id-0"

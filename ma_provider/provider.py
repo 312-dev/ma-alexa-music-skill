@@ -327,22 +327,25 @@ class AmperePlayer(Player):
         MA asks this to decide whether the member Echoes are owned by the group
         and should therefore be hidden from the player picker.
 
-        Playing only, deliberately, against MA's own guidance that a group
-        should also hold its members while paused and through an idle grace
-        period. That guidance assumes a group the user can put down. Music
-        Assistant offers this player no stop control, only pause, so a group
-        that held its members while paused held them until something else
-        started playing, and in practice that meant every Echo in the group was
-        permanently missing from the picker. Releasing on pause is the lesser
-        wrong: the worst it costs is a member being individually selectable
-        while the group happens to be paused.
+        Always False, including for a group, which is not what the name
+        suggests and needs the reason written down.
 
-        A non-group player must always answer False, which is what the base
-        class does and why this only overrides for a group.
+        Capture exists so MA does not issue commands to a speaker it is
+        currently streaming to as part of a group **MA itself formed**: the
+        members are mid-sync and talking to one directly would break the
+        session. Ampere forms nothing. An Alexa Whole Home Audio group is
+        Amazon's, assembled and dissolved by Amazon, and a command sent to a
+        member is a request Amazon knows how to service. There is no MA-side
+        session to protect, so there is nothing to capture.
+
+        Getting this wrong is expensive and hard to read as a bug: capturing
+        members deletes them from the player picker while leaving them under
+        Settings > Players, so they look present everywhere an operator would
+        check. Two intermediate versions of this method, holding members while
+        playing-or-paused and then while playing, each hid every Echo in the
+        house for as long as the group was in the corresponding state.
         """
-        if not self.is_group:
-            return False
-        return self._attr_playback_state == PlaybackState.PLAYING
+        return False
 
     @property
     def api(self) -> AlexaAPI:
@@ -623,6 +626,16 @@ class AmperePlayer(Player):
         self._attr_current_media = PlayerMedia(
             uri=f"ampere://{self.player_id}/{title}",
             media_type=MediaType.TRACK,
+            # Both of these, or neither counts. MA's
+            # PlayerQueues._parse_player_current_item_id will only believe a
+            # queue_item_id when source_id names the queue as well, and its
+            # fallbacks parse a Sonos uri or an MA stream url, neither of which
+            # an ampere:// uri can ever look like. Without source_id the queue
+            # index never advances, so MA went on showing whatever track the
+            # queue was holding when it arrived while the speakers played on:
+            # observed with a group three tracks ahead of the display. A
+            # player's own queue is keyed by its player_id.
+            source_id=self.player_id,
             title=title,
             artist=kept(text.get("subText1"), "artist"),
             album=kept(text.get("subText2"), "album"),
