@@ -345,6 +345,24 @@ Ranges come from exactly two things: scrubbing the progress bar, and moving
 audio between rooms. Neither happens on a first fetch, which is why a source
 that cannot answer one looks perfect right up until someone touches it.
 
+Both were then confirmed against a real Echo and a real buffered track, and
+both are byte ranges against the identical URL:
+
+```
+# dragging the progress bar in the Alexa app
+GET /mastream/<ref>/...  206  4455002  "Echo/1.0(APNG)"
+
+# "Alexa, move the music to the bedroom"
+GET /mastream/<ref>/...  200        0  "Echo/1.0(APNG)"   <- probe
+GET /mastream/<ref>/...  206  2639362  "Echo/1.0(APNG)"   <- resumed
+```
+
+The room move sends **no directive of any kind** to the skill. Amazon re-forms
+the audio cluster in its own layer and has the new speaker re-pull the same
+stream URL from wherever playback had reached. So the only thing that makes a
+transfer work is the stream URL being device-agnostic, long-lived and
+range-capable; nothing in the skill ever learns that it happened.
+
 ### A stream reference must not be a stream URL
 
 MA's own per-track stream URL is scoped to a queue session:
