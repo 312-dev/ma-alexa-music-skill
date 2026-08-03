@@ -1,1 +1,8 @@
 pytest>=8
+
+# The aiohttp adapter (ma_provider/webserver.py) is Ampere's public front door
+# when it runs inside Music Assistant. MA brings aiohttp itself, but the tests
+# have to be able to exercise that adapter on a laptop that has never heard of
+# Music Assistant, which is the whole point of the framework-free core.
+aiohttp>=3.9
+pytest-aiohttp>=1.0

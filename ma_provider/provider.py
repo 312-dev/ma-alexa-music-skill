@@ -50,10 +50,11 @@ from music_assistant.constants import CONF_PASSWORD, CONF_USERNAME
 from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
-from .bridge import BridgeClient, BridgeError
+from .bridge import BridgeClient, BridgeError, LocalBridge
 from .stream_ref import encode_ref, is_live
 from .stream_route import MediaStreamRoute
 from .utterance import custom_command, sanitize
+from .webserver import DEFAULT_PORT, AmpereWebServer
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ConfigValueType, ProviderConfig
@@ -71,6 +72,8 @@ CONF_ALIAS = "alias"
 CONF_HANDOFF_PHRASE = "handoff_phrase"
 CONF_EXPOSE_GROUPS = "expose_groups"
 CONF_MA_SOURCE = "ma_source"
+CONF_SERVE_ENDPOINT = "serve_endpoint"
+CONF_ENDPOINT_PORT = "endpoint_port"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -153,6 +156,36 @@ async def get_config_entries(
     """Return config entries for setting up this provider."""
     return (
         ConfigEntry(
+            key=CONF_SERVE_ENDPOINT,
+            type=ConfigEntryType.BOOLEAN,
+            label="Serve the Alexa endpoint from Music Assistant",
+            default_value=True,
+            description=(
+                "On, Ampere listens on its own port in this process and no "
+                "separate service is needed. Point your reverse proxy at that "
+                "port. Off, it expects a standalone Ampere deployment at the "
+                "bridge URL below, which is how it works without Music "
+                "Assistant."
+            ),
+            # The listener is raised at init, so it cannot be moved under a
+            # running provider.
+            requires_reload=True,
+        ),
+        ConfigEntry(
+            key=CONF_ENDPOINT_PORT,
+            type=ConfigEntryType.INTEGER,
+            label="Endpoint port",
+            default_value=DEFAULT_PORT,
+            description=(
+                "The port Ampere listens on. A port of its own rather than "
+                "one of Music Assistant's, because MA's webservers have no "
+                "HTTP authentication and this one faces the public internet."
+            ),
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=True,
+            requires_reload=True,
+        ),
+        ConfigEntry(
             key=CONF_BRIDGE_URL,
             type=ConfigEntryType.STRING,
             label="Ampere bridge URL",
@@ -160,18 +193,22 @@ async def get_config_entries(
             # saves as a real value, so a field left untouched looks configured
             # and fails later at publish time with a confusing error.
             description=(
-                "Base URL of the Ampere bridge, for example "
-                "http://127.0.0.1:5056 when it runs beside this container, or "
-                "the public HTTPS host the Alexa skill endpoint points at."
+                "Base URL of a standalone Ampere bridge, for example "
+                "http://127.0.0.1:5056. Only used when the endpoint above is "
+                "not served from Music Assistant."
             ),
-            required=True,
+            required=False,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=False,
         ),
         ConfigEntry(
             key=CONF_ADMIN_TOKEN,
             type=ConfigEntryType.SECURE_STRING,
             label="Bridge admin token",
             description="The bridge's ADMIN_TOKEN. Sent as X-Admin-Token.",
-            required=True,
+            required=False,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=False,
         ),
         ConfigEntry(
             key=CONF_ALIAS,
@@ -733,17 +770,42 @@ class AmpereAlexaProvider(PlayerProvider):
     async def handle_async_init(self) -> None:
         self.logger.info("ampere provider build %s", build_stamp())
         self._discovery_lock = asyncio.Lock()
-        self.bridge = BridgeClient(
-            base_url=str(self.config.get_value(CONF_BRIDGE_URL) or ""),
-            admin_token=str(self.config.get_value(CONF_ADMIN_TOKEN) or ""),
-            session=self.mass.http_session,
-        )
+
+        # Hosting the endpoint ourselves is the point of phase 5: the Alexa
+        # skill, the audio proxy and the player provider all run in this
+        # process. The separate Flask deployment is still supported, because
+        # Ampere works for anyone with a Subsonic server whether or not they
+        # run Music Assistant, and pointing at one is what turning this off
+        # means.
+        self.webserver: AmpereWebServer | None = None
+        if self.config.get_value(CONF_SERVE_ENDPOINT, True):
+            port = int(self.config.get_value(CONF_ENDPOINT_PORT) or DEFAULT_PORT)
+            self.webserver = AmpereWebServer(self.logger, port=port)
+            await self.webserver.start()
+            # No HTTP hop to a service that is us. See LocalBridge for what
+            # that removes besides the round trip.
+            self.bridge = LocalBridge(executor=self.webserver._pool)
+        else:
+            self.bridge = BridgeClient(
+                base_url=str(self.config.get_value(CONF_BRIDGE_URL) or ""),
+                admin_token=str(self.config.get_value(CONF_ADMIN_TOKEN) or ""),
+                session=self.mass.http_session,
+            )
+
         self.stream_route = MediaStreamRoute(self.mass, self.logger)
         self.stream_route.register()
 
     async def unload(self, is_removed: bool = False) -> None:
-        """Take the audio route back down with the provider that serves it."""
+        """Take the audio route and the endpoint down with the provider.
+
+        The listener especially: a reload that left the old one holding the
+        port would make the new one fail to bind, and the failure would look
+        like a broken skill rather than a stale socket.
+        """
         self.stream_route.unregister()
+        if self.webserver is not None:
+            await self.webserver.stop()
+            self.webserver = None
 
     async def loaded_in_mass(self) -> None:
         await self._login()

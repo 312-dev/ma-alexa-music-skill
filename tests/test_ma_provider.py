@@ -1221,3 +1221,87 @@ def test_a_length_of_zero_is_no_length_rather_than_a_zero_length():
         "progress": {"mediaLength": 0, "mediaProgress": 0},
     })
     assert player._attr_current_media.duration is None
+
+
+# --- publishing without the round trip --------------------------------------
+#
+# Inside Music Assistant the bridge is this process, so `LocalBridge` calls
+# `queue_api.publish` directly. It has to be interchangeable with `BridgeClient`
+# at the one call site in the provider, so these mirror the HTTP tests above.
+
+
+@pytest.fixture
+def local_queue_dir(tmp_path, monkeypatch):
+    from ma_provider import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "external")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    return queue_api
+
+
+def test_a_local_publish_returns_a_content_id(local_queue_dir, fake_subsonic):
+    content_id = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"], "Evening"))
+
+    assert content_id.startswith(f"{local_queue_dir.CONTENT_PREFIX}:")
+    stored = local_queue_dir.resolve(content_id.split(":", 1)[1])
+    assert [s["id"] for s in stored] == ["t1", "t2"]
+
+
+def test_a_local_publish_is_the_same_content_id_as_republishing(local_queue_dir,
+                                                                fake_subsonic):
+    """The token hashes the track list, so an unchanged queue keeps its id.
+
+    That property is what stops a republish orphaning the queue Alexa is
+    already holding, and it must survive the move off HTTP.
+    """
+    once = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"]))
+    again = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"]))
+    assert once == again
+
+
+def test_a_local_publish_stringifies_track_ids(local_queue_dir, monkeypatch):
+    """Same coercion the HTTP body did, now that there is no body.
+
+    Asserted on what `publish` was handed rather than on the outcome, because a
+    caller holding ids as ints would otherwise fail deep inside the Subsonic
+    lookup with a message about an unknown song.
+    """
+    seen = {}
+
+    def fake_publish(tracks, name="", start_offset_ms=0):
+        seen.update(tracks=tracks, name=name, start_offset_ms=start_offset_ms)
+        return {"token": "abc", "tracks": [{"id": "123"}], "requested": 1}
+
+    monkeypatch.setattr(local_queue_dir, "publish", fake_publish)
+    asyncio.run(bridge.LocalBridge().publish_queue([123], "Evening", -5))
+
+    assert seen["tracks"] == ["123"], "ids must reach publish as strings"
+    assert seen["name"] == "Evening"
+    assert seen["start_offset_ms"] == 0, "a negative offset is clamped, not passed"
+
+
+def test_a_local_publish_refuses_an_empty_queue():
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(bridge.LocalBridge().publish_queue([]))
+
+
+def test_a_local_publish_refuses_a_queue_with_nothing_playable(local_queue_dir,
+                                                               fake_subsonic):
+    """Every id unknown to the library is a failure, not an empty success.
+
+    The HTTP path raised here because the bridge answered without a
+    content_id. Locally there is no response to inspect, so the check is on
+    what was actually stored; without it the provider would speak an utterance
+    for a queue with no tracks and the Echo would say it found nothing.
+    """
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(bridge.LocalBridge().publish_queue(["nope-1", "nope-2"]))
+
+
+def test_both_bridges_present_the_same_call(local_queue_dir, fake_subsonic):
+    """The provider has one call site and must not have to know which it holds."""
+    for impl in (bridge.LocalBridge(), bridge.BridgeClient("http://x", "t", None)):
+        publish = impl.publish_queue
+        assert asyncio.iscoroutinefunction(publish)
+        names = publish.__code__.co_varnames[:publish.__code__.co_argcount]
+        assert names == ("self", "tracks", "name", "start_offset_ms")

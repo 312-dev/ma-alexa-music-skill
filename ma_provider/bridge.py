@@ -12,6 +12,8 @@ hold onto. Anything with the aiohttp `post`/`get` shape works here.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 
 logger = logging.getLogger(__name__)
@@ -100,3 +102,57 @@ class BridgeClient:
                 count, requested,
             )
         return content_id
+
+
+class LocalBridge:
+    """The same publish, without the round trip.
+
+    When Ampere's endpoint runs inside this process there is no reason to
+    speak HTTP to ourselves. `BridgeClient` and this class present the same
+    `publish_queue`, so the caller does not branch: the provider picks one at
+    setup and the difference stops there.
+
+    This is not only a saved hop. The HTTP path had a failure mode that cannot
+    exist here: the bridge being unconfigured, unreachable, or answering with
+    someone else's admin token turned a perfectly good queue into a speaker
+    saying it could not find anything. A direct call either publishes or
+    raises, in this process, with a stack trace pointing at the reason.
+
+    `queue_api.publish` is synchronous and does a Subsonic lookup per track, so
+    it goes to a worker thread. Awaiting it inline would stall Music
+    Assistant's event loop for the length of a few hundred round trips, which
+    is exactly the stall the whole adapter design exists to avoid.
+    """
+
+    def __init__(self, executor=None) -> None:
+        self.executor = executor
+
+    async def publish_queue(self, tracks: list, name: str = "",
+                            start_offset_ms: int = 0) -> str:
+        if not tracks:
+            raise BridgeError("refusing to publish an empty queue")
+
+        from . import queue_api
+
+        loop = asyncio.get_running_loop()
+        record = await loop.run_in_executor(
+            self.executor,
+            functools.partial(
+                queue_api.publish,
+                [t if isinstance(t, dict) else str(t) for t in tracks],
+                name or "",
+                max(0, int(start_offset_ms or 0)),
+            ),
+        )
+
+        stored = len(record["tracks"])
+        if not stored:
+            raise BridgeError("published queue held no playable tracks")
+        # Same warning as the HTTP path, for the same reason: a queue that
+        # plays four of its twelve tracks otherwise looks like an Alexa bug.
+        if stored < record["requested"]:
+            logger.warning(
+                "stored %s of %s tracks; the rest are not in the library",
+                stored, record["requested"],
+            )
+        return f"{queue_api.CONTENT_PREFIX}:{record['token']}"

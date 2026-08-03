@@ -14,7 +14,13 @@ import pytest
 
 _TMP = tempfile.mkdtemp(prefix="ma-alexa-tests-")
 os.environ.setdefault("CAPTURE_DIR", os.path.join(_TMP, "captures"))
-os.environ.setdefault("ICON_DIR", os.path.join(_TMP, "icons"))
+# The repository's real icons, not an empty temp directory. Amazon refetches
+# these on every manifest update and fails the whole update on a 304, so the
+# route that serves them has behaviour worth testing, and it cannot be tested
+# against a directory with nothing in it.
+os.environ.setdefault(
+    "ICON_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons")
+)
 os.environ.setdefault("SIGNING_KEY", "test-signing-key-not-a-real-secret")
 os.environ.setdefault("ADMIN_TOKEN", "test-admin-token")
 os.environ.setdefault("PUBLIC_BASE", "https://example.test")
