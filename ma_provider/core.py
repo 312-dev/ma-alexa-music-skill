@@ -107,6 +107,12 @@ def set_signing_key(key: bytes) -> None:
     oauth.SIGNING_KEY = key
     queue_api.SIGNING_KEY = key
 
+
+# Guards the admin plane: /captures replays inbound Amazon requests and /diag
+# names the music server. Empty means the admin plane is closed, which is the
+# right default for a value that is a password.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
 # The public HTTPS origin Amazon reaches this service on. No default: every
 # stream and art URL Amazon fetches is built from it, so a wrong value does not
 # fail here, it fails later as audio that will not play, with nothing in any log
@@ -134,7 +140,9 @@ PUBLIC_BASE_HELP = (
 
 def configure(public_base: str = "", storage_path: str = "",
               subsonic_url: str = "", subsonic_user: str = "",
-              subsonic_password: str = "", signing_key: str = "") -> None:
+              subsonic_password: str = "", signing_key: str = "",
+              admin_token: str = "", oauth_client_id: str = "",
+              oauth_client_secret: str = "", oauth_link_secret: str = "") -> None:
     """Supply settings that do not come from the environment.
 
     Music Assistant holds its own configuration and does not hand providers an
@@ -146,8 +154,12 @@ def configure(public_base: str = "", storage_path: str = "",
     owned, and inside Music Assistant they resolve to MA's storage root: on
     2026-08-03 that put `captures/` and `queuestate/` next to MA's library.db
     and settings.json. Nothing broke, which is the problem with it.
+
+    Every argument is skipped when empty rather than written as an empty
+    string. Configuring twice with a partial second call is a normal thing for
+    a provider reload to do, and it must not blank out what the first call set.
     """
-    global PUBLIC_BASE, FALLBACK_ART, LOG_DIR
+    global PUBLIC_BASE, FALLBACK_ART, LOG_DIR, ADMIN_TOKEN
     if public_base:
         PUBLIC_BASE = public_base.rstrip("/")
         FALLBACK_ART = _fallback_art()
@@ -156,6 +168,20 @@ def configure(public_base: str = "", storage_path: str = "",
 
     if signing_key:
         set_signing_key(signing_key.encode())
+
+    if admin_token:
+        ADMIN_TOKEN = admin_token
+
+    # The client id and secret are Ampere's own: Amazon learns them from the
+    # skill manifest this service writes, so nobody ever types them and they
+    # can be generated. The link passphrase is the opposite, and is the one
+    # linking value a person reads off the screen and types into the Alexa app.
+    if oauth_client_id:
+        oauth.CLIENT_ID = oauth_client_id
+    if oauth_client_secret:
+        oauth.CLIENT_SECRET = oauth_client_secret
+    if oauth_link_secret:
+        oauth.LINK_SECRET = oauth_link_secret
 
     if storage_path:
         root = pathlib.Path(storage_path)
@@ -1886,7 +1912,7 @@ def admin_authorized(remote_addr: str | None, headers: Mapping[str, str]) -> boo
     calls. Amazon never asks for either, so nothing is lost by refusing them
     from off the LAN. Same rule and same variables as the wizard.
     """
-    expected = os.environ.get("ADMIN_TOKEN")
+    expected = ADMIN_TOKEN
     if not expected or headers.get("X-Admin-Token") != expected:
         return False
     forwarded = headers.get("X-Forwarded-For")

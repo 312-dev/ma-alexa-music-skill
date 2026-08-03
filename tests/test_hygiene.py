@@ -401,3 +401,74 @@ def test_a_signature_survives_the_key_being_reapplied():
         assert app_module.verify("stream", "t1", expires, signature) is False
     finally:
         app_module.set_signing_key(original)
+
+
+def test_every_injected_secret_reaches_the_module_that_uses_it():
+    """Configuring must actually move the value, not just accept it.
+
+    Each of these lives in a different module and was read from a different
+    environment variable. Music Assistant supplies none of them, so if any one
+    fails to arrive the failure is silent and remote: the admin plane answers
+    nobody, or account linking rejects the right passphrase, and the log says
+    only that a request was refused.
+    """
+    from ma_provider import oauth
+
+    before = (app_module.ADMIN_TOKEN, oauth.CLIENT_ID, oauth.CLIENT_SECRET,
+              oauth.LINK_SECRET, app_module.SIGNING_KEY)
+    try:
+        app_module.configure(
+            admin_token="token-from-config",
+            oauth_client_id="ampere-abcd1234",
+            oauth_client_secret="secret-from-config",
+            oauth_link_secret="passphrase-from-config",
+        )
+        assert app_module.ADMIN_TOKEN == "token-from-config"
+        assert oauth.CLIENT_ID == "ampere-abcd1234"
+        assert oauth.CLIENT_SECRET == "secret-from-config"
+        assert oauth.LINK_SECRET == "passphrase-from-config"
+    finally:
+        (app_module.ADMIN_TOKEN, oauth.CLIENT_ID, oauth.CLIENT_SECRET,
+         oauth.LINK_SECRET) = before[:4]
+        app_module.set_signing_key(before[4])
+
+
+def test_configuring_again_does_not_blank_what_was_already_set():
+    """A partial second call is a normal thing for a reload to make.
+
+    `configure` takes ten keyword arguments and callers pass the ones they
+    have. If an omitted argument overwrote the stored value with an empty
+    string, the second call would silently close the admin plane and break
+    account linking, and the only symptom would be 403s.
+    """
+    from ma_provider import oauth
+
+    before = (app_module.ADMIN_TOKEN, oauth.LINK_SECRET)
+    try:
+        app_module.configure(admin_token="set-the-first-time",
+                             oauth_link_secret="also-the-first-time")
+        app_module.configure(public_base="https://elsewhere.test")
+
+        assert app_module.ADMIN_TOKEN == "set-the-first-time"
+        assert oauth.LINK_SECRET == "also-the-first-time"
+    finally:
+        app_module.ADMIN_TOKEN, oauth.LINK_SECRET = before
+        app_module.configure(public_base="https://example.test")
+
+
+def test_the_admin_plane_is_closed_when_no_token_was_supplied():
+    """Empty means closed, not open.
+
+    /captures replays inbound Amazon requests and /diag names the music
+    server. A token read from an environment Music Assistant does not provide
+    is an empty token, and an empty token that compared equal to an absent
+    header would open both to anyone on the network.
+    """
+    before = app_module.ADMIN_TOKEN
+    try:
+        app_module.ADMIN_TOKEN = ""
+        assert app_module.admin_authorized("127.0.0.1", {}) is False
+        assert app_module.admin_authorized("127.0.0.1",
+                                           {"X-Admin-Token": ""}) is False
+    finally:
+        app_module.ADMIN_TOKEN = before

@@ -81,6 +81,9 @@ CONF_SUBSONIC_URL = "subsonic_url"
 CONF_SUBSONIC_USER = "subsonic_user"
 CONF_SUBSONIC_PASSWORD = "subsonic_password"
 CONF_SIGNING_KEY = "signing_key"
+CONF_ADMIN_SECRET = "admin_secret"
+CONF_CLIENT_SECRET = "client_secret"
+CONF_LINK_SECRET = "link_secret"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -824,30 +827,49 @@ class AmpereAlexaProvider(PlayerProvider):
     login: AlexaLogin
     bridge: BridgeClient
 
-    def _signing_key(self) -> str:
-        """The key that signs stream URLs, OAuth tokens and queue ids.
+    def _minted(self, key: str, what: str, length: int = 32) -> str:
+        """A secret this instance generates for itself, once, and keeps.
 
-        Generated once and kept in this provider's own config, because it has
-        to survive a restart. It signs URLs Amazon holds for hours: a key that
-        changed on reload would 403 Alexa partway through a queue it was
-        already playing, unlink the account, and give a republished queue a new
-        id that orphans the one Alexa is holding.
+        Standalone Ampere takes these from environment variables. Music
+        Assistant hands providers no environment, and there is nothing for
+        anyone to decide about any of them, so rather than add fields nobody
+        can answer they are generated here and stored encrypted in this
+        provider's own config.
 
-        Not a visible setting. There is nothing for anyone to decide here, and
-        a field inviting someone to change it is a field inviting them to break
-        every URL currently in flight.
+        Persisting is the whole point. Every one of these outlives the process
+        that made it: the signing key validates URLs Amazon holds for hours, so
+        a key that changed on reload would 403 Alexa partway through a queue it
+        was already playing, unlink the account, and give a republished queue a
+        new id that orphans the one Alexa is holding.
+
+        Deliberately not visible settings. A field inviting someone to change
+        one is a field inviting them to break every URL currently in flight.
         """
         stored = self.mass.config.get_raw_provider_config_value(
-            self.instance_id, CONF_SIGNING_KEY
+            self.instance_id, key
         )
         if stored:
             return str(stored)
-        minted = secrets.token_hex(32)
+        minted = secrets.token_hex(length)
         self.mass.config.set_raw_provider_config_value(
-            self.instance_id, CONF_SIGNING_KEY, minted, encrypted=True
+            self.instance_id, key, minted, encrypted=True
         )
-        self.logger.info("generated a signing key for this Ampere instance")
+        self.logger.info("generated %s for this Ampere instance", what)
         return minted
+
+    def _link_passphrase(self) -> str:
+        """The passphrase typed once in the Alexa app to link the account.
+
+        Minted like the others, but short and readable, because unlike them a
+        person has to read this one off a screen and type it into a phone. A
+        64 character hex string is technically fine and practically hostile.
+
+        Nothing else guards the linking page, so it is not decoration: it is
+        what stops anyone who finds the public endpoint from linking their own
+        Alexa to this library.
+        """
+        return self._minted(CONF_LINK_SECRET, "an account linking passphrase",
+                            length=6)
 
     async def handle_async_init(self) -> None:
         self.logger.info("ampere provider build %s", build_stamp())
@@ -874,7 +896,12 @@ class AmpereAlexaProvider(PlayerProvider):
             subsonic_url=str(self.config.get_value(CONF_SUBSONIC_URL) or ""),
             subsonic_user=str(self.config.get_value(CONF_SUBSONIC_USER) or ""),
             subsonic_password=str(self.config.get_value(CONF_SUBSONIC_PASSWORD) or ""),
-            signing_key=self._signing_key(),
+            signing_key=self._minted(CONF_SIGNING_KEY, "a signing key"),
+            admin_token=self._minted(CONF_ADMIN_SECRET, "an admin token"),
+            oauth_client_id=f"ampere-{self.instance_id[:8]}",
+            oauth_client_secret=self._minted(CONF_CLIENT_SECRET,
+                                             "an account linking client secret"),
+            oauth_link_secret=self._link_passphrase(),
         )
 
         self.webserver: AmpereWebServer | None = None
