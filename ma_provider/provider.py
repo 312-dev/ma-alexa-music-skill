@@ -547,6 +547,7 @@ class AmperePlayer(Player):
         progress = info.get("progress") or {}
         text = info.get("infoText") or {}
         title = text.get("title") or ""
+        previously_playing = self._attr_current_media is not None
 
         # mediaProgress and mediaLength come back in milliseconds, which is not
         # what the field names suggest and is why the Alexa Media Player
@@ -557,14 +558,15 @@ class AmperePlayer(Player):
             self._attr_elapsed_time_last_updated = time.time()
 
         if not title:
-            # Every state bug tonight has come from guessing what Alexa sent.
-            # A poll with a state but no title leaves current_media pointing at
-            # whatever played last, so if that is happening it needs to be
-            # visible rather than inferred. Keys only: the payload carries
-            # tokens.
-            self.logger.info(
-                "%s reported %s with no track title; keys were %s",
-                self.name, state or "<no state>", sorted(info))
+            # A poll with no title leaves current_media pointing at whatever
+            # played last, which is a candidate explanation for MA showing a
+            # stale track. Worth seeing, but only on the way in: an idle Echo
+            # answers this way on every poll forever, and logging that turns a
+            # signal into 36 lines a minute of noise.
+            if previously_playing:
+                self.logger.info(
+                    "%s stopped reporting a track title (state %s) so its "
+                    "media is left as it was", self.name, state or "<none>")
             return
 
         # Alexa omits fields it does not feel like sending, and omits more of

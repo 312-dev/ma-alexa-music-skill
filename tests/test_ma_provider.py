@@ -835,3 +835,38 @@ def test_artist_and_art_survive_a_thin_poll_too():
     assert media.artist == "Someone"
     assert media.album == "A Record"
     assert media.image_url == "https://art.test/1.jpg"
+
+
+def test_an_idle_speaker_does_not_log_on_every_poll():
+    """An Echo with nothing playing answers with no title forever.
+
+    Logging that per poll turns a signal into 36 lines a minute, which is how
+    a log stops being read at all.
+    """
+    provider = _provider_module()
+    lines = []
+
+    player = _polled(provider, None)
+    player.logger = SimpleNamespace(info=lambda m, *a: lines.append(m % a),
+                                    warning=lambda *a, **k: None,
+                                    debug=lambda *a, **k: None)
+    for _ in range(5):
+        player._apply_state({"state": "IDLE", "infoText": {}, "progress": {}})
+
+    assert lines == []
+
+
+def test_losing_the_title_mid_track_is_worth_one_line():
+    provider = _provider_module()
+    lines = []
+
+    player = _polled(provider, _media(provider, duration=240))
+    player.logger = SimpleNamespace(info=lambda m, *a: lines.append(m % a),
+                                    warning=lambda *a, **k: None,
+                                    debug=lambda *a, **k: None)
+
+    player._apply_state({"state": "PLAYING", "infoText": {}, "progress": {}})
+
+    assert len(lines) == 1
+    assert "stopped reporting a track title" in lines[0]
+    assert player._attr_current_media.title == "Song", "media left as it was"
