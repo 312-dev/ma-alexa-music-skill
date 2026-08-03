@@ -117,6 +117,29 @@ def test_capability_failure_does_not_lose_a_working_token(auth):
     assert auth.state.ok is True
 
 
+def test_a_refused_capability_registration_is_warned_about(auth, caplog):
+    """It reports failure by returning False, not by raising.
+
+    So wrapping the call in `try` catches nothing, and the result was being
+    discarded entirely. alexapy's own docstring says capabilities are required
+    for HTTP/2 push: skipping them yields a token that authenticates, a stream
+    that opens, and no events at all, with every individual step reporting
+    success. That is the single hardest failure in this whole feature to
+    diagnose, so it has to be said out loud.
+    """
+    caplog.set_level(logging.WARNING)
+    login = FakeLogin()
+
+    async def refused():
+        return False
+
+    login.register_capabilities = refused
+
+    _run(auth.adopt(login))
+
+    assert "capabilities" in caplog.text.lower()
+
+
 # -- persistence -------------------------------------------------------------
 
 

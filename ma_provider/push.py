@@ -191,12 +191,30 @@ class PushStream:
             self._set_connected(False)
 
     async def _teardown_client(self) -> None:
+        """Stop a client completely, not just its socket.
+
+        `async_run` starts two tasks: the reader, and a ping loop that sleeps
+        299 seconds and repeats forever. Closing the httpx client leaves that
+        ping loop running, so every reconnect used to leak one, and each leaked
+        loop went on pinging Amazon with the same bearer token. A handful of
+        reconnects and the account has several unattached clients pinging on
+        its behalf, which is its own reason for Amazon to hang up -- a
+        reconnect loop that causes the disconnects it is reconnecting from.
+
+        `on_close` is alexapy's own teardown and cancels both tasks. It also
+        calls back into `_on_close` here, which only sets an event that is
+        already set, so calling it during teardown is harmless.
+        """
         client, self._client = self._client, None
         if client is None:
             return
-        # Best effort. The httpx client owns sockets, and leaking one per
-        # reconnect would eventually exhaust the process; failing to close one
-        # is not a reason to stop reconnecting.
+        # Best effort throughout. Failing to tidy up is not a reason to stop
+        # reconnecting, but it must happen before the socket goes.
+        with contextlib.suppress(Exception):
+            client.on_close()
+        for task in list(getattr(client, "_tasks", ()) or ()):
+            with contextlib.suppress(Exception):
+                task.cancel()
         with contextlib.suppress(Exception):
             await client.client.aclose()
 
@@ -213,8 +231,23 @@ class PushStream:
         self._set_connected(False)
 
     async def _on_error(self, error: str) -> None:
-        self.last_error = str(error)
-        self.logger.debug("push stream error: %s", error)
+        """Record why the stream ended.
+
+        The first occurrence of each distinct reason is logged at info, not
+        debug. A stream that reconnects every few seconds and says only
+        "reconnecting" is unactionable: the reason lives in the exception
+        alexapy hands here, and putting it at debug meant the one line that
+        explained a flapping connection was the one line nobody could see.
+
+        Repeats stay at debug, because a persistent fault would otherwise
+        write a line every backoff interval for as long as it lasts.
+        """
+        text = str(error)
+        if text and text != self.last_error:
+            self.logger.info("live updates dropped: %s", text)
+        else:
+            self.logger.debug("push stream error: %s", text)
+        self.last_error = text
         self._closed.set()
 
     async def _on_message(self, message: Any) -> None:

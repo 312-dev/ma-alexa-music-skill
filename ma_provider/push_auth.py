@@ -204,15 +204,22 @@ class PushAuth:
             )
             return False
 
+        # The return value matters and was being discarded. alexapy's own
+        # docstring says this is required for HTTP/2 push, and it reports
+        # failure by returning False rather than by raising, so a `try` alone
+        # catches nothing. A registration that skipped this yields a token that
+        # authenticates, a stream that opens, and no events at all -- every
+        # step reporting success.
         try:
-            await login.register_capabilities()
-        except Exception as err:
-            # Not fatal on its own: the token exists and the stream may still
-            # be accepted. Worth recording, because if the stream then delivers
-            # nothing this is the first thing to suspect.
+            capable = await login.register_capabilities()
+        except Exception as err:  # noqa: BLE001
+            capable = False
             self.logger.info(
-                "capability registration did not complete (%s); live updates "
-                "may not arrive", type(err).__name__)
+                "capability registration raised (%s)", type(err).__name__)
+        if not capable:
+            self.logger.warning(
+                "Amazon did not accept this instance's push capabilities. "
+                "Live updates may connect and then deliver nothing.")
 
         self.login = login
         self._persist()
