@@ -1,7 +1,9 @@
 """Decoding real push directives.
 
-The sample in `RAW_VOLUME` is verbatim off a live stream on 2026-08-03,
-backslashes and all. That matters more than it looks: the payload is JSON
+The sample in `RAW_VOLUME` is a live directive from 2026-08-03 with the
+account and device identifiers replaced and nothing else touched -- the
+backslashes, nesting and field order are exactly as Amazon sent them. That
+matters more than it looks: the payload is JSON
 encoded inside a string inside JSON encoded inside a string, and a parser
 written against a hand-tidied example decodes the outer layer, returns
 something that passes a shallow assertion, and reads nothing. Keeping one
