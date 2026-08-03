@@ -32,8 +32,8 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import handoff
-import subsonic
+from . import handoff
+from . import subsonic
 
 STATE_PATH = pathlib.Path(os.environ.get("CATALOG_STATE", "/data/catalog-state.json"))
 OUT_DIR = pathlib.Path(os.environ.get("CATALOG_OUT", "/tmp/catalog"))

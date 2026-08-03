@@ -18,9 +18,9 @@ from datetime import datetime, timezone
 import pytest
 
 import app as flask_module
-import core as app_module
+from ma_provider import core as app_module
 from setup_ui import bp as setup_bp
-import smapi_rest
+from ma_provider import smapi_rest
 from setup_ui import qr, smapi, state as store, validate, views
 
 # The parent wires this up in app.py. Registering once here keeps the suite
@@ -471,7 +471,7 @@ def test_stations_page_no_longer_demands_a_restart(cfg):
 
 def test_saved_settings_take_effect_without_a_restart(cfg, app):
     """The point of the change: the form is a real settings page."""
-    import core as bridge
+    from ma_provider import core as bridge
     cfg.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
                                      "radio_tracks_per_artist": "4"})
     assert bridge.effective_after_content() == "stop"
@@ -486,7 +486,7 @@ def test_saved_settings_take_effect_without_a_restart(cfg, app):
 
 def test_saving_settings_drops_the_stale_pools(cfg):
     """Cached pools were built under the old numbers."""
-    import core as bridge
+    from ma_provider import core as bridge
     bridge._RADIO_CACHE["a1"] = ["a1", "a2"]
     bridge._QUEUE_CACHE["rad:a1"] = [{"id": "t1"}]
     cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
@@ -496,7 +496,7 @@ def test_saving_settings_drops_the_stale_pools(cfg):
 
 
 def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch):
-    import core as bridge
+    from ma_provider import core as bridge
     monkeypatch.setattr(bridge, "AFTER_CONTENT", "genre")
     # No saved value in this test's store, so the module constant wins.
     assert bridge.effective_after_content() == "genre"
@@ -580,7 +580,7 @@ def test_manifest_is_a_music_skill_with_an_https_endpoint():
 
 
 def test_wizard_catalogs_cover_every_kind():
-    import catalog_sync
+    from ma_provider import catalog_sync
 
     assert set(views.CATALOG_KINDS) == set(catalog_sync.CATALOGS)
     assert views.CATALOG_KINDS == catalog_sync.TYPES
@@ -1579,7 +1579,7 @@ def test_ingestion_success_unlocks_continue_without_a_reload(ui, monkeypatch):
 
 
 def test_playlists_shuffle_only_when_the_setting_is_on(cfg):
-    import core as bridge
+    from ma_provider import core as bridge
     assert bridge.shuffle_by_default("pl:x") is False
     cfg.post("/setup/stations", data={
         "after_content": "stop", "radio_artists": "12",

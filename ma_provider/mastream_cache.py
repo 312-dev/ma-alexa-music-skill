@@ -57,7 +57,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from ma_provider import stream_ref
+from . import stream_ref
 
 logger = logging.getLogger("ma-music-skill.mastream-cache")
 

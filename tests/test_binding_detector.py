@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import pytest
 
 from setup_ui import state as store, views
-import smapi_rest
+from ma_provider import smapi_rest
 
 SEARCH = views.SEARCH_DIRECTIVE
 INITIATE = views.INITIATE_DIRECTIVE

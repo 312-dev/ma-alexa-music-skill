@@ -18,7 +18,7 @@ import datetime
 
 import pytest
 
-import signature
+from ma_provider import signature
 
 cryptography = pytest.importorskip("cryptography")
 

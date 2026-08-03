@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-import smapi_rest
+from ma_provider import smapi_rest
 
 from . import captures
 

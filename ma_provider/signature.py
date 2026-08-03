@@ -33,18 +33,17 @@ Amazon request pass, and then turn it on knowing what will happen.
 ## Dependency
 
 Full X.509 path validation is not something to hand-roll, so this uses
-`cryptography`. It is the only dependency in the project beyond flask and
-gunicorn, and it earns its place. If it is not importable this module still
-imports and `verify()` returns a clear "unavailable" reason, so the absence of
-the library degrades to the pre-existing behavior rather than to a crash on
-every request.
+`cryptography`. Music Assistant already depends on it and the standalone
+deployment declares it, so it costs nothing on either side. If it is not
+importable this module still imports and `verify()` returns a clear
+"unavailable" reason, so the absence of the library degrades to the
+pre-existing behavior rather than to a crash on every request.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import functools
 import logging
 import os
 import posixpath
@@ -358,23 +357,19 @@ def verify(headers: Mapping[str, str], body: bytes) -> tuple[bool, str]:
     return True, "ok"
 
 
-def check_request(headers: Mapping[str, str] | None = None,
-                  body: bytes | None = None) -> tuple[bool, str]:
+def check_request(headers: Mapping[str, str], body: bytes) -> tuple[bool, str]:
     """Apply the VERIFY_REQUESTS policy. Returns (allow, reason).
 
     `allow` is False only under policy `on` with a failed check, so the caller
     can gate on it unconditionally and let the env var decide what happens.
-    Falls back to the current Flask request when called with no arguments.
+
+    Both arguments are required. They used to default to None and fall back to
+    reading Flask's ambient request, which was the last thing in this package
+    that imported a web framework. Inside Music Assistant that import does not
+    resolve, so the fallback was not a convenience but a way for signature
+    checking to fail at the exact moment it was asked to do its job.
     """
     mode = policy()
-
-    if headers is None or body is None:
-        from flask import request  # imported here so the module stays usable off-web
-
-        headers = request.headers if headers is None else headers
-        # cache=True so a later get_json() still sees the body.
-        body = request.get_data(cache=True) if body is None else body
-
     ok, reason = verify(headers, body)
 
     if ok:
@@ -391,20 +386,7 @@ def check_request(headers: Mapping[str, str] | None = None,
     return True, reason
 
 
-def require_amazon_signature(view):
-    """Flask decorator form of check_request.
-
-    Returns 403 with an Alexa-shaped body when policy is `on` and the check
-    fails, and is a no-op otherwise.
-    """
-
-    @functools.wraps(view)
-    def wrapper(*args, **kwargs):
-        allow, reason = check_request()
-        if not allow:
-            from flask import jsonify
-
-            return jsonify({"error": "unverified request", "reason": reason}), 403
-        return view(*args, **kwargs)
-
-    return wrapper
+# A Flask decorator form of check_request lived here and was never used by
+# anything. It was the only other reference to a web framework in this package,
+# so it went with the fallback above rather than being carried into Music
+# Assistant unused. `core.dispatch` gates on check_request directly.

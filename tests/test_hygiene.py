@@ -19,8 +19,8 @@ import time
 
 import pytest
 
-import core as app_module
-import queuestate
+from ma_provider import core as app_module
+from ma_provider import queuestate
 from conftest import directive
 
 
@@ -188,24 +188,43 @@ def test_writing_queue_state_still_works_when_prune_fails(tmp_path, monkeypatch)
     assert queuestate.update("q1", shuffle=True)["shuffle"] is True
 
 
-def test_every_module_the_app_imports_is_in_the_image():
-    """The Dockerfile names its modules one by one, so a new one is silently
-    left out and the container dies on import at start.
+def test_the_image_copies_the_package_whole_rather_than_module_by_module():
+    """A named-module COPY list silently omits whatever was added last.
 
     Caught the hard way: `handoff.py` was added, the build succeeded, the image
-    passed a push and only failed when it ran.
+    passed a push, and it only failed when it ran. The old form of this test
+    compared the list against the directory and had to be kept in step by hand.
+
+    Copying the package as a directory removes the failure mode instead of
+    detecting it, so what is worth pinning now is that nobody goes back to
+    enumerating files. Every module lives in `ma_provider`, so one COPY of that
+    directory is both necessary and sufficient.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     dockerfile = (root / "Dockerfile").read_text()
-    copied = set(re.findall(r"[\w./-]+\.py", dockerfile))
 
-    modules = {
+    assert re.search(r"^COPY\s+ma_provider/\s+ma_provider/\s*$", dockerfile, re.M), (
+        "the image must COPY the ma_provider package as a directory"
+    )
+    named = {
+        m for m in re.findall(r"ma_provider/[\w.-]+\.py", dockerfile)
+    }
+    assert not named, (
+        "modules are named individually again, which is how one gets missed: "
+        + ", ".join(sorted(named))
+    )
+
+    # Nothing but the Flask adapter should be left loose at the root, since a
+    # loose module is one the provider inside Music Assistant cannot import.
+    loose = {
         path.name
         for path in root.glob("*.py")
-        if path.name not in {"conftest.py", "setup.py"}
+        if path.name not in {"conftest.py", "setup.py", "app.py"}
     }
-    missing = sorted(modules - copied)
-    assert not missing, f"not COPYed into the image: {', '.join(missing)}"
+    assert not loose, (
+        "these belong in ma_provider, or the provider cannot import them: "
+        + ", ".join(sorted(loose))
+    )
 
 
 def test_the_core_does_not_depend_on_a_web_framework():
@@ -237,7 +256,7 @@ def test_the_core_does_not_depend_on_a_web_framework():
                 return None
 
         sys.meta_path.insert(0, Blocker())
-        import core  # noqa: F401
+        from ma_provider import core  # noqa: F401
         assert not [m for m in sys.modules if m.split(".")[0] == "flask"]
         """
     )

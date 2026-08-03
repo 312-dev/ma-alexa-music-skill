@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-import smapi_rest
+from ma_provider import smapi_rest
 
 
 @pytest.fixture(autouse=True)

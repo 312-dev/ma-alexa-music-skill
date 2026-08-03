@@ -23,12 +23,12 @@ from flask import (Blueprint, jsonify, make_response, redirect,
                    render_template, request)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-import catalog_sync
-import logring
-import access
-import core as bridge
-import smapi_rest
-import subsonic
+from ma_provider import catalog_sync
+from ma_provider import logring
+from ma_provider import access
+from ma_provider import core as bridge
+from ma_provider import smapi_rest
+from ma_provider import subsonic
 
 from . import (captures, qr, smapi, state as store,
                steps as wizard_steps, validate)

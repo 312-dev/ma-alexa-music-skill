@@ -59,22 +59,22 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html import escape
 
-import access
-import logring
-import mastream_cache
-import mdns
-import oauth
-import queue_api
-import queuestate
-import signature
-import subsonic
+from . import access
+from . import logring
+from . import mastream_cache
+from . import mdns
+from . import oauth
+from . import queue_api
+from . import queuestate
+from . import signature
+from . import subsonic
 # Re-exported rather than merely used: `core` is what the adapters import, and
 # making them reach into two modules for one route's worth of vocabulary would
 # be a worse seam than the one line it saves.
-from answers import (  # noqa: F401
+from .answers import (  # noqa: F401
     CHUNK, Json, LocalFile, Page, Redirect, Upstream, fetch_upstream, iter_chunks,
 )
-from ma_provider import stream_ref
+from . import stream_ref
 
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
 LOG_DIR.mkdir(parents=True, exist_ok=True)

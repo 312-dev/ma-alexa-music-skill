@@ -15,7 +15,7 @@ import pytest
 
 import io
 
-import core as app_module
+from ma_provider import core as app_module
 
 
 def _upstream(body: bytes = b"audio"):
@@ -28,7 +28,7 @@ def _upstream(body: bytes = b"audio"):
     return app_module.Upstream(200, {"Content-Type": "audio/mpeg"},
                                io.BytesIO(body))
 
-import queue_api
+from ma_provider import queue_api
 from ma_provider import stream_ref
 
 SPOTIFY = "spotify://track/4uLU6hMCjMI75M1A2tKUQC"
@@ -98,7 +98,7 @@ def test_seeking_is_not_offered_when_the_buffer_is_off(app, monkeypatch):
     A control that is declared and then misbehaves is worse than one that is
     greyed out, and a scrub that cannot be answered restarts the track.
     """
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "ENABLED", False)
     assert _seek_enabled(app, ma_song()) is False
@@ -171,7 +171,7 @@ def test_the_route_refuses_a_reference_that_is_not_a_music_assistant_uri(client,
 
 def test_the_route_fetches_music_assistant_and_nowhere_else(client, app, monkeypatch):
     """The reference names an item; the host is the bridge's own config."""
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "ENABLED", False)
     _url, expires = app.signed_url("mastream", REF)
@@ -208,7 +208,7 @@ def test_a_published_music_assistant_queue_survives_the_whole_path(app, tmp_path
 @pytest.fixture
 def buffered(monkeypatch, tmp_path):
     """A cache holding one complete track, without touching the network."""
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "mastream")
     monkeypatch.setattr(mastream_cache, "ENABLED", True)
@@ -275,7 +275,7 @@ def test_an_unbuffered_plain_fetch_streams_through_rather_than_waiting(
     publishing did not get far enough ahead. So the audio is proxied straight
     through and the buffer fills behind it.
     """
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "empty")
     monkeypatch.setattr(mastream_cache, "ENABLED", True)
@@ -300,7 +300,7 @@ def test_a_range_on_an_unbuffered_track_waits_for_the_buffer(
     Here an answer from byte zero is not a slow answer, it is a wrong one, so
     this is the request that pays the wait.
     """
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "empty2")
     monkeypatch.setattr(mastream_cache, "ENABLED", True)
@@ -353,7 +353,7 @@ def test_a_station_cannot_be_seeked(app):
 def test_a_station_is_never_buffered():
     """Buffering an endless stream writes until the disk fills and never
     produces a file, and there is nothing to gain: it was never seekable."""
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     with mock.patch.object(mastream_cache.urllib.request, "urlopen") as urlopen:
         assert mastream_cache.ensure(STATION_REF) is None
@@ -364,7 +364,7 @@ def test_a_station_is_never_buffered():
 
 def test_a_station_still_streams(client, app, monkeypatch):
     """Routed around the buffer, not refused."""
-    import mastream_cache
+    from ma_provider import mastream_cache
 
     monkeypatch.setattr(mastream_cache, "ENABLED", True)
     _url, expires = app.signed_url("mastream", STATION_REF)

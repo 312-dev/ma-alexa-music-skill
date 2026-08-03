@@ -22,8 +22,8 @@ import os
 
 from flask import Blueprint, Flask, Response, jsonify, redirect, request, send_file
 
-import core
-import queue_api
+from ma_provider import core
+from ma_provider import queue_api
 import setup_ui
 
 # The wizard's catalog sync runs on a thread of its own, started here because

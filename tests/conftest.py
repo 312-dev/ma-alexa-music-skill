@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # the one fixture that needs a test client can reach it. Everything else in
 # this file patches the core, because that is where the caches and the
 # Navidrome calls actually are.
-import core as app_module  # noqa: E402
+from ma_provider import core as app_module  # noqa: E402
 import app as flask_module  # noqa: E402
 
 

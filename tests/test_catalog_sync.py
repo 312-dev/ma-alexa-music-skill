@@ -19,9 +19,9 @@ import types
 
 import pytest
 
-import catalog_sync
-import handoff
-import subsonic
+from ma_provider import catalog_sync
+from ma_provider import handoff
+from ma_provider import subsonic
 
 
 # The autouse fixture in conftest replaces subsonic.song with a dict lookup so

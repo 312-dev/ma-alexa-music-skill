@@ -164,7 +164,7 @@ def test_token_rejects_forged_code(client):
 
 
 def test_refresh_token_grant(client):
-    import oauth
+    from ma_provider import oauth
     refresh = oauth.mint("refresh", 3600, sub="owner")
     resp = client.post("/oauth/token", data={
         "grant_type": "refresh_token", "refresh_token": refresh,
@@ -175,7 +175,7 @@ def test_refresh_token_grant(client):
 
 def test_access_token_not_accepted_as_refresh_token(client):
     """Token kinds must not be interchangeable."""
-    import oauth
+    from ma_provider import oauth
     access = oauth.mint("access", 3600, sub="owner")
     resp = client.post("/oauth/token", data={
         "grant_type": "refresh_token", "refresh_token": access,
@@ -197,7 +197,7 @@ def test_access_token_not_accepted_as_refresh_token(client):
 def test_a_stream_url_is_not_bound_to_whichever_device_asked_first(
         client, fake_subsonic, monkeypatch):
     """The second Echo presents the identical URL and must be served."""
-    import core as app_module
+    from ma_provider import core as app_module
 
     seen = []
 
@@ -222,7 +222,7 @@ def test_a_range_request_is_forwarded_and_its_answer_preserved(
     A 200 with the whole file here would restart the song in every room, which
     is what a transfer must not do.
     """
-    import core as app_module
+    from ma_provider import core as app_module
 
     class FakeUpstream:
         status = 206

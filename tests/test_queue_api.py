@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-import core as app_module
-import handoff
-import queue_api
+from ma_provider import core as app_module
+from ma_provider import handoff
+from ma_provider import queue_api
 
 AUTH = {"X-Admin-Token": "test-admin-token"}
 

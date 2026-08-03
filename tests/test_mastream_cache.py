@@ -19,7 +19,7 @@ from unittest import mock
 
 import pytest
 
-import mastream_cache
+from ma_provider import mastream_cache
 from ma_provider import stream_ref
 
 AUDIO = b"ID3" + b"\x00" * 4096

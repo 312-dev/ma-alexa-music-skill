@@ -397,8 +397,8 @@ def test_top_songs_not_used_for_artists(client, app, monkeypatch):
 # the answer, because a real playlist of the same name would otherwise win and
 # Music Assistant would play something else without saying so.
 
-import handoff
-import queue_api  # noqa: E402
+from ma_provider import handoff
+from ma_provider import queue_api  # noqa: E402
 
 
 @pytest.fixture
@@ -502,7 +502,7 @@ def test_the_handoff_entity_with_nothing_published_is_content_not_found(client):
 
 def _publish(tracks, start_offset_ms=0):
     """Publish a queue the way Music Assistant does, returning its contentId."""
-    import queue_api
+    from ma_provider import queue_api
 
     record = queue_api.publish(tracks, "from MA", start_offset_ms)
     return f"{queue_api.CONTENT_PREFIX}:{record['token']}"
@@ -516,7 +516,7 @@ def test_a_seek_starts_the_first_item_where_it_was_dragged_to(client, tmp_path,
     so PlayerQueues.seek re-issues play_media and the seek arrives here as an
     ordinary Initiate on a republished queue.
     """
-    import queue_api
+    from ma_provider import queue_api
 
     monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
     queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -530,7 +530,7 @@ def test_a_seek_starts_the_first_item_where_it_was_dragged_to(client, tmp_path,
 
 
 def test_an_ordinary_play_starts_at_zero(client, tmp_path, monkeypatch):
-    import queue_api
+    from ma_provider import queue_api
 
     monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
     queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -549,7 +549,7 @@ def test_only_the_first_item_carries_the_offset(client, tmp_path, monkeypatch):
     A GetNextItem that inherited the offset would drop 90 seconds off every
     remaining track in the queue.
     """
-    import queue_api
+    from ma_provider import queue_api
 
     monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "ext")
     queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -572,7 +572,7 @@ def test_only_the_first_item_carries_the_offset(client, tmp_path, monkeypatch):
 
 def test_content_that_did_not_come_from_ma_has_no_offset(client):
     """A Subsonic album cannot carry a seek; the lookup must not reach for one."""
-    import core as app_module
+    from ma_provider import core as app_module
 
     assert app_module.start_offset("al:al1") == 0
     assert app_module.start_offset("") == 0
@@ -587,7 +587,7 @@ def test_a_music_assistant_queue_is_not_extended_by_the_bridge(monkeypatch):
     it knew while the speakers play on. Measured 2026-08-02 with
     AFTER_CONTENT=radio and a one track queue.
     """
-    import core as app_module
+    from ma_provider import core as app_module
 
     monkeypatch.setattr(app_module, "effective_after_content", lambda: "radio")
 

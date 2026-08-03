@@ -42,11 +42,11 @@ import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 
-import handoff
-import mastream_cache
-import subsonic
-from answers import Json
-from ma_provider import stream_ref
+from . import handoff
+from . import mastream_cache
+from . import subsonic
+from .answers import Json
+from . import stream_ref
 
 logger = logging.getLogger("ma-music-skill.queue-api")
 
