@@ -863,7 +863,9 @@ def test_losing_the_title_mid_track_is_worth_one_line():
 
 
 def _with_queue(provider, player, *titles):
-    items = [SimpleNamespace(name=t, queue_item_id=f"id-{i}")
+    # name is the composite MA builds, "Artist - Title"; media_item.name is the
+    # track title on its own. Tests pass whichever shape they mean.
+    items = [SimpleNamespace(name=t, media_item=None, queue_item_id=f"id-{i}")
              for i, t in enumerate(titles)]
     player.mass = SimpleNamespace(
         player_queues=SimpleNamespace(items=lambda _qid: items))
@@ -939,3 +941,61 @@ def test_the_polled_media_names_the_queue_it_belongs_to():
     media = player._attr_current_media
     assert media.source_id == "p1", "must equal the player id, which keys the queue"
     assert media.queue_item_id == "id-0"
+
+
+def test_alexa_reports_a_title_where_ma_holds_artist_and_title():
+    """The reason queue following never worked, on any track.
+
+    MA names a queue item "Artist - Title"; Alexa reports the title alone.
+    Comparing them directly never matched once, and with no match MA cannot
+    parse a current item id, so _update_queue_from_player returns early and
+    both the queue index and the scrubber freeze. Measured 2026-08-02 against
+    a live queue of ['Perry Como - And I Love You So', 'Ramones - Blitzkrieg
+    Bop', ...] while Alexa reported 'Mony, Mony'.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Perry Como - And I Love You So",
+                         "The White Stripes - Seven Nation Army")
+
+    assert player._queue_item_for("Seven Nation Army") == "id-1"
+    assert player._queue_item_for("And I Love You So") == "id-0"
+
+
+def test_the_media_items_own_name_is_preferred():
+    """The composite is a display string; the media item carries the truth."""
+    provider = _provider_module()
+    item = SimpleNamespace(name="Some Artist - Wrong Display",
+                           media_item=SimpleNamespace(name="Real Title"),
+                           queue_item_id="id-x")
+    player = _polled(provider, None)
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=lambda _qid: [item]))
+
+    assert player._queue_item_for("Real Title") == "id-x"
+
+
+def test_the_whole_composite_still_matches():
+    """Some sources may report the composite; it must not stop working."""
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Robyn - Dancing On My Own")
+
+    assert player._queue_item_for("Robyn - Dancing On My Own") == "id-0"
+
+
+def test_a_hyphen_in_the_artist_does_not_eat_the_title():
+    """rpartition, not partition: split on the last separator."""
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Emerson, Lake - Palmer - Lucky Man")
+
+    assert player._queue_item_for("Lucky Man") == "id-0"
+
+
+def test_a_title_containing_a_hyphen_survives():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Robyn - Dancing On My Own - Radio Edit")
+
+    assert player._queue_item_for("Radio Edit") == "id-0"

@@ -237,6 +237,9 @@ class AmperePlayer(Player):
     # whichever way it was constructed. refresh() deliberately leaves it alone:
     # a rediscovery pass is not evidence about whether the device is answering.
     _poll_failures = 0
+    # Whether the last polled title resolved to an MA queue item. Class level
+    # for the same reason as _poll_failures.
+    _matched_last = False
 
     def __init__(
         self,
@@ -516,6 +519,14 @@ class AmperePlayer(Player):
         self._apply_state(info)
         self.update_state()
 
+    def _queue_titles(self) -> list[str]:
+        """Track names in this player's MA queue, for diagnosing a miss."""
+        try:
+            items = self.mass.player_queues.items(self.player_id) or ()
+        except Exception:
+            return []
+        return [getattr(i, "name", "") or "" for i in items]
+
     def _queue_item_for(self, title: str) -> str | None:
         """Which MA queue item the polled title corresponds to.
 
@@ -541,7 +552,7 @@ class AmperePlayer(Player):
         except Exception:  # no queue for this player yet
             return None
         for item in items or ():
-            if (getattr(item, "name", "") or "").lower() == wanted:
+            if wanted in _queue_item_titles(item):
                 return item.queue_item_id
         return None
 
@@ -609,9 +620,23 @@ class AmperePlayer(Player):
         # said nothing about, so the last known value stands.
         previous = self._attr_current_media
         same_track = previous is not None and previous.title == title
-        if not same_track:
-            self.logger.info("%s is now playing %r (was %r)", self.name, title,
-                             getattr(previous, "title", None))
+        matched = self._queue_item_for(title)
+        # Whether the title resolved to an MA queue item is the whole ball
+        # game: PlayerQueues._update_queue_from_player bails out entirely when
+        # it cannot parse an item id, so an unmatched title means the queue
+        # index and the scrubber both stop dead. Logged when the track changes
+        # and also when the match starts or stops working, because a queue can
+        # be populated long after the track began.
+        if not same_track or bool(matched) != self._matched_last:
+            if matched:
+                self.logger.info("%s is now playing %r; queue item %s",
+                                 self.name, title, matched)
+            else:
+                self.logger.info(
+                    "%s is now playing %r; NOT MATCHED against %d queue "
+                    "item(s): %s", self.name, title, len(self._queue_titles()),
+                    self._queue_titles()[:4] or "queue is empty")
+        self._matched_last = bool(matched)
 
         def kept(value: Any, attribute: str) -> Any:
             if value not in (None, ""):
@@ -641,7 +666,7 @@ class AmperePlayer(Player):
             album=kept(text.get("subText2"), "album"),
             image_url=kept((info.get("mainArt") or {}).get("url"), "image_url"),
             duration=kept(seconds, "duration"),
-            queue_item_id=kept(self._queue_item_for(title), "queue_item_id"),
+            queue_item_id=kept(matched, "queue_item_id"),
         )
 
 
@@ -887,6 +912,33 @@ async def _load_cookie(login: AlexaLogin) -> dict[str, str] | None:
         return None  # a corrupt jar is a fresh login, not a crash
     cookies = login._get_cookies_from_session()
     return cast("dict[str, str]", cookies) if cookies else None
+
+
+def _queue_item_titles(item: Any) -> set[str]:
+    """Every name a queue item could plausibly be reported under, lowercased.
+
+    Measured 2026-08-02, and it is the whole reason queue following failed for
+    every track: Music Assistant names a queue item `Artist - Title` while
+    Alexa reports the title alone, so comparing the two directly never matched
+    once. With no match MA cannot parse a current item id, and
+    _update_queue_from_player returns early, which freezes the queue index and
+    the scrubber and makes a later seek slice the queue from the wrong place.
+
+    The media item's own name is the honest source. The composite is kept as a
+    fallback, along with its tail, because a queue item that has lost its media
+    item still has the string.
+    """
+    names: list[str] = []
+    if media_name := getattr(getattr(item, "media_item", None), "name", ""):
+        names.append(media_name)
+    if composite := (getattr(item, "name", "") or ""):
+        names.append(composite)
+        # rsplit, not partition: a hyphen in the artist would otherwise take
+        # the split with it and leave part of the artist on the title.
+        head, sep, tail = composite.rpartition(" - ")
+        if sep and head and tail:
+            names.append(tail)
+    return {n.strip().lower() for n in names if n and n.strip()}
 
 
 def _group_speaker(speakers: dict[str, AlexaDevice], members: list[str]) -> str:
