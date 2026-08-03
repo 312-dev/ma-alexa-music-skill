@@ -24,6 +24,7 @@ from ma_provider import setup_state as _setup_state
 from setup_ui import bp as setup_bp
 from ma_provider import smapi_rest
 from ma_provider import setup_smapi as smapi
+from ma_provider import setup_ops
 from ma_provider import setup_state as store
 from ma_provider import setup_validate as validate
 from setup_ui import qr, views
@@ -1414,8 +1415,11 @@ def test_scheduled_upload_cycles_enablement_and_skips_unchanged(ui, monkeypatch)
     monkeypatch.setattr(smapi_rest, "upload_catalog",
                         lambda catalog_id, payload: "up-9")
     cycled = []
-    monkeypatch.setattr(views, "_cycle_enablement", lambda sid: (
-        cycled.append(sid) or {"ok": True, "detail": "cycled"}))
+    # Patched where the work now lives. The view still has a wrapper of the
+    # same name, and patching that would have left this test passing while
+    # the scheduled path called the real thing.
+    monkeypatch.setattr(setup_ops, "cycle_enablement", lambda sid: (
+        cycled.append(sid) or setup_ops.Outcome(True, "cycled")))
 
     views._UPLOAD.update(running=True, auto=True, cancel=False)
     views._run_upload(auto=True)

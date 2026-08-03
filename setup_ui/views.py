@@ -31,6 +31,7 @@ from ma_provider import smapi_rest
 from ma_provider import subsonic
 
 from ma_provider import setup_captures as captures
+from ma_provider import setup_ops
 from ma_provider import setup_smapi as smapi
 from ma_provider import setup_state as store
 from ma_provider import setup_steps as wizard_steps
@@ -297,16 +298,21 @@ def logs_tail():
 
 
 def subsonic_probe() -> dict:
-    """The same cheap search /diag uses."""
-    try:
-        result = subsonic.search("the", songs=3)
-    except Exception as exc:
-        return {"ok": False, "detail": str(exc)[:200]}
-    songs = result.get("song") or []
-    noun = "result" if len(songs) == 1 else "results"
-    return {"ok": True,
-            "detail": f"{len(songs)} {noun} for a sample search",
-            "sample": [s.get("title") for s in songs[:3]]}
+    """The same cheap search /diag uses.
+
+    The sample titles are added here rather than in `setup_ops`, because they
+    exist to fill a panel and Music Assistant's config form has nowhere to put
+    them.
+    """
+    outcome = setup_ops.probe_music_server()
+    sample = []
+    if outcome.ok:
+        try:
+            sample = [s.get("title")
+                      for s in (subsonic.search("the", songs=3).get("song") or [])[:3]]
+        except Exception:
+            pass
+    return {"ok": outcome.ok, "detail": outcome.detail, "sample": sample}
 
 
 # SMAPI reads mean shelling out to `ask` once per catalog, which is seconds
@@ -317,12 +323,7 @@ _SMAPI_TTL = 300
 
 
 def catalog_ids(current: dict) -> dict[str, str]:
-    stored = current.get("catalogs") or {}
-    kinds = ("artists", "albums", "tracks", "playlists", "genres")
-    return {
-        kind: os.environ.get(f"CATALOG_{kind.upper()}", "") or stored.get(kind, "")
-        for kind in kinds
-    }
+    return setup_ops.catalog_ids(current)
 
 
 def smapi_snapshot(force: bool = False) -> dict | None:
@@ -739,13 +740,7 @@ def stations_preview():
 # --- wizard -----------------------------------------------------------------
 
 
-CATALOG_KINDS = {
-    "artists": "AMAZON.MusicGroup",
-    "albums": "AMAZON.MusicAlbum",
-    "tracks": "AMAZON.MusicRecording",
-    "playlists": "AMAZON.MusicPlaylist",
-    "genres": "AMAZON.Genre",
-}
+CATALOG_KINDS = setup_ops.CATALOG_KINDS
 
 
 _VENDORS = {"at": 0.0, "value": None}
@@ -816,54 +811,10 @@ def step_completed(template: str, **context):
 
 
 def _manifest_verdict(skill_id: str, tries: int = 8, delay: float = 1.5) -> str:
-    """Wait out the async manifest validation that follows skill creation.
-
-    Creation returning a skillId is not acceptance: validation runs after,
-    and its failure is otherwise silent until catalog association 404s. An
-    empty return means validated, or still pending after a patient wait;
-    a non-empty return is Amazon's own error text.
-    """
-    for attempt in range(tries):
-        try:
-            status = smapi_rest.skill_status(skill_id)
-        except Exception:
-            return ""
-        last = (status.get("manifest") or {}).get("lastUpdateRequest") or {}
-        state = last.get("status", "")
-        if state == "SUCCEEDED":
-            return ""
-        if state == "FAILED":
-            return ("; ".join(e.get("message", "")
-                              for e in last.get("errors") or [])
-                    or "manifest validation failed")
-        if attempt + 1 < tries:
-            time.sleep(delay)
-    return ""
-
+    return setup_ops.manifest_verdict(skill_id, tries=tries, delay=delay)
 
 def _existing_music_skills(exclude: str = "") -> list[dict]:
-    """Music skills already on the vendor, which would compete for the alias.
-
-    Alexa routes an invocation across every enabled music skill, so a leftover
-    from an earlier install fights the new skill for the same words. Surfaced
-    before creation, not discovered by ear afterwards.
-    """
-    if not smapi_rest.connected():
-        return []
-    found = []
-    try:
-        for summary in smapi_rest.list_skills():
-            if summary.get("skillId") == exclude:
-                continue
-            if "music" not in (summary.get("apis") or []):
-                continue
-            name = next(iter((summary.get("nameByLocale") or {}).values()), "")
-            found.append({"id": summary.get("skillId", ""), "name": name,
-                          "stage": summary.get("stage", "")})
-    except Exception:
-        return []
-    return found
-
+    return setup_ops.existing_music_skills(exclude)
 
 def step_context(step_key: str) -> dict:
     state = store.load()
@@ -925,41 +876,8 @@ def _binding_now(state: dict, force: bool = False) -> dict:
 
 
 def _cycle_enablement(skill_id: str) -> dict:
-    """Re-provision the skill, then delete and set the enablement.
-
-    The manifest re-put is the load-bearing part, found the hard way: a
-    freshly created skill can sit half provisioned on Amazon's side, where
-    searches route and resolve but Playback.Initiate never comes, and no
-    amount of enablement cycling alone fixes it. Re-putting the manifest
-    forces the music-provider provisioning to run again; cycling on top of
-    that fresh registration is what actually restored playback. The delete
-    before set stays required as well: a catalog upload unbinds the provider
-    slot without reporting it."""
-    if not skill_id:
-        return {"ok": False, "detail": "No skill id yet."}
-    nudged = ""
-    try:
-        smapi_rest.update_manifest(
-            skill_id, smapi_rest.get_manifest(skill_id))
-        problem = _manifest_verdict(skill_id, tries=10, delay=1.5)
-        if problem:
-            return {"ok": False,
-                    "detail": f"Re-provisioning failed: {problem}"}
-        nudged = "Re-provisioned and enabled"
-    except Exception:
-        # The plain cycle is still worth doing when the nudge cannot run.
-        nudged = "Enabled (re-provisioning was skipped)"
-    try:
-        try:
-            smapi_rest.delete_enablement(skill_id)
-        except smapi_rest.SmapiError:
-            pass  # Not enabled is the normal state here, not a failure.
-        smapi_rest.set_enablement(skill_id)
-    except Exception as exc:
-        return {"ok": False, "detail": _rest_error(exc)}
-    store.update(enabled=True, enabled_at=time.time())
-    return {"ok": True, "detail": f"{nudged} for development."}
-
+    outcome = setup_ops.cycle_enablement(skill_id)
+    return {"ok": outcome.ok, "detail": outcome.detail}
 
 @bp.post("/skill/enable")
 def skill_enable():
@@ -1205,45 +1123,18 @@ def wizard_skill():
             "detail": f"The skill already exists: {current['skill_id']}. "
                       "Nothing was created."}, **wizard_context())
 
-    alias_word = (request.form.get("alias") or current.get("alias") or "Ampere").strip()
-    vendor = (request.form.get("vendor_id") or "").strip()
-    manifest = smapi.manifest(
-        name=alias_word.title(),
+    outcome = setup_ops.create_skill(
+        alias=(request.form.get("alias") or current.get("alias") or "Ampere").strip(),
         public_base=public_base(),
-        cert_type=current.get("cert_type") or "Trusted",
-        aliases=[alias_word.lower()],
+        vendor=(request.form.get("vendor_id") or "").strip(),
     )
-    try:
-        skill_id = smapi_rest.create_skill(manifest, vendor)
-    except Exception as exc:
-        return fragment("wizard/_skill.html", blocked=False, result={
-            "ok": False, "detail": _rest_error(exc)}, **wizard_context())
-
-    if problem := _manifest_verdict(skill_id):
-        # A skill that failed validation exists in name only: it lists, it
-        # 404s for catalog association, and nothing ever calls its endpoint.
-        # Better deleted now, with Amazon's own words shown, than discovered
-        # two steps later.
-        try:
-            smapi_rest.delete_skill(skill_id)
-        except Exception:
-            pass
-        return fragment("wizard/_skill.html", blocked=False, result={
-            "ok": False, "detail": f"Amazon rejected the manifest: {problem}"},
-            existing_skills=_existing_music_skills(), **wizard_context())
-
-    store.update(skill_id=skill_id, alias=alias_word, vendor_id=vendor)
-    wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
-    # A recreated skill starts with no catalog associations even though the
-    # catalogs themselves survived on the vendor. Re-binding here keeps the
-    # catalogs step honest about already being done.
-    for catalog_id in (current.get("catalogs") or {}).values():
-        try:
-            smapi_rest.associate_catalog(skill_id, catalog_id)
-        except Exception:
-            pass
-    return step_completed("wizard/_skill.html", blocked=False, result={
-        "ok": True, "detail": f"Created {skill_id}"}, **wizard_context())
+    result = {"ok": outcome.ok, "detail": outcome.detail}
+    if not outcome.ok:
+        return fragment("wizard/_skill.html", blocked=False, result=result,
+                        existing_skills=_existing_music_skills(),
+                        **wizard_context())
+    return step_completed("wizard/_skill.html", blocked=False, result=result,
+                          **wizard_context())
 
 
 @bp.post("/wizard/skill/forget")
@@ -1254,11 +1145,11 @@ def wizard_skill_forget():
     Amazon's side to delete. Enablement is cleared with it, because it
     described the vanished skill.
     """
-    store.update(skill_id="", enabled=False)
-    wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
-    return step_completed("wizard/_skill.html", blocked=False, result={
-        "ok": True, "detail": "Stale record discarded."},
-        existing_skills=_existing_music_skills(), **wizard_context())
+    outcome = setup_ops.forget_skill()
+    return step_completed("wizard/_skill.html", blocked=False,
+                          result={"ok": outcome.ok, "detail": outcome.detail},
+                          existing_skills=_existing_music_skills(),
+                          **wizard_context())
 
 
 @bp.post("/wizard/skill/remove")
@@ -1283,45 +1174,15 @@ def wizard_skill_remove():
 
 @bp.post("/wizard/catalogs")
 def wizard_catalogs():
-    current = store.load()
-    skill_id = current.get("skill_id") or os.environ.get("SKILL_ID", "")
-    if not skill_id:
+    outcome = setup_ops.create_catalogs()
+    if not outcome.rows:
         return fragment("wizard/_catalogs.html", results=None,
-                        **wizard_context(message="Create the skill first."))
-
-    catalogs = dict(current.get("catalogs") or {})
-    # Orphans from an earlier run: a catalog created moments before its
-    # association failed was never recorded anywhere. Reusing by title means
-    # a re-run heals instead of minting duplicates on the vendor.
-    try:
-        existing = {c.get("title", ""): c.get("id", "")
-                    for c in smapi_rest.list_catalogs()}
-    except Exception:
-        existing = {}
-    results = []
-    for kind, catalog_type in CATALOG_KINDS.items():
-        title = f"Ampere {kind}"
-        try:
-            catalog_id = catalogs.get(kind) or existing.get(title, "")
-            if not catalog_id:
-                catalog_id = smapi_rest.create_catalog(title, catalog_type)
-            # Recorded before association, so a failure there cannot orphan it.
-            catalogs[kind] = catalog_id
-            store.update(catalogs=catalogs)
-            # Association has to happen before any upload or the content has
-            # nowhere to resolve against. The PUT is idempotent, so running it
-            # again for an already-associated catalog is a no-op, not an error.
-            smapi_rest.associate_catalog(skill_id, catalog_id)
-        except Exception as exc:
-            results.append({"kind": kind, "ok": False, "detail": _rest_error(exc)})
-            continue
-        results.append({"kind": kind, "ok": True, "detail": catalog_id})
-    store.update(catalogs=catalogs)
-    if results and all(row["ok"] for row in results):
-        return step_completed("wizard/_catalogs.html", results=results,
+                        **wizard_context(message=outcome.detail))
+    if outcome.ok:
+        return step_completed("wizard/_catalogs.html", results=outcome.rows,
                               **wizard_context())
-    return fragment("wizard/_catalogs.html", results=results, **wizard_context())
-
+    return fragment("wizard/_catalogs.html", results=outcome.rows,
+                    **wizard_context())
 
 @bp.post("/wizard/upload")
 def wizard_upload():
@@ -1345,82 +1206,28 @@ def wizard_upload():
                     back="/setup/wizard/upload")
 
 
-class _UploadStopped(Exception):
-    """The page that started the upload was left before it finished."""
-
-
 def _run_upload(auto: bool = False) -> None:
-    # The crawl owns 0-85% of the bar (it dominates wall time); the five
-    # catalog uploads share the last 15%.
-    def _tell(text, fraction=None):
-        if _UPLOAD["cancel"]:
-            raise _UploadStopped()
-        _UPLOAD["phase"] = text
+    """Drive the shared upload and mirror its progress into `_UPLOAD`.
+
+    The work itself lives in `setup_ops.run_upload`, which knows nothing about
+    this dict, the thread it runs on, or the page that polls it. What is left
+    here is the reporting: the crawl owns 0-85% of the bar because it dominates
+    wall time, and the five catalog uploads share the last 15%.
+    """
+    def report(phase: str, fraction: float | None) -> None:
+        _UPLOAD["phase"] = phase
         _UPLOAD["percent"] = None if fraction is None else round(fraction * 85)
 
-    uploaded_any = False
     try:
-        current = store.load()
-        ids = catalog_ids(current)
-        _tell("reading the library", 0.0)
-        collected = catalog_sync.collect(progress=_tell)
-        saved = store.load().get("catalog_hashes") or {}
-        results, uploads = [], dict(current.get("uploads") or {})
-        for index, (kind, entities) in enumerate(collected.items()):
-            if _UPLOAD["cancel"]:
-                raise _UploadStopped()
-            catalog_id = ids.get(kind)
-            if not catalog_id or not entities:
-                continue
-            final, hashes = catalog_sync.apply_timestamps(kind, entities, saved)
-            if kind in uploads and saved.get(kind) == hashes:
-                # Nothing changed since the last accepted upload. Skipping is
-                # what makes a schedule safe: only real deltas spend one of
-                # the rate-limited upload slots.
-                results.append({"kind": kind, "ok": True,
-                                "detail": "unchanged, skipped"})
-                continue
-            _UPLOAD["phase"] = f"uploading {kind} ({len(final)} entities)"
-            _UPLOAD["percent"] = 85 + round(15 * index / max(1, len(collected)))
-            payload = json.dumps({
-                "type": catalog_sync.TYPES[kind], "version": 2.0,
-                "locales": catalog_sync.LOCALES, "entities": final,
-            }).encode()
-            try:
-                upload_id = smapi_rest.upload_catalog(catalog_id, payload)
-            except Exception as exc:
-                results.append({"kind": kind, "ok": False,
-                                "detail": _rest_error(exc)})
-                continue
-            saved[kind] = hashes
-            uploads[kind] = upload_id
-            uploaded_any = True
-            results.append({"kind": kind, "ok": True,
-                            "detail": f"{len(final)} entities, upload {upload_id}"})
-        store.update(catalog_hashes=saved, uploads=uploads)
-        if auto and uploaded_any:
-            # An upload unbinds the provider slot without reporting it. A
-            # human is told to cycle afterwards; a schedule has to do it
-            # itself or it would silently break voice playback while every
-            # diagnostic stays green.
-            _UPLOAD["phase"] = "cycling enablement"
-            outcome = _cycle_enablement(
-                current.get("skill_id") or os.environ.get("SKILL_ID", ""))
-            results.append({"kind": "enablement", "ok": outcome["ok"],
-                            "detail": outcome["detail"]})
-        _UPLOAD["results"] = results
-    except _UploadStopped:
-        _UPLOAD["message"] = ("Stopped: the page was left before the upload "
-                              "finished. Nothing was recorded; run it again "
-                              "when you are ready.")
-    except Exception as exc:
-        # Logged as well as shown, because the dict is the only other record
-        # and it is read by one page. A run started from a browser tab that is
-        # then closed, or from curl, failed here in complete silence: the whole
-        # library crawl ran, hit the container's memory ceiling, and left
-        # nothing behind but a log that stopped mid-crawl.
-        logger.exception("catalog upload failed")
-        _UPLOAD["message"] = f"Could not read the library: {exc}"
+        outcome = setup_ops.run_upload(
+            progress=report,
+            should_stop=lambda: bool(_UPLOAD["cancel"]),
+            cycle_after=auto,
+        )
+        if outcome.rows:
+            _UPLOAD["results"] = outcome.rows
+        if not outcome.ok and not outcome.rows:
+            _UPLOAD["message"] = outcome.detail
     finally:
         _UPLOAD["running"] = False
         _UPLOAD["done_at"] = time.time()
