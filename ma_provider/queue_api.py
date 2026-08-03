@@ -60,7 +60,6 @@ SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
 STATE_DIR = pathlib.Path(
     os.environ.get("QUEUE_STATE_DIR", "/data/queuestate")
 ) / "external"
-STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Seven days. A published queue is dead weight the moment Alexa stops asking
 # for it, but there is no event that tells us when that happened, so the only

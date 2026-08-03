@@ -67,6 +67,7 @@ from . import oauth
 from . import queue_api
 from . import queuestate
 from . import signature
+from . import smapi_rest
 from . import subsonic
 # Re-exported rather than merely used: `core` is what the adapters import, and
 # making them reach into two modules for one route's worth of vocabulary would
@@ -76,8 +77,12 @@ from .answers import (  # noqa: F401
 )
 from . import stream_ref
 
+# Not created at import. Importing a module should not put directories on
+# somebody else's disk: inside Music Assistant this ran during MA's startup and
+# left `captures/` and `queuestate/` in MA's storage root next to library.db
+# and settings.json. `configure()` moves them under a directory of Ampere's
+# own, and `capture()` creates what it needs when it needs it.
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 ICON_DIR = pathlib.Path(os.environ.get("ICON_DIR", "/app/icons"))
 
 SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
@@ -107,17 +112,35 @@ PUBLIC_BASE_HELP = (
 )
 
 
-def configure(public_base: str = "") -> None:
+def configure(public_base: str = "", storage_path: str = "",
+              subsonic_url: str = "", subsonic_user: str = "",
+              subsonic_password: str = "") -> None:
     """Supply settings that do not come from the environment.
 
     Music Assistant holds its own configuration and does not hand providers an
-    environment, so the values the standalone deployment reads from env vars
-    have to be injectable. Called before anything starts serving.
+    environment, so every value the standalone deployment reads from an env var
+    has to be injectable. Called before anything starts serving.
+
+    `storage_path` moves Ampere's state under a directory of its own. Left
+    alone, the defaults are absolute paths chosen for a container this service
+    owned, and inside Music Assistant they resolve to MA's storage root: on
+    2026-08-03 that put `captures/` and `queuestate/` next to MA's library.db
+    and settings.json. Nothing broke, which is the problem with it.
     """
-    global PUBLIC_BASE, FALLBACK_ART
+    global PUBLIC_BASE, FALLBACK_ART, LOG_DIR
     if public_base:
         PUBLIC_BASE = public_base.rstrip("/")
         FALLBACK_ART = _fallback_art()
+
+    subsonic.configure(subsonic_url, subsonic_user, subsonic_password)
+
+    if storage_path:
+        root = pathlib.Path(storage_path)
+        LOG_DIR = root / "captures"
+        queuestate.STATE_DIR = root / "queuestate"
+        queue_api.STATE_DIR = root / "queuestate" / "external"
+        mastream_cache.CACHE_DIR = root / "mastream"
+        smapi_rest.set_state_dir(root)
 
 
 def require_public_base() -> None:
@@ -144,9 +167,26 @@ STREAM_TTL = int(os.environ.get("STREAM_TTL", str(12 * 3600)))
 # registered. Measured 2026-08-03, after believing the latter for a while.
 MA_STREAM_BASE = os.environ.get("MA_STREAM_BASE", "http://127.0.0.1:8097").rstrip("/")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logring.attach()  # after basicConfig: a prior root handler would no-op it
 logger = logging.getLogger("ma-music-skill")
+
+
+def install_logging() -> None:
+    """Take over the root logger. Only a process that owns one may call this.
+
+    `basicConfig` sets the format and level for every logger in the
+    interpreter, and `logring.attach()` adds a handler to the root. That is
+    correct for the standalone deployment, whose whole job is this service, and
+    plainly wrong for a provider loaded into Music Assistant, where it would
+    reformat MA's logs and tee them into Ampere's ring buffer.
+
+    It ran at import until 2026-08-03 and did no visible harm only because MA
+    configures logging before it loads providers, which makes `basicConfig` a
+    no-op. That is luck rather than design, and it would have stopped being
+    true the first time load order changed.
+    """
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    logring.attach()  # after basicConfig: a prior root handler would no-op it
 
 _BOOTED = False
 
@@ -220,7 +260,7 @@ def _saved_settings() -> dict:
     Read on the hot path (continuation decisions per queue request), so it must
     cost a stat rather than a parse when nothing has changed.
     """
-    path = pathlib.Path(os.environ.get("SETUP_STATE_DIR", "/data")) / "setup-state.json"
+    path = smapi_rest.state_dir() / "setup-state.json"
     try:
         mtime = path.stat().st_mtime
     except OSError:
@@ -877,6 +917,10 @@ def capture(payload: object, kind: str) -> None:
     """
     global _CAPTURES_WRITTEN
     try:
+        # Created here rather than at import. The `exist_ok` path is a stat, so
+        # it costs nothing on every call after the first, and it means nothing
+        # makes a directory until there is genuinely something to put in it.
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
         (LOG_DIR / f"{stamp}-{kind}.json").write_text(
             json.dumps(redact(payload), indent=2))
@@ -1992,6 +2036,18 @@ def advertise(port: int) -> None:
     mdns.advertise(port)
 
 
-# Off in tests, where Navidrome is mocked and there is nothing to warm from.
-if os.environ.get("PREWARM", "1") == "1":
+def warm_up() -> None:
+    """Start filling the artist cache, if that is wanted here.
+
+    Called by whatever is about to serve, not at import. Importing used to fire
+    it, which meant Music Assistant's startup made Subsonic requests before
+    anything had told Ampere where Subsonic is, and logged a traceback for each
+    one. A cache warm is an optimisation; it has no business running in a
+    process that has not decided to serve anything yet.
+    """
+    if os.environ.get("PREWARM", "1") != "1":
+        return
+    if not subsonic.configured():
+        logger.debug("no music server configured yet, not warming the cache")
+        return
     _WARM_POOL.submit(prewarm_artists)

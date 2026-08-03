@@ -135,6 +135,10 @@ class AmpereWebServer:
 
         # Optional, and a no-op unless MDNS is set.
         await self._in_thread(core.advertise, self.port)
+        # Only now, and only if a music server has been named. This used to
+        # fire at import, which made Music Assistant's startup issue Subsonic
+        # requests before anything had told Ampere where Subsonic is.
+        await self._in_thread(core.warm_up)
         return True
 
     @property

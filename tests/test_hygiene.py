@@ -8,6 +8,7 @@ ever started left a state file behind permanently.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import pathlib
@@ -312,4 +313,46 @@ def test_importing_the_core_never_kills_the_host_process():
     )
     assert done.returncode == 0, (
         "importing core without PUBLIC_BASE must not fail:\n" + done.stderr
+    )
+
+
+def test_importing_the_package_has_no_side_effects():
+    """The hazard class behind the 2026-08-03 outage, pinned as a rule.
+
+    Ampere was written as an application, and an application may do things at
+    import that a library may not: exit on bad config, take the root logger,
+    make directories, start network calls. Every one of those became a hazard
+    the moment the same code was loaded into Music Assistant's process.
+
+    Three had already shipped. `raise SystemExit` aborted MA's startup and left
+    it without a stream server. `logging.basicConfig` plus `logring.attach()`
+    would have reformatted MA's logs and teed them into Ampere's ring buffer,
+    and did no harm only because MA configures logging first, which is luck.
+    `mkdir` put Ampere's directories in MA's storage root beside library.db.
+
+    Rather than wait to discover the fourth, this walks the package for
+    top-level statements that call out to the world. Assignments and function
+    definitions are fine; doing something is not.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    allowed = {
+        # A logging handler on a logger this package owns by name, which is
+        # local to it and does not touch the root logger.
+        ("logring.py", "setFormatter"),
+    }
+    offenders = []
+    for path in sorted((root / "ma_provider").glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in tree.body:
+            if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+                continue
+            called = node.value.func
+            name = getattr(called, "attr", getattr(called, "id", "?"))
+            if (path.name, name) in allowed:
+                continue
+            offenders.append(f"{path.name}:{node.lineno} {ast.unparse(node)[:70]}")
+
+    assert not offenders, (
+        "importing this package must not do anything, because the import "
+        "happens inside Music Assistant's process:\n  " + "\n  ".join(offenders)
     )

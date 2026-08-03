@@ -76,6 +76,9 @@ CONF_MA_SOURCE = "ma_source"
 CONF_SERVE_ENDPOINT = "serve_endpoint"
 CONF_ENDPOINT_PORT = "endpoint_port"
 CONF_PUBLIC_BASE = "public_base"
+CONF_SUBSONIC_URL = "subsonic_url"
+CONF_SUBSONIC_USER = "subsonic_user"
+CONF_SUBSONIC_PASSWORD = "subsonic_password"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -184,6 +187,40 @@ async def get_config_entries(
                 "does not fail here: it fails later as audio that will not "
                 "play, with nothing in any log to say why."
             ),
+            required=True,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=True,
+            requires_reload=True,
+        ),
+        ConfigEntry(
+            key=CONF_SUBSONIC_URL,
+            type=ConfigEntryType.STRING,
+            label="Music server URL",
+            description=(
+                "Your Subsonic-compatible server, for example "
+                "http://navidrome.local:4533. Ampere streams every track from "
+                "here; it is not required to be reachable from the internet, "
+                "because Amazon fetches audio through Ampere rather than "
+                "directly."
+            ),
+            required=True,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=True,
+            requires_reload=True,
+        ),
+        ConfigEntry(
+            key=CONF_SUBSONIC_USER,
+            type=ConfigEntryType.STRING,
+            label="Music server username",
+            required=True,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=True,
+            requires_reload=True,
+        ),
+        ConfigEntry(
+            key=CONF_SUBSONIC_PASSWORD,
+            type=ConfigEntryType.SECURE_STRING,
+            label="Music server password",
             required=True,
             depends_on=CONF_SERVE_ENDPOINT,
             depends_on_value=True,
@@ -799,8 +836,17 @@ class AmpereAlexaProvider(PlayerProvider):
         # settings the standalone deployment reads from env vars are injected
         # here instead. Before anything starts serving, because every stream
         # and art URL Amazon fetches is built from the public base.
+        #
+        # The storage path is MA's, plus a directory of Ampere's own. Without
+        # it the defaults are absolute paths chosen for a container this
+        # service owned, and inside MA they land in MA's storage root beside
+        # library.db.
         core.configure(
-            public_base=str(self.config.get_value(CONF_PUBLIC_BASE) or "")
+            public_base=str(self.config.get_value(CONF_PUBLIC_BASE) or ""),
+            storage_path=str(pathlib.Path(self.mass.storage_path) / "ampere"),
+            subsonic_url=str(self.config.get_value(CONF_SUBSONIC_URL) or ""),
+            subsonic_user=str(self.config.get_value(CONF_SUBSONIC_USER) or ""),
+            subsonic_password=str(self.config.get_value(CONF_SUBSONIC_PASSWORD) or ""),
         )
 
         self.webserver: AmpereWebServer | None = None

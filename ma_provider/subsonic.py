@@ -20,6 +20,9 @@ import urllib.request
 import json
 from typing import Any
 
+# The environment is how the standalone deployment supplies these. Inside
+# Music Assistant there is no environment to read, so `configure()` sets them
+# from provider config instead.
 BASE = os.environ.get("SUBSONIC_URL", "").rstrip("/")
 USER = os.environ.get("SUBSONIC_USER", "")
 PASSWORD = os.environ.get("SUBSONIC_PASSWORD", "")
@@ -27,6 +30,27 @@ CLIENT = "ma-alexa-skill"
 API_VERSION = "1.16.1"
 
 TIMEOUT = float(os.environ.get("SUBSONIC_TIMEOUT", "6"))
+
+
+def configure(url: str = "", user: str = "", password: str = "") -> None:
+    """Point at a music server, when it was not named in the environment."""
+    global BASE, USER, PASSWORD
+    if url:
+        BASE = url.rstrip("/")
+    if user:
+        USER = user
+    if password:
+        PASSWORD = password
+
+
+def configured() -> bool:
+    """Whether there is a server to talk to at all.
+
+    Callers use this to avoid making requests that cannot succeed. Every such
+    request costs a timeout and writes a traceback, and a log full of those
+    hides whatever the real problem is.
+    """
+    return bool(BASE and USER)
 
 
 def _auth_params() -> dict[str, str]:

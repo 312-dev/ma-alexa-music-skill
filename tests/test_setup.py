@@ -104,6 +104,9 @@ def ui(client):
 
 
 def capture_file(name: str, body: dict) -> pathlib.Path:
+    # The directory is made by `capture()` on first write rather than at
+    # import, so a test that plants a file has to make it the same way.
+    app_module.LOG_DIR.mkdir(parents=True, exist_ok=True)
     path = app_module.LOG_DIR / name
     path.write_text(json.dumps(body))
     return path

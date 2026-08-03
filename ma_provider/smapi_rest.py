@@ -76,7 +76,19 @@ class SmapiError(RuntimeError):
 # --- credential storage -----------------------------------------------------
 
 
+# Set by core.configure() when Music Assistant hosts this, since MA hands
+# providers a storage path rather than an environment.
+_STATE_DIR: pathlib.Path | None = None
+
+
+def set_state_dir(path: pathlib.Path) -> None:
+    global _STATE_DIR
+    _STATE_DIR = pathlib.Path(path)
+
+
 def state_dir() -> pathlib.Path:
+    if _STATE_DIR is not None:
+        return _STATE_DIR
     return pathlib.Path(os.environ.get("SETUP_STATE_DIR", "/data"))
 
 

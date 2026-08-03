@@ -24,8 +24,10 @@ import random
 import tempfile
 import time
 
+# Redirected by core.configure() when Music Assistant hosts this, and not
+# created until something writes. See core.configure for why importing a
+# module must not make directories.
 STATE_DIR = pathlib.Path(os.environ.get("QUEUE_STATE_DIR", "/data/queuestate"))
-STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT: dict[str, object] = {"shuffle": False, "loop": False, "repeat": "OFF"}
 
@@ -85,6 +87,7 @@ def get(queue_id: str) -> dict:
 def update(queue_id: str, **changes) -> dict:
     state = {**get(queue_id), **changes}
     target = _path(queue_id)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(STATE_DIR), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
