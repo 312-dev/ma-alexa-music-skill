@@ -1031,12 +1031,25 @@ class AmperePlayer(Player):
         #
         # Matching on the title because it is the only identity the two sides
         # share, which is the same constraint `_queue_item_for` works under.
+        # Compared against the media's own title. The first version of this
+        # passed `_attr_current_media` to `_queue_item_titles`, which reads
+        # `.name` and `.media_item.name` off a *queue item*; a PlayerMedia has
+        # neither, so it returned an empty set and every position update was
+        # dropped. The scrubber then sat at zero while Alexa reported 64
+        # seconds, which is the same symptom this whole feature exists to fix,
+        # reintroduced by the guard meant to protect it.
         info = data.get("infoText")
         reported_title = (info or {}).get("title") if isinstance(info, dict) else None
         current = self._attr_current_media
-        current_title = getattr(current, "title", "") if current else ""
+        current_title = str(getattr(current, "title", "") or "") if current else ""
         if current_title and reported_title:
-            if str(reported_title).lower() not in _queue_item_titles(current):
+            reported = str(reported_title).strip().lower()
+            wanted = current_title.strip().lower()
+            # Alexa reports the title alone where Music Assistant may hold
+            # "Artist - Title", so a containment check either way is what
+            # actually matches, the same problem `_queue_item_titles` solves
+            # for the polled path.
+            if reported != wanted and reported not in wanted and wanted not in reported:
                 self.logger.debug(
                     "%s: ignoring a position for %r while playing %r",
                     self.name, reported_title, current_title)
