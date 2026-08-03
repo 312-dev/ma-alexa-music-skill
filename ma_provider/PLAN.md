@@ -166,7 +166,7 @@ The grouping is reasoned from how those services deliver audio, not measured.
 | 4. Live streams | Group C | 100-200 lines | low | **done** 2026-08-03 |
 | 5. Fold bridge into MA | One deployable | ~2,000 lines moved, ~5,300 deleted | medium, broad | **done** 2026-08-03 |
 | 6. Upstream merge | Ships to everyone | negotiation | outside our control | open |
-| 7. Push instead of polling | State in under a second | one supervised connection | medium | proposed, see PUSH-PLAN.md |
+| 7. Push instead of polling | State in under a second | one supervised connection | medium | **done**, see PUSH-PLAN.md |
 
 ### Phase 1: play one track
 
@@ -312,10 +312,19 @@ It fixes the scrubber, the resume lag and the volume snap-back, all of which
 are the same "nothing tells us it changed" problem. It does **not** make
 playback start faster: that is bounded by Amazon's utterance pipeline.
 
-Written up separately in [PUSH-PLAN.md](PUSH-PLAN.md), including the question
-that decides whether it is worth doing at all, which is whether the stream
-fires for changes made by a music skill rather than only by Amazon's own
-providers.
+**Done.** The question that decided whether it was worth doing at all -- does
+the stream fire for changes made by a music skill, or only for Amazon's own
+providers -- was answered by observation: it fires, and Amazon names the
+provider `Ampere` in the payload. It fires for speaker groups too, keyed by the
+group id Ampere already uses.
+
+Turning it on is one button in the provider settings, `Connect Amazon for live
+updates`, which runs the same interactive sign-in Music Assistant's own alexa
+provider uses. Polling continues either way, more slowly, because push can say
+what changed and never what was missed while disconnected.
+
+[PUSH-PLAN.md](PUSH-PLAN.md) is kept as the record of what was measured, since
+Amazon documents none of it and `alexapy` only transports it.
 
 ### Phase 6: upstream merge
 

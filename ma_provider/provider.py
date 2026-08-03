@@ -179,6 +179,12 @@ VOLUME_ATTEMPTS = 3
 # turns that into a permanent failure no resend can fix.
 VOLUME_TOLERANCE = 2
 
+# How far apart a group's retries are spread. Every member reaches the retry at
+# the same instant, and sent together they are a burst against an API that rate
+# limits. Wide enough to separate a large group, short enough that a correction
+# still feels immediate.
+VOLUME_RETRY_SPREAD = 2.0
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -853,6 +859,19 @@ class AmperePlayer(Player):
                 self.logger.info(
                     "%s did not take %s%% (reported %s); resending (%s of %s)",
                     self.name, wanted, reported, attempt, VOLUME_ATTEMPTS - 1)
+                # Spread out, because every member of a group reaches this line
+                # at the same instant. Sent together and uncoalesced they are a
+                # burst, and measured 2026-08-03 a four speaker group's retries
+                # drew three TooManyRequests at once. alexapy backs off and
+                # recovers, so this was self healing rather than broken, but a
+                # retry that provokes throttling is a poor way to fix a dropped
+                # command.
+                #
+                # Derived from the player id rather than randomised, so a given
+                # speaker always waits the same amount and two of them can
+                # never collide by chance.
+                await asyncio.sleep(
+                    (hash(self.player_id) % 100) / 100.0 * VOLUME_RETRY_SPREAD)
                 await self.state_api.set_volume(wanted / 100, queue_delay=0)
         except asyncio.CancelledError:
             raise

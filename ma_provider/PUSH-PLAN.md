@@ -1,12 +1,18 @@
 # Plan: replace polling with Amazon's push channel
 
-Status: **phase 1 complete, phases 2-5 blocked on an auth problem.** Written
-2026-08-03 after the Music Assistant migration; revised the same day once the
-push stream was actually observed rather than reasoned about.
+Status: **built and running.** Written 2026-08-03 after the Music Assistant
+migration, revised the same day once the stream was observed rather than
+reasoned about, and closed out when it shipped.
 
-Read "What phase 1 found" before anything else. Two of the assumptions this
-plan was originally built on turned out to be wrong, one in our favour and one
-against.
+This is kept as a record of what was measured, because almost none of it could
+be looked up. Amazon documents none of this and `alexapy` only transports it.
+What was built from it is described in README and lives in `push_events.py`,
+`push_router.py`, `push_auth.py`, `push.py`, `push_signin.py` and
+`alexapy_compat.py`.
+
+Read "What phase 1 found" before anything else. Several assumptions this plan
+was originally built on turned out to be wrong, and section 7 lists the ones
+this document itself got wrong before they were measured.
 
 ## The problem, measured
 
@@ -184,129 +190,71 @@ larger piece of work, and it lands on the user as a new setup step.
   this account and its alarm and timer sensors depend on its stream; breaking
   it would be a visible regression in the apartment.
 
-## Two findings that are not about push
 
-Both surfaced from the same capture and are cheaper than the push project.
+## What was built
 
-### `mediaProgress` units differ by endpoint
+The blocker in section 6 was real but the conclusion drawn from it was wrong.
+It said push needs "a new OAuth login in the wizard", implying a novel flow.
+Music Assistant's own alexa provider already had one: an ACTION entry,
+`AuthenticationHelper`, and `alexapy`'s `AlexaProxy` on a webserver route. That
+flow already walks the PKCE pages and already mints the token. It just throws
+it away, because it only wants the cookie.
 
-`provider.py` documents, from a measurement taken earlier the same day, that
-the REST poll returns `{'mediaLength': 226, 'mediaProgress': 11}` for a
-226-second track -- **seconds** -- and the code was corrected to stop dividing
-by 1000.
+So the work was one button, not a new subsystem.
 
-The push payload for a 232-second track reads
-`{'mediaLength': 232000, 'mediaProgress': 83306}` -- **milliseconds**.
+| Module | Does |
+|---|---|
+| `push_events` | Decodes the directive envelope. alexapy hands over a raw dict by design; interpreting it is ours. |
+| `push_router` | Places an event on a player, by device serial or by the `ext:` contentId we published. |
+| `push_auth` | Owns the registration, its token and its renewal, on a login of its own. |
+| `push` | Supervises `HTTP2EchoClient`, which does not reconnect itself. |
+| `push_signin` | The one button. |
+| `alexapy_compat` | Every private touch, in one file, with a guard test. |
 
-Both were measured on 2026-08-03. Whatever the explanation, anything that
-consumes push must convert, and feeding a push value straight into
-`_attr_elapsed_time` would recreate the exact "scrubber never moves" bug the
-existing comment was written to explain, running 1000x the other way. Confirm
-the units per endpoint before writing either path.
+Polling was not removed, only slowed to 30 or 60 seconds depending on whether
+the installed alexapy can detect a stalled stream. Push says what changed; it
+can never say what was missed while disconnected.
 
-### Every publish is a one-item queue
+## What implementation found that observation did not
 
-Every `NotifyNowPlayingUpdated` reports
-`transport: {next: 'DISABLED', previous: 'DISABLED'}` and a `mediaReference`
-whose `id` is always `"0"`, and every skip emits `NEW_QUEUE` rather than an
-advance within a queue.
+Six things, all of which cost real time and none of which were visible from
+reading the stream.
 
-That is Amazon being told our queue has one item in it. It explains the
-measured 7.3 seconds for a skip -- a full re-publish plus a fresh utterance --
-and is the likely reason a spoken "Alexa, next" is refused on an Ampere
-session. **This is probably a bigger win than push and does not need an auth
-change.**
+**Two push streams on one Amazon account coexist.** This was listed as an open
+question that could have forced a redesign. Home Assistant's client and
+Ampere's both received the same volume event 101ms apart.
 
-## Verdict
+**`HTTP2EchoClient` starts a ping loop that must be cancelled.** `async_run`
+starts a reader *and* a ping loop that sleeps 299s forever. Closing the httpx
+client leaves the ping running, so every reconnect leaked one, each still
+pinging Amazon with the same token. The result was a reconnect loop causing the
+disconnects it was reconnecting from. Cancel via alexapy's own `on_close`.
 
-The value is confirmed, and it is larger than this plan originally claimed:
-push carries the exact track-progress correction, it covers groups, and it
-names our own content ids so events can be matched to queue items without
-guessing.
+**Amazon's event clock is not safe as a timebase.** `event.at` was used for
+`elapsed_time_last_updated` to avoid adding delivery delay. Delivery is under
+0.1s, but the clocks are on different machines and nothing keeps them in step,
+and Music Assistant extrapolates position forward from that stamp. Use local
+time.
 
-The cost is also larger, and lands somewhere the plan did not anticipate: an
-OAuth login flow, not a client and a supervisor.
+**Replayed state is real state from the wrong moment.** On connect the stream
+reports the current state of every device, so a paused session's position was
+applied to a player that was idle, putting the scrubber halfway through a track
+nobody had started. Apply position only when the event says PLAYING.
 
-Recommended order:
+**`mediaProgress` is milliseconds on push and seconds on the polled API.** Both
+measured the same day. Feeding one into the other's units reproduces the
+"scrubber never moves" bug at a thousand times the rate.
 
-1. **The one-item queue** (no auth change, likely fixes skip latency and
-   spoken next/previous).
-2. **The `mediaProgress` unit question** (cheap, and the scrubber is the
-   loudest remaining complaint).
-3. **Push**, and only as a deliberate project that starts with adding a proxy
-   OAuth login to the wizard -- not as an incremental improvement.
+**A stored SECURE_STRING never comes back to a config action.** The form
+receives `this_value_is_encrypted`, which is neither empty nor encrypted, so it
+survives every obvious guard: it reached pyotp as a TOTP seed and Amazon as the
+account password. Read credentials from `ProviderConfig`, which decrypts.
 
-## Design, if and when it is built
+## A correction, and why it is worth recording
 
-### One client per provider instance, not per player
-
-The stream is per account. `AmpereAlexaProvider` owns it; players subscribe.
-Route by `dopplerId.deviceSerialNumber`, which matches player ids exactly for
-both devices and groups.
-
-### The consumer reconnects, not the library
-
-**`HTTP2EchoClient` does not reconnect itself.** It calls `close_callback` and
-`error_callback` and stops. A supervisor that assumes otherwise produces a
-provider that works for an hour and then silently stops updating, which is
-worse than polling because nothing looks wrong.
-
-Because there is no read timeout (see corrections above), the supervisor must
-supply its own staleness clock. A stalled stream delivering nothing forever is
-exactly the failure that masquerades as "the house is quiet".
-
-### Polling stays
-
-Not as a transition step, permanently, at a much slower interval (60 to 120
-seconds). Push tells us what changed. It cannot tell us what we missed while
-disconnected, and it says nothing about a device that changed state before we
-connected. Poll immediately on `open_callback` for the same reason.
-
-## Phases
-
-| Phase | Delivers | Status |
-|---|---|---|
-| 1. Observe | recorded vocabulary of real directives | **done** |
-| 2. Obtain a token | proxy OAuth login in the wizard | **blocked, not started** |
-| 3. Connect | supervised client, logging only | not started |
-| 4. Consume | volume, playback state, progress from push | not started |
-| 5. Slow the poll | the actual win | not started |
-| 6. Remove the workarounds | `_resync_soon`, volume defence | not started |
-
-Phase 2 did not exist in the original plan and is the whole reason the rest is
-stalled.
-
-Phase 3 should be shipped and left alone for several days before anything
-consumes it. The point of that phase is to find out whether the connection
-survives on this account -- how often it drops, how the cookie refresh
-interacts with it, and whether it coexists with Home Assistant's client. A
-connection that is fine for an hour proves nothing.
-
-Phase 6 keeps `_confirm_volume` and `_confirm_play`. Those resend commands
-Amazon accepted and silently dropped, which is a different defect and one push
-does nothing about.
-
-## What not to do
-
-- **Do not lower `POLL_INTERVAL` as an interim measure.** It is the thing push
-  exists to avoid needing, and throttling from Amazon presents as unrelated
-  failures elsewhere.
-- **Do not remove polling entirely.** The gap after a reconnect has no other
-  repair, and there is no read timeout to notice a silent stall.
-- **Do not open a client per player.** One account, one stream.
-- **Do not reach into Home Assistant's config entry for its OAuth tokens.** It
-  would work, and it would make Ampere stop working the day the user removes
-  an unrelated integration.
-
-## Where the value actually is
-
-Ranked by what a person would notice:
-
-1. The scrubber telling the truth.
-2. Volume and playback state within a second rather than up to ten.
-3. A quieter API footprint, which matters more as speakers are added.
-
-None of it makes music start faster. Measured 2026-08-03: `run_custom` returns
-in ~0.2s and Alexa arrives 1.8 to 2.0 seconds later; a skip took 7.3 seconds
-end to end. That is Amazon's utterance pipeline, and the only lever on it is
-the one-item-queue finding above, not push.
+An early capture showed `transport: {next: DISABLED, previous: DISABLED}` and a
+`mediaReference` whose `id` was always `"0"`, and this document concluded that
+every publish was a one-item queue and that this explained slow skips. **That
+was wrong.** A later capture of a multi-track queue showed `next: ENABLED` and
+`id: "1"`. The first reading came from a single-track play, and a property of
+the test was mistaken for a property of the system.

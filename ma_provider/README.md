@@ -339,6 +339,37 @@ This is not fixable from here. Alexa echoes back the `contentId` it was given
 at `Initiate` on every later queue request, and an `Item` has no field to hand
 back a different one, so the content behind a running queue cannot be swapped.
 
+## Live updates
+
+By default Ampere learns what a speaker is doing by asking Amazon on a timer.
+Amazon can also **tell** it instead, over one long-lived HTTP/2 stream per
+account, and that is what the `Live updates` group in the provider settings
+turns on.
+
+It is worth turning on. Measured against Amazon's own event clock, a directive
+arrives within a tenth of a second of Amazon knowing, where a poll adds up to
+its whole interval on top. It is what makes the track position track, and it
+costs **one connection for the whole account** no matter how many Echoes are on
+it, where polling costs one request per speaker per interval.
+
+Press `Connect Amazon for live updates` and sign in. This is a separate
+authorization from the developer account used to create the skill, because
+Amazon issues them from different places: this one is the account the Echo
+devices are registered to. It opens Amazon's real sign-in page, so a captcha or
+a two-factor prompt can be answered by hand, and it is the same flow Music
+Assistant's own alexa provider uses. The window closes itself when it is done.
+
+The stream reconnects on its own with backoff, and the token renews itself
+before it expires. **Polling never stops**, only slows to 30 or 60 seconds:
+push can say what changed and can never say what was missed while
+disconnected, so the poll stays as the floor that repairs state after any gap.
+How far it slows depends on whether the installed alexapy can detect a stream
+that has stopped delivering without closing, which the currently pinned version
+cannot.
+
+Running this alongside Home Assistant's Alexa Media Player on the same Amazon
+account is fine; both hold their own stream and both receive the same events.
+
 ## Running through Home Assistant instead
 
 If MA already runs beside Home Assistant with the Alexa Media Player
