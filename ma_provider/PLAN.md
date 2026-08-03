@@ -166,6 +166,7 @@ The grouping is reasoned from how those services deliver audio, not measured.
 | 4. Live streams | Group C | 100-200 lines | low | **done** 2026-08-03 |
 | 5. Fold bridge into MA | One deployable | ~2,000 lines moved, ~5,300 deleted | medium, broad | **done** 2026-08-03 |
 | 6. Upstream merge | Ships to everyone | negotiation | outside our control | open |
+| 7. Push instead of polling | State in under a second | one supervised connection | medium | proposed, see PUSH-PLAN.md |
 
 ### Phase 1: play one track
 
@@ -299,6 +300,22 @@ drops values with no declared entry, which discarded the signing key mid-cutover
 and broke the linked account while every other signal stayed green.
 
 Each is now pinned by a test that was verified to fail without the fix.
+
+### Phase 7: push instead of polling
+
+Every piece of state is currently read on a ten second timer, one request per
+player, and that interval is a rate-limit budget rather than a preference.
+`alexapy` ships `HTTP2EchoClient`, one long-lived stream per **account**, which
+is what Home Assistant's alexa_media_player uses.
+
+It fixes the scrubber, the resume lag and the volume snap-back, all of which
+are the same "nothing tells us it changed" problem. It does **not** make
+playback start faster: that is bounded by Amazon's utterance pipeline.
+
+Written up separately in [PUSH-PLAN.md](PUSH-PLAN.md), including the question
+that decides whether it is worth doing at all, which is whether the stream
+fires for changes made by a music skill rather than only by Amazon's own
+providers.
 
 ### Phase 6: upstream merge
 

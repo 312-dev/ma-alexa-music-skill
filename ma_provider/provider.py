@@ -124,6 +124,31 @@ POLL_INTERVAL = 10
 # misses at POLL_INTERVAL is half a minute of silence, which is a real fault.
 POLL_FAILURES_BEFORE_UNAVAILABLE = 3
 
+# How long a requested volume outranks the one Alexa reports. Amazon keeps
+# reporting the previous volume for several seconds after accepting a change,
+# and at POLL_INTERVAL this has to cover more than one poll or the value would
+# be conceded on the first read. Thirty seconds is three polls; past that, a
+# volume that has not arrived is one Amazon is not going to apply.
+VOLUME_SETTLE_SECONDS = 30.0
+
+# How long to wait before checking a volume change landed. Long enough for
+# Amazon to have acted on a command it was going to act on, short enough that a
+# resend still feels like part of the same gesture rather than a correction
+# arriving later.
+VOLUME_CONFIRM_SECONDS = 2.0
+
+# How long to give Alexa to act on a play command before sending it again.
+# Measured 2026-08-03: when Amazon does act, the search arrives 1.8 to 2.0
+# seconds after `run_custom` returns. Four seconds is comfortably past that, so
+# a resend means the command really was dropped rather than merely slow, and a
+# working play is never spoken twice.
+PLAY_CONFIRM_SECONDS = 4.0
+
+# How soon after a control to read the real state back. Long enough for Alexa
+# to have actually done the thing, short enough that a resume does not sit at
+# the wrong position while the regular poll cycle comes round.
+RESYNC_SECONDS = 1.5
+
 
 def build_stamp() -> str:
     """A short digest of this provider's own source files.
@@ -212,6 +237,18 @@ class AmperePlayer(Player):
     # Whether the last polled title resolved to an MA queue item. Class level
     # for the same reason as _poll_failures.
     _matched_last = False
+    # A volume asked for and not yet confirmed by Alexa. Class level for the
+    # same reason again: `poll` reads these and a player built any other way
+    # must not arrive one attribute short of pollable.
+    _volume_wanted: int | None = None
+    _volume_asked_at = 0.0
+    _volume_resent = False
+    _volume_confirm: asyncio.Task | None = None
+    # The same for a play command, which Amazon drops in the same way.
+    _play_confirm: asyncio.Task | None = None
+    # A one-off catch-up poll after a control, so the correction to an
+    # optimistic answer does not wait for the ten second cycle.
+    _resync: asyncio.Task | None = None
 
     def __init__(
         self,
@@ -338,6 +375,54 @@ class AmperePlayer(Player):
 
     # -- playback ------------------------------------------------------------
 
+    def _resync_soon(self) -> None:
+        """Read the real state back shortly, rather than at the next poll.
+
+        Every control here answers optimistically: the state is set to what was
+        asked for and shown immediately, because waiting on Amazon before
+        moving a play button would feel worse than being briefly wrong. What
+        made it *stay* briefly wrong was that the correction only came with the
+        next poll, up to ten seconds later, so a resume showed the wrong
+        position for several seconds and the scrubber sat where it had been.
+
+        Alexa needs a moment to actually change what it is doing, so this is
+        not immediate either. It is one read, soon, instead of a wait of
+        unknown length.
+        """
+        if self._resync is not None:
+            self._resync.cancel()
+
+        async def run() -> None:
+            try:
+                await asyncio.sleep(RESYNC_SECONDS)
+                await self.poll()
+                self.update_state()
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                self.logger.debug("resync poll failed: %s", err)
+
+        self._resync = asyncio.create_task(run())
+
+    async def _timed(self, what: str, coro):
+        """Time an Amazon call and say how long it took.
+
+        Every control here is a round trip to Amazon and back, and the
+        interesting question when something feels slow is always which leg was
+        slow: our own publish, the call to Amazon, or Amazon's own processing
+        before it asks us for anything. Without this the answer is a guess.
+
+        Logged at info, because these fire on user actions rather than on a
+        timer, so the volume is bounded by how often somebody presses
+        something.
+        """
+        started = time.monotonic()
+        try:
+            return await coro
+        finally:
+            self.logger.info("%s on %s took %.2fs", what, self.name,
+                             time.monotonic() - started)
+
     async def play_media(self, media: PlayerMedia) -> None:
         """Publish MA's queue to the bridge, then tell Alexa to play it."""
         provider = self.provider_instance
@@ -362,7 +447,8 @@ class AmperePlayer(Player):
         name = media.title or (items[0].name if items else "") or label
 
         offset_ms = self._seek_offset_ms(media)
-        await provider.bridge.publish_queue(tracks, name, offset_ms)
+        await self._timed("publish", provider.bridge.publish_queue(
+            tracks, name, offset_ms))
 
         # The published queue is claimed by phrase, not by id. There is no
         # utterance that names an arbitrary track list, so the bridge maps one
@@ -371,13 +457,47 @@ class AmperePlayer(Player):
         # at the same instant is the one case this loses; see README.
         text = custom_command(alias, label, self.group_name or None)
         self.logger.debug("run_custom on %s: %s", self.speaker.device_serial_number, text)
-        await self.api.run_custom(text)
+        sent_at = time.monotonic()
+        await self._timed("run_custom", self.api.run_custom(text))
 
         self._attr_current_media = media
         self._attr_elapsed_time = 0
         self._attr_elapsed_time_last_updated = time.time()
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
+
+        if self._play_confirm is not None:
+            self._play_confirm.cancel()
+        self._play_confirm = asyncio.create_task(self._confirm_play(text, sent_at))
+
+    async def _confirm_play(self, text: str, sent_at: float) -> None:
+        """Did Alexa act on the command. If not, say it once more.
+
+        Amazon accepts a `run_custom` and then sometimes does nothing with it.
+        Measured 2026-08-03: the call returned in 0.17s and no search ever
+        arrived, so nothing played; pressing play a second time worked
+        immediately. The same shape as a volume change needing two sends.
+
+        Unlike volume there is a direct signal here. Alexa turning up to
+        resolve the handoff is unambiguous proof the command was acted on, and
+        `queue_api` records when that last happened, so this waits for that
+        rather than guessing from a status code that already said fine.
+        """
+        try:
+            await asyncio.sleep(PLAY_CONFIRM_SECONDS)
+            from . import queue_api
+
+            if queue_api.handoff_claimed_at() > sent_at:
+                return  # Alexa came and asked; nothing was dropped
+
+            self.logger.info(
+                "%s: Alexa did not act on the play command within %.0fs; "
+                "sending it again", self.name, PLAY_CONFIRM_SECONDS)
+            await self._timed("run_custom (resend)", self.api.run_custom(text))
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            self.logger.debug("play confirm failed: %s", err)
 
     def _seek_offset_ms(self, media: PlayerMedia) -> int:
         """Where in the first published track playback should start.
@@ -425,14 +545,16 @@ class AmperePlayer(Player):
         """
 
     async def play(self) -> None:
-        await self.state_api.play()
+        await self._timed("play", self.state_api.play())
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
+        self._resync_soon()
 
     async def pause(self) -> None:
-        await self.state_api.pause()
+        await self._timed("pause", self.state_api.pause())
         self._attr_playback_state = PlaybackState.PAUSED
         self.update_state()
+        self._resync_soon()
 
     async def stop(self) -> None:
         await self.state_api.stop()
@@ -441,16 +563,120 @@ class AmperePlayer(Player):
         self.update_state()
 
     async def next_track(self) -> None:
-        await self.state_api.next()
+        await self._timed("next", self.state_api.next())
+        self._resync_soon()
 
     async def previous_track(self) -> None:
-        await self.state_api.previous()
+        await self._timed("previous", self.state_api.previous())
+        self._resync_soon()
 
     async def volume_set(self, volume_level: int) -> None:
+        """Set the volume, then check it landed and send it again if not.
+
+        Measured 2026-08-03 on a live Echo: the command has to be sent twice
+        before the speaker actually changes. Not a display artifact and not a
+        lost response, because the first send returns without error; Amazon
+        simply does not act on it.
+
+        Two separate defects were in play and only one of them was cosmetic.
+        The speaker ignoring the first send is this one, and it is handled by
+        confirming shortly afterwards and resending once. The other is `poll`
+        copying Amazon's lagging report over the requested value, which made
+        even a successful change appear to snap back; that is handled in
+        `_reconcile_volume`.
+
+        The confirm runs as its own task so the command returns immediately.
+        A control that waits two seconds before releasing the slider feels
+        broken in a different way.
+        """
+        wanted = max(0, min(100, volume_level))
         # alexapy takes 0..1 and multiplies by 100 on the way out.
-        await self.state_api.set_volume(max(0, min(100, volume_level)) / 100)
-        self._attr_volume_level = volume_level
+        await self._timed("volume_set", self.state_api.set_volume(wanted / 100))
+        self._attr_volume_level = wanted
+        self._volume_wanted = wanted
+        self._volume_asked_at = time.time()
+        self._volume_resent = False
         self.update_state()
+
+        if self._volume_confirm is not None:
+            # A newer request supersedes an older one rather than racing it.
+            self._volume_confirm.cancel()
+        self._volume_confirm = asyncio.create_task(self._confirm_volume(wanted))
+
+    async def _confirm_volume(self, wanted: int) -> None:
+        """Did the speaker take it. If not, say it once more.
+
+        Only once. A retry per poll would fight a person who has since turned
+        the dial themselves, and the point here is one user action producing
+        one volume change, not a loop that insists.
+        """
+        try:
+            await asyncio.sleep(VOLUME_CONFIRM_SECONDS)
+            if self._volume_wanted != wanted:
+                return  # superseded by a newer request
+
+            try:
+                raw = await self.state_api.get_state()
+                reported = ((raw or {}).get("volume") or {}).get("volume")
+            except Exception as err:
+                self.logger.debug("volume confirm could not read state: %s", err)
+                reported = None
+
+            if reported == wanted:
+                self._volume_wanted = None
+                return
+
+            self._volume_resent = True
+            self.logger.info("%s did not take %s%% (reported %s); sending again",
+                             self.name, wanted, reported)
+            await self.state_api.set_volume(wanted / 100)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            self.logger.debug("volume confirm failed: %s", err)
+
+    def _reconcile_volume(self, reported: int) -> None:
+        """Decide whether a polled volume or a requested one is the truth.
+
+        With nothing outstanding, Alexa wins: the volume may have been changed
+        by voice or on the device itself, and those are real changes this has
+        no other way to learn about.
+
+        With a request outstanding, the requested value wins until Alexa
+        reports it or the window runs out. Ceding immediately is what made a
+        volume change need two attempts, because Amazon reports the previous
+        volume for several seconds after accepting a new one.
+
+        Giving up after the window matters as much as defending inside it. If
+        Amazon has genuinely refused the change, saying so is better than a
+        slider that lies about the volume of the room.
+
+        Synchronous, because `_apply_state` is. Nothing here needs to await:
+        the resend belongs to `_confirm_volume`, which runs two seconds after
+        the request rather than whenever the next poll happens to land.
+        """
+        if self._volume_wanted is None:
+            self._attr_volume_level = reported
+            return
+
+        if reported == self._volume_wanted:
+            self._volume_wanted = None
+            self._attr_volume_level = reported
+            return
+
+        if time.time() - self._volume_asked_at > VOLUME_SETTLE_SECONDS:
+            self.logger.info(
+                "%s stayed at %s%% after asking for %s%%; Alexa refused it",
+                self.name, reported, self._volume_wanted)
+            self._volume_wanted = None
+            self._attr_volume_level = reported
+            return
+
+        # No resend here. `_confirm_volume` already did that two seconds after
+        # the request, which is far sooner than the next poll and is where one
+        # user action turning into one volume change belongs. All this does is
+        # keep the slider honest about what was asked for while that plays out.
+        self._attr_volume_level = self._volume_wanted
 
     # -- state ---------------------------------------------------------------
 
@@ -556,7 +782,7 @@ class AmperePlayer(Player):
 
         volume = info.get("volume") or {}
         if isinstance(volume.get("volume"), int):
-            self._attr_volume_level = volume["volume"]
+            self._reconcile_volume(volume["volume"])
         if isinstance(volume.get("muted"), bool):
             self._attr_volume_muted = volume["muted"]
 

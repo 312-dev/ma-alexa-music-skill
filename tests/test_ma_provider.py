@@ -11,6 +11,8 @@ importing a submodule does not drag in music_assistant.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 import json
 import pathlib
 from types import SimpleNamespace
@@ -1305,3 +1307,137 @@ def test_both_bridges_present_the_same_call(local_queue_dir, fake_subsonic):
         assert asyncio.iscoroutinefunction(publish)
         names = publish.__code__.co_varnames[:publish.__code__.co_argcount]
         assert names == ("self", "tracks", "name", "start_offset_ms")
+
+
+# --- volume, which needed saying twice --------------------------------------
+
+
+@contextlib.contextmanager
+def _quick_confirm(provider, seconds=0.01):
+    """Shorten the confirm delay without monkeypatch.
+
+    The in-container runner (tools/run_provider_tests.py) is a small stub that
+    cannot inject pytest fixtures, and these are exactly the tests that have to
+    run where Music Assistant actually exists.
+    """
+    original = provider.VOLUME_CONFIRM_SECONDS
+    provider.VOLUME_CONFIRM_SECONDS = seconds
+    try:
+        yield
+    finally:
+        provider.VOLUME_CONFIRM_SECONDS = original
+
+
+def _volume_player(provider, reported=None):
+    """A player whose only job is to record what it sent to Alexa."""
+    player = _bare_player(provider)
+    player.sent: list[float] = []
+
+    class FakeApi:
+        async def set_volume(self, level):
+            player.sent.append(level)
+
+        async def get_state(self):
+            if reported is None:
+                raise RuntimeError("state unavailable")
+            return {"volume": {"volume": reported}}
+
+    player.state_api = FakeApi()
+    player.update_state = lambda: None
+    player._attr_volume_level = 0
+    player._volume_wanted = None
+    player._volume_asked_at = 0.0
+    player._volume_resent = False
+    player._volume_confirm = None
+    return player
+
+
+async def test_a_volume_the_speaker_ignored_is_sent_again():
+    """Measured on a live Echo: the first send returns without error and the
+    speaker does not change. Two sends were needed, by hand, every time."""
+    provider = _provider_module()
+    with _quick_confirm(provider):
+        player = _volume_player(provider, reported=25)   # still the old value
+        await player.volume_set(36)
+        await player._volume_confirm
+
+    assert player.sent == [0.36, 0.36], "the ignored command must be repeated"
+
+
+async def test_a_volume_the_speaker_took_is_not_sent_again():
+    """Resending unconditionally would double every volume call."""
+    provider = _provider_module()
+    with _quick_confirm(provider):
+        player = _volume_player(provider, reported=36)   # Alexa agrees
+        await player.volume_set(36)
+        await player._volume_confirm
+
+    assert player.sent == [0.36]
+    assert player._volume_wanted is None, "confirmed, so nothing is outstanding"
+
+
+async def test_a_newer_request_supersedes_the_one_being_confirmed():
+    """Dragging a slider produces a run of sets. The confirm for an
+    abandoned one must not fire and put the volume back."""
+    provider = _provider_module()
+    with _quick_confirm(provider, seconds=0.05):
+        player = _volume_player(provider, reported=25)
+        await player.volume_set(36)
+        first = player._volume_confirm
+        await player.volume_set(50)
+        await asyncio.sleep(0.12)
+
+    assert first.cancelled() or first.done()
+    assert 0.36 not in player.sent[1:], "the abandoned value was not resent"
+
+
+def test_the_poll_does_not_overwrite_a_volume_just_asked_for():
+    """The second defect, and the cosmetic one.
+
+    Amazon reports the previous volume for several seconds after accepting a
+    change, and poll used to copy that straight over the requested value. The
+    slider moved and snapped back, which reads as the command being ignored
+    even on the occasions it was not.
+    """
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time()
+
+    player._reconcile_volume(25)
+    assert player._attr_volume_level == 36
+
+
+def test_the_poll_is_believed_once_alexa_agrees():
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time()
+
+    player._reconcile_volume(36)
+    assert player._attr_volume_level == 36
+    assert player._volume_wanted is None
+
+
+def test_a_volume_that_never_arrives_stops_being_defended():
+    """Giving up matters as much as holding on. If Amazon has refused the
+    change, a slider that keeps showing the requested value is lying about the
+    volume of the room."""
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time() - provider.VOLUME_SETTLE_SECONDS - 1
+
+    player._reconcile_volume(25)
+    assert player._attr_volume_level == 25
+    assert player._volume_wanted is None
+
+
+def test_a_volume_changed_on_the_device_is_still_picked_up():
+    """With nothing outstanding Alexa wins, because voice and the buttons on
+    the speaker are real changes with no other way in."""
+    provider = _provider_module()
+    player = _volume_player(provider)
+
+    player._reconcile_volume(70)
+    assert player._attr_volume_level == 70

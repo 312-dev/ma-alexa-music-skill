@@ -458,3 +458,86 @@ def test_a_missing_duration_is_absent_rather_than_zero(queue_client):
     resp = publish(queue_client, [ma_track(duration=0), ma_track("x://y/2", duration="nonsense")])
     token = resp.get_json()["content_id"].split(":", 1)[1]
     assert all("duration" not in s for s in queue_api.resolve(token))
+
+
+# --- the lookups that were the whole delay before playback ------------------
+
+
+def test_a_song_is_fetched_once_and_then_remembered(monkeypatch):
+    """Publishing cost one Subsonic round trip per track, every time.
+
+    Measured 2026-08-03: 8.33s of a 10s play, against a call to Amazon that
+    took 0.20s. The remote service was never the slow part; re-reading
+    metadata we had just read was.
+    """
+    calls = []
+    monkeypatch.setattr(queue_api.subsonic, "song",
+                        lambda sid: calls.append(sid) or {"id": sid, "title": sid})
+    queue_api.forget_songs()
+
+    assert queue_api._fetch("t1")["id"] == "t1"
+    assert queue_api._fetch("t1")["id"] == "t1"
+    assert calls == ["t1"], "the second read must not reach Subsonic"
+
+
+def test_republishing_the_same_queue_costs_no_lookups(monkeypatch):
+    """The case this exists for. Resuming, seeking, moving a queue between
+    rooms and skipping all republish a list fetched moments earlier."""
+    calls = []
+    monkeypatch.setattr(queue_api.subsonic, "song",
+                        lambda sid: calls.append(sid) or {"id": sid, "title": sid})
+    queue_api.forget_songs()
+
+    queue_api.publish(["t1", "t2", "t3"])
+    first = len(calls)
+    queue_api.publish(["t1", "t2", "t3"])
+
+    assert first == 3
+    assert len(calls) == 3, "the republish fetched nothing"
+
+
+def test_a_stale_entry_is_refetched(monkeypatch):
+    """Half an hour, not forever. A retag or a replaced file should be picked
+    up the same evening rather than at the next restart."""
+    calls = []
+    monkeypatch.setattr(queue_api.subsonic, "song",
+                        lambda sid: calls.append(sid) or {"id": sid})
+    queue_api.forget_songs()
+
+    queue_api._fetch("t1")
+    stamp, value = queue_api._SONG_CACHE["t1"]
+    queue_api._SONG_CACHE["t1"] = (stamp - queue_api.SONG_CACHE_TTL - 1, value)
+    queue_api._fetch("t1")
+
+    assert calls == ["t1", "t1"]
+
+
+def test_a_missing_song_is_remembered_as_missing(monkeypatch):
+    """A queue holding a deleted track would otherwise pay the same failing
+    lookup on every republish."""
+    calls = []
+
+    def gone(sid):
+        calls.append(sid)
+        raise RuntimeError("no such song")
+
+    monkeypatch.setattr(queue_api.subsonic, "song", gone)
+    queue_api.forget_songs()
+
+    assert queue_api._fetch("t9") is None
+    assert queue_api._fetch("t9") is None
+    assert calls == ["t9"]
+
+
+def test_forgetting_songs_makes_them_be_read_again(monkeypatch):
+    """For a library that has just been rescanned."""
+    calls = []
+    monkeypatch.setattr(queue_api.subsonic, "song",
+                        lambda sid: calls.append(sid) or {"id": sid})
+    queue_api.forget_songs()
+
+    queue_api._fetch("t1")
+    queue_api.forget_songs()
+    queue_api._fetch("t1")
+
+    assert calls == ["t1", "t1"]

@@ -495,3 +495,24 @@ def test_one_directory_answer_reaches_everything_that_reads_it(tmp_path):
     finally:
         (core_module.LOG_DIR, queuestate.STATE_DIR, queue_api.STATE_DIR,
          mastream_cache.CACHE_DIR, setup_state.STATE_DIR) = before
+
+
+def test_the_package_compiles_and_not_merely_parses():
+    """`ast.parse` is not enough, and trusting it cost an outage.
+
+    Measured 2026-08-03: an `await` was added to a synchronous method,
+    `ast.parse` accepted it because building a tree is not the step that
+    checks it, and the SyntaxError surfaced only when Music Assistant imported
+    the provider and could not load it. `compile` runs that check.
+    """
+    import pathlib
+    import py_compile
+    import tempfile
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "ma_provider"
+    for path in sorted(root.glob("*.py")):
+        source = path.read_text()
+        try:
+            compile(source, str(path), "exec")
+        except SyntaxError as err:
+            raise AssertionError(f"{path.name} does not compile: {err}") from err

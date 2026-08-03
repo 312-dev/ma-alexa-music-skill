@@ -78,8 +78,12 @@ TOKEN_BYTES = 12
 # Song lookups run wide because a published queue can be a few hundred tracks
 # and each one is a round trip. This is off the Alexa request path entirely
 # (publishing happens before anyone says anything), but a user waiting on a
-# speaker to start is still waiting.
-_FETCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="extq-fetch")
+# speaker to start is still waiting: measured 2026-08-03, publishing was 8.33s
+# of a 10s play. Wide on purpose. These are small metadata reads against one Subsonic server
+# on a LAN or a tailnet, and they are the only thing standing between pressing
+# play and hearing music, so the queue is fetched in as few round trips as the
+# server will take rather than in careful batches of eight.
+_FETCH_POOL = ThreadPoolExecutor(max_workers=32, thread_name_prefix="extq-fetch")
 
 
 # --------------------------------------------------------------------------
@@ -131,6 +135,26 @@ _FETCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="extq-fetch")
 # reads like the setting and silently is not the one the predicates consult.
 is_handoff_phrase = handoff.is_handoff_phrase
 is_handoff_entity = handoff.is_handoff_entity
+
+
+# When Alexa last acted on a handoff, as a monotonic stamp.
+#
+# Amazon accepts a `run_custom` and then sometimes does nothing with it: the
+# call returns 200 in under a second and no search ever arrives. Measured
+# 2026-08-03, and the same shape as a volume change needing to be sent twice.
+# A caller cannot tell the difference from its own side, so this records the
+# only unambiguous evidence there is, which is Alexa turning up to ask.
+_LAST_HANDOFF = 0.0
+
+
+def handoff_claimed_at() -> float:
+    """When a handoff was last resolved for Alexa. 0.0 if never."""
+    return _LAST_HANDOFF
+
+
+def note_handoff_claimed() -> None:
+    global _LAST_HANDOFF
+    _LAST_HANDOFF = time.monotonic()
 
 
 def handoff_content_id() -> str | None:
@@ -254,13 +278,52 @@ def _evict() -> None:
 # --------------------------------------------------------------------------
 
 
+# Song records already fetched, by id. Publishing a queue used to cost one
+# Subsonic round trip per track every single time, which on a real playlist is
+# the whole delay between pressing play and hearing anything: measured
+# 2026-08-03, publishing took 8.33s of a 10s play, against a `run_custom` to
+# Amazon that took 0.20s. The remote service was never the slow part.
+#
+# Cached because the same tracks are published over and over. Resuming,
+# seeking, moving a queue between rooms and skipping all republish a list whose
+# songs were fetched moments earlier, and none of that metadata has changed.
+_SONG_CACHE: dict[str, tuple[float, dict | None]] = {}
+
+# Long enough to cover a listening session, short enough that a retag or a
+# replaced file is picked up the same evening rather than next restart.
+SONG_CACHE_TTL = float(os.environ.get("SONG_CACHE_TTL", "1800"))
+
+# A ceiling so a very large library cannot turn this into a memory leak. Songs
+# are small; this is thousands of tracks, not a limit anyone will notice.
+SONG_CACHE_MAX = 5000
+
+
 def _fetch(song_id: str) -> dict | None:
+    now = time.time()
+    hit = _SONG_CACHE.get(song_id)
+    if hit is not None and now - hit[0] < SONG_CACHE_TTL:
+        return hit[1]
     try:
-        return subsonic.song(song_id)
+        song = subsonic.song(song_id)
     except Exception:
         # One track that has left the library must not cost the whole queue.
         logger.warning("published queue references unknown song %s", song_id)
-        return None
+        # Cached as a miss too, briefly. A queue holding a deleted track would
+        # otherwise pay the same failing lookup on every republish.
+        song = None
+    if len(_SONG_CACHE) >= SONG_CACHE_MAX:
+        _SONG_CACHE.clear()
+    _SONG_CACHE[song_id] = (now, song)
+    return song
+
+
+def forget_songs() -> None:
+    """Drop the cached song records.
+
+    For a library that has just been rescanned, where holding half an hour of
+    stale titles would be worse than paying the lookups again.
+    """
+    _SONG_CACHE.clear()
 
 
 # The `id` prefix an MA-sourced track gets. It has to be an id at all because

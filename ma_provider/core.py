@@ -1197,6 +1197,10 @@ def handle_get_playable_content(payload: dict) -> dict:
         if not content_id:
             return error("Alexa.Media", "CONTENT_NOT_FOUND",
                          "nothing has been handed over yet")
+        # Recorded before answering, because this is the only evidence that
+        # Amazon acted on the command rather than merely accepting it, and
+        # `play_media` is waiting on exactly that.
+        queue_api.note_handoff_claimed()
         logger.info("handoff phrase resolved to %s", content_id)
         return envelope(
             "Alexa.Media.Search",
