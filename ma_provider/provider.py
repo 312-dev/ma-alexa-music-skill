@@ -513,6 +513,35 @@ class AmperePlayer(Player):
         self._apply_state(info)
         self.update_state()
 
+    def _queue_item_for(self, title: str) -> str | None:
+        """Which MA queue item the polled title corresponds to.
+
+        This is what lets MA's queue follow along. Alexa advances the queue
+        itself and never tells MA, so the only way MA's own index moves is by
+        recognising the title Alexa reports as one of its own items. Alexa
+        reports what is playing by name and never by anything it was handed, so
+        a name is all there is to match on. Duplicate titles resolve to the
+        first.
+
+        The map built at play_media is the fast path. It lives only in memory,
+        so it is empty after a restart and after a queue transferred in from
+        another player, and those are exactly the moments MA's queue has no
+        other way to catch up: observed with the group audibly on one track
+        while MA's UI showed the track the queue had arrived holding. So the
+        live queue is scanned as a fallback.
+        """
+        wanted = title.lower()
+        if known := self._titles_to_items.get(wanted):
+            return known
+        try:
+            items = self.mass.player_queues.items(self.player_id)
+        except Exception:  # no queue for this player yet
+            return None
+        for item in items or ():
+            if (getattr(item, "name", "") or "").lower() == wanted:
+                return item.queue_item_id
+        return None
+
     def _apply_state(self, info: dict[str, Any]) -> None:
         # An empty payload is not a claim that nothing is playing. A speaker
         # group answers with no playerInfo at all while its members are audibly
@@ -599,8 +628,7 @@ class AmperePlayer(Player):
             album=kept(text.get("subText2"), "album"),
             image_url=kept((info.get("mainArt") or {}).get("url"), "image_url"),
             duration=kept(seconds, "duration"),
-            queue_item_id=kept(self._titles_to_items.get(title.lower()),
-                               "queue_item_id"),
+            queue_item_id=kept(self._queue_item_for(title), "queue_item_id"),
         )
 
 

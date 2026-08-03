@@ -870,3 +870,65 @@ def test_losing_the_title_mid_track_is_worth_one_line():
     assert len(lines) == 1
     assert "stopped reporting a track title" in lines[0]
     assert player._attr_current_media.title == "Song", "media left as it was"
+
+
+# --- letting MA's queue follow Alexa ----------------------------------------
+
+
+def _with_queue(provider, player, *titles):
+    items = [SimpleNamespace(name=t, queue_item_id=f"id-{i}")
+             for i, t in enumerate(titles)]
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=lambda _qid: items))
+    return player
+
+
+def test_the_playing_title_is_matched_against_the_live_queue():
+    """The map built at play_media is memory only.
+
+    It is empty after a restart and after a queue transferred in from another
+    player, and those are exactly the moments MA's queue index has no other way
+    to catch up: the group was audibly on one track while MA showed the track
+    the queue had arrived holding.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "And I Love You So", "Triste", "My Way")
+
+    assert player._queue_item_for("My Way") == "id-2"
+
+
+def test_the_prebuilt_map_wins_when_it_has_the_answer():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+    player._titles_to_items = {"my way": "from-the-map"}
+
+    assert player._queue_item_for("My Way") == "from-the-map"
+
+
+def test_matching_ignores_case_the_way_alexa_reports_it():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "THAT'S LIFE")
+
+    assert player._queue_item_for("That's Life") == "id-0"
+
+
+def test_a_title_that_is_not_in_the_queue_matches_nothing():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+
+    assert player._queue_item_for("Something Else") is None
+
+
+def test_no_queue_at_all_is_not_a_crash():
+    """Polling starts before anything has ever played on this player."""
+    provider = _provider_module()
+    player = _polled(provider, None)
+
+    def explode(_qid):
+        raise KeyError("no queue")
+
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=explode))
+
+    assert player._queue_item_for("My Way") is None
