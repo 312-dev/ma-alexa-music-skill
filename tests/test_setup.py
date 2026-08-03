@@ -910,25 +910,25 @@ def test_no_page_links_a_cdn(ui):
 
 def test_callback_rejects_a_response_it_did_not_ask_for(client):
     """It is reachable from anywhere, so state is the only thing guarding it."""
-    views._PENDING.clear()
+    setup_ops._PENDING.clear()
     body = client.get("/setup/oauth/callback?code=x&state=whatever").data.decode()
     assert "did not match" in body
 
 
 def test_callback_rejects_a_mismatched_state(client, monkeypatch):
-    views._PENDING.update({"state": "real", "verifier": "v", "at": time.time(),
+    setup_ops._PENDING.update({"state": "real", "verifier": "v", "at": time.time(),
                            "client_id": "c", "client_secret": "s"})
     body = client.get("/setup/oauth/callback?code=x&state=forged").data.decode()
     assert "did not match" in body
-    views._PENDING.clear()
+    setup_ops._PENDING.clear()
 
 
 def test_callback_rejects_an_expired_request(client):
-    views._PENDING.update({"state": "s", "verifier": "v", "at": time.time() - 1000,
+    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time() - 1000,
                            "client_id": "c", "client_secret": "s"})
     body = client.get("/setup/oauth/callback?code=x&state=s").data.decode()
     assert "expired" in body
-    views._PENDING.clear()
+    setup_ops._PENDING.clear()
 
 
 def test_callback_reports_an_error_from_amazon(client):
@@ -946,13 +946,13 @@ def test_a_good_callback_stores_the_token(client, monkeypatch):
         return {"refresh_token": "r"}
 
     monkeypatch.setattr(smapi_rest, "complete", complete)
-    views._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
+    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
                            "client_id": "cid", "client_secret": "sec"})
     body = client.get("/setup/oauth/callback?code=abc&state=s").data.decode()
     assert "Connected" in body
     assert seen == {"code": "abc", "client_id": "cid", "verifier": "v"}
     # Single use: the pending request is consumed even on success.
-    assert not views._PENDING
+    assert not setup_ops._PENDING
 
 
 def test_callback_sends_the_operator_back_to_the_origin_they_came_from(client, monkeypatch):
@@ -960,7 +960,7 @@ def test_callback_sends_the_operator_back_to_the_origin_they_came_from(client, m
     serve. The way back must point at the address the wizard was driven from."""
     monkeypatch.setattr(smapi_rest, "complete",
                         lambda *a, **kw: {"refresh_token": "r"})
-    views._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
+    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
                            "client_id": "cid", "client_secret": "sec",
                            "origin": "http://100.85.183.28:5056"})
     body = client.get("/setup/oauth/callback?code=abc&state=s").data.decode()
@@ -968,7 +968,7 @@ def test_callback_sends_the_operator_back_to_the_origin_they_came_from(client, m
 
 
 def test_callback_without_a_known_origin_does_not_link_into_the_blocked_plane(client):
-    views._PENDING.clear()
+    setup_ops._PENDING.clear()
     body = client.get("/setup/oauth/callback?code=x&state=whatever").data.decode()
     assert 'href="/setup/wizard"' not in body
     assert "address you use for setup" in body

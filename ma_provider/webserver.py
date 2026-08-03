@@ -189,6 +189,12 @@ class AmpereWebServer:
             web.post("/oauth/authorize", self.oauth_authorize_submit),
             web.post("/oauth/token", self.oauth_token),
 
+            # Where Amazon returns the operator after developer-account
+            # consent. It has to be served here rather than by Music
+            # Assistant, because Amazon will only redirect to https and this
+            # is the only listener that is on the public origin.
+            web.get("/setup/oauth/callback", self.setup_callback),
+
             web.get("/icons/{name:.*}", self.icons),
 
             # The handoff endpoint. Kept even though the provider now publishes
@@ -330,6 +336,34 @@ class AmpereWebServer:
         form = dict(await request.post())
         return await self.respond(request, core.oauth_token_exchange(
             form, request.headers.get("Authorization", "")))
+
+    async def setup_callback(self, request: web.Request) -> web.StreamResponse:
+        """Finish connecting the Amazon developer account.
+
+        The exchange is a blocking HTTPS round trip to Amazon, so it goes to
+        the pool like everything else here rather than stalling the loop that
+        is also serving audio.
+
+        Answers in plain text. This page is read once, by the person who just
+        pressed a button in Music Assistant's settings, and its whole job is to
+        say whether it worked so they know to go back and carry on.
+        """
+        from . import setup_ops
+
+        if error := request.query.get("error"):
+            detail = f"{error}: {request.query.get('error_description', '')}"
+            return web.Response(status=400, text=f"Not connected. {detail}")
+
+        outcome = await self._in_thread(
+            setup_ops.complete_amazon_link,
+            request.query.get("code", ""),
+            request.query.get("state", ""),
+        )
+        if not outcome.ok:
+            return web.Response(status=400, text=f"Not connected. {outcome.detail}")
+        return web.Response(
+            text="Connected to Amazon. You can close this page and go back to "
+                 "Music Assistant.")
 
     async def icons(self, request: web.Request) -> web.StreamResponse:
         return await self.respond(request, await self._in_thread(

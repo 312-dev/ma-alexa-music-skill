@@ -135,7 +135,19 @@ def connected() -> bool:
 
 
 def redirect_uri() -> str:
-    base = (os.environ.get("PUBLIC_BASE") or "").rstrip("/")
+    """Where Amazon sends the operator back after consent.
+
+    The public base is asked of `core`, which is the one place that knows it
+    once Music Assistant has supplied it. Reading the environment here worked
+    only while this ran in a container of its own; inside MA it returned an
+    empty string, which does not fail loudly. It produces a consent URL with
+    no redirect and an error from Amazon that names nothing recognizable.
+
+    Imported inside the function because `core` imports this module.
+    """
+    from . import core
+
+    base = core.PUBLIC_BASE.rstrip("/")
     return f"{base}/setup/oauth/callback" if base else ""
 
 

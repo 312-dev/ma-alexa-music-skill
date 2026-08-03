@@ -1019,83 +1019,46 @@ def wizard_step(step_key: str):
     return render_template("wizard.html", **step_context(step_key))
 
 
-# The verifier and state for an in-flight consent round trip. In memory on
-# purpose: it is valid for one redirect and writing it down would leave the
-# thing that binds the authorization code to this process sitting in /data.
-_PENDING: dict = {}
-
-
 @bp.post("/wizard/amazon/begin")
 def wizard_amazon_begin():
-    client_id = (request.form.get("client_id") or "").strip()
-    client_secret = (request.form.get("client_secret") or "").strip()
-    if not (client_id and client_secret):
-        return fragment("wizard/_amazon.html", result={
-            "ok": False,
-            "detail": "Both the client ID and the client secret are needed.",
-        }, **wizard_context())
-    if not smapi_rest.redirect_uri().startswith("https://"):
-        return fragment("wizard/_amazon.html", result={
-            "ok": False,
-            "detail": "PUBLIC_BASE must be an https origin before connecting, "
-                      "because Amazon will only redirect back to https.",
-        }, **wizard_context())
-
-    url, state, verifier = smapi_rest.begin(client_id)
-    _PENDING.clear()
-    # The origin this wizard is being driven from. Amazon must redirect to the
-    # public https hostname, but the admin plane does not serve there, so the
-    # callback page needs to send the operator back to the address they were
-    # actually using.
-    _PENDING.update({"state": state, "verifier": verifier, "at": time.time(),
-                     "client_id": client_id, "client_secret": client_secret,
-                     "origin": request.host_url.rstrip("/")})
-    return redirect(url)
+    outcome = setup_ops.begin_amazon_link(
+        request.form.get("client_id") or "",
+        request.form.get("client_secret") or "",
+        origin=request.host_url.rstrip("/"),
+    )
+    if not outcome.ok:
+        return fragment("wizard/_amazon.html",
+                        result={"ok": False, "detail": outcome.detail},
+                        **wizard_context())
+    return redirect(outcome.detail)
 
 
 @bp.get("/oauth/callback")
 def oauth_callback():
     """Where Amazon sends the operator back.
 
-    Reachable from any address, because the operator's browser is on the public
-    internet and cannot be judged by the LAN rule the rest of setup uses. What
-    protects it instead is the state value and the PKCE verifier, both of which
-    only this process holds and both of which are good for exactly one attempt.
+    Reachable from any address, because the operator's browser is on the
+    public internet and cannot be judged by the LAN rule the rest of setup
+    uses. What protects it is the state value and the PKCE verifier, both held
+    only by this process and both good for exactly one attempt.
     """
+    back = setup_ops.pending_origin()
     if error := request.args.get("error"):
-        return render_template("oauth_done.html", ok=False,
-                               back=_PENDING.get("origin"), detail=(
+        return render_template("oauth_done.html", ok=False, back=back, detail=(
             f"{error}: {request.args.get('error_description', '')}"))
 
-    state = request.args.get("state", "")
-    code = request.args.get("code", "")
-    pending = dict(_PENDING)
-    _PENDING.clear()
-    back = pending.get("origin")
-
-    if not pending or not state or not hmac.compare_digest(state, pending.get("state", "")):
-        return render_template("oauth_done.html", ok=False, back=back, detail=(
-            "That response did not match a consent request from this bridge. "
-            "Start again from the wizard."))
-    if time.time() - pending.get("at", 0) > 900:
-        return render_template("oauth_done.html", ok=False, back=back, detail=(
-            "The consent request expired. Start again from the wizard."))
-
-    try:
-        smapi_rest.complete(code, pending["client_id"], pending["client_secret"],
-                            pending["verifier"])
-    except smapi_rest.SmapiError as exc:
-        return render_template("oauth_done.html", ok=False, back=back,
-                               detail=f"{exc} {exc.body}".strip())
-    return render_template("oauth_done.html", ok=True, back=back, detail="")
+    outcome = setup_ops.complete_amazon_link(request.args.get("code", ""),
+                                             request.args.get("state", ""))
+    return render_template("oauth_done.html", ok=outcome.ok, back=back,
+                           detail="" if outcome.ok else outcome.detail)
 
 
 @bp.post("/wizard/amazon/disconnect")
 def wizard_amazon_disconnect():
-    smapi_rest.forget_credentials()
-    return fragment("wizard/_amazon.html", result={
-        "ok": True, "detail": "Disconnected. The refresh token was deleted.",
-    }, **wizard_context())
+    outcome = setup_ops.disconnect_amazon()
+    return fragment("wizard/_amazon.html",
+                    result={"ok": outcome.ok, "detail": outcome.detail},
+                    **wizard_context())
 
 
 def _rest_error(exc: Exception) -> str:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 
 import pytest
 from aiohttp import web
@@ -367,3 +368,53 @@ async def test_a_free_port_reports_that_it_is_serving():
     finally:
         await server.stop()
         assert server.serving is False
+
+
+# --- the Amazon developer-account callback ----------------------------------
+
+
+async def test_the_consent_callback_completes_the_link(aio, monkeypatch):
+    """Music Assistant cannot host this route, so this listener must.
+
+    Amazon redirects only to https, and this is the only listener on the
+    public origin. Without it, connecting the developer account from MA's
+    settings has nowhere to land.
+    """
+    from ma_provider import setup_ops, smapi_rest
+
+    exchanged = []
+    monkeypatch.setattr(smapi_rest, "complete",
+                        lambda code, cid, secret, verifier:
+                        exchanged.append((code, cid, verifier)) or {})
+    setup_ops._PENDING.clear()
+    setup_ops._PENDING.update({"state": "st", "verifier": "v", "at": time.time(),
+                               "client_id": "cid", "client_secret": "sec",
+                               "origin": ""})
+
+    response = await aio.get("/setup/oauth/callback?code=abc&state=st")
+    assert response.status == 200
+    assert "Connected to Amazon" in await response.text()
+    assert exchanged == [("abc", "cid", "v")]
+
+
+async def test_a_callback_nobody_asked_for_is_refused(aio):
+    """The state value is the whole protection on a route open to the world."""
+    from ma_provider import setup_ops
+
+    setup_ops._PENDING.clear()
+    response = await aio.get("/setup/oauth/callback?code=abc&state=forged")
+    assert response.status == 400
+    assert "did not match" in await response.text()
+
+
+async def test_amazon_reporting_an_error_does_not_look_like_success(aio):
+    from ma_provider import setup_ops
+
+    setup_ops._PENDING.clear()
+    setup_ops._PENDING.update({"state": "st", "verifier": "v", "at": time.time(),
+                               "client_id": "cid", "client_secret": "sec"})
+    response = await aio.get(
+        "/setup/oauth/callback?error=access_denied&error_description=nope")
+    assert response.status == 400
+    body = await response.text()
+    assert "access_denied" in body and "Connected" not in body

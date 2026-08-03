@@ -164,6 +164,92 @@ def existing_music_skills(exclude: str = "") -> list[dict]:
 
 
 # --------------------------------------------------------------------------
+# connecting the Amazon developer account
+# --------------------------------------------------------------------------
+
+# The verifier and state for an in-flight consent round trip. In memory on
+# purpose: it is valid for one redirect, and writing it down would leave the
+# thing that binds the authorization code to this process sitting on disk.
+_PENDING: dict = {}
+
+# How long a consent request stays answerable. Long enough to log in to Amazon
+# and read a permissions page, short enough that a link left in a browser
+# history is not a standing invitation.
+CONSENT_TTL = 900
+
+
+def begin_amazon_link(client_id: str, client_secret: str,
+                      origin: str = "") -> Outcome:
+    """Start the consent round trip, and return the URL to open.
+
+    `origin` is where the operator is driving setup from, remembered only so
+    the callback page can offer a way back. Amazon must redirect to the public
+    https hostname, which is usually not the address the admin plane is being
+    used on.
+    """
+    client_id = (client_id or "").strip()
+    client_secret = (client_secret or "").strip()
+    if not (client_id and client_secret):
+        return Outcome(False, "Both the client ID and the client secret are "
+                              "needed.")
+    if not smapi_rest.redirect_uri().startswith("https://"):
+        return Outcome(False, "The public base URL must be an https origin "
+                              "before connecting, because Amazon will only "
+                              "redirect back to https.")
+
+    url, state, verifier = smapi_rest.begin(client_id)
+    _PENDING.clear()
+    _PENDING.update({"state": state, "verifier": verifier, "at": time.time(),
+                     "client_id": client_id, "client_secret": client_secret,
+                     "origin": origin})
+    return Outcome(True, url)
+
+
+def pending_origin() -> str:
+    return _PENDING.get("origin", "")
+
+
+def complete_amazon_link(code: str, state: str) -> Outcome:
+    """Exchange the authorization code Amazon sent back.
+
+    The state and the PKCE verifier are what protect this: the callback is
+    reachable from anywhere, because the operator's browser is on the public
+    internet and cannot be judged by the network rule the rest of setup uses.
+    Both are held only by this process and both are good for exactly one
+    attempt, which is why the pending record is cleared before anything is
+    checked rather than after a successful exchange.
+    """
+    pending = dict(_PENDING)
+    _PENDING.clear()
+
+    if not pending or not state or not _constant_equal(
+        state, pending.get("state", "")
+    ):
+        return Outcome(False, "That response did not match a consent request "
+                              "from this service. Start again from setup.")
+    if time.time() - pending.get("at", 0) > CONSENT_TTL:
+        return Outcome(False, "The consent request expired. Start again from "
+                              "setup.")
+    try:
+        smapi_rest.complete(code, pending["client_id"],
+                            pending["client_secret"], pending["verifier"])
+    except smapi_rest.SmapiError as exc:
+        return Outcome(False, error_text(exc))
+    return Outcome(True, "Connected to Amazon.")
+
+
+def _constant_equal(left: str, right: str) -> bool:
+    import hmac
+
+    return hmac.compare_digest(left, right)
+
+
+def disconnect_amazon() -> Outcome:
+    smapi_rest.forget_credentials()
+    return Outcome(True, "Disconnected. The refresh token was deleted.")
+
+
+# --------------------------------------------------------------------------
 # the steps
 # --------------------------------------------------------------------------
 

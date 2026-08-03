@@ -29,12 +29,23 @@ def isolated(tmp_path, monkeypatch):
 # --- the authorization code grant -------------------------------------------
 
 
-def test_redirect_uri_is_derived_from_public_base():
+def test_redirect_uri_is_derived_from_public_base(monkeypatch):
+    from ma_provider import core
+
+    monkeypatch.setattr(core, "PUBLIC_BASE", "https://music.example.com")
     assert smapi_rest.redirect_uri() == "https://music.example.com/setup/oauth/callback"
 
 
 def test_redirect_uri_is_empty_without_a_public_base(monkeypatch):
-    monkeypatch.setenv("PUBLIC_BASE", "")
+    """The value, not the environment variable that used to carry it.
+
+    Music Assistant supplies the public base through `core.configure` and
+    hands providers no environment at all, so a test that cleared the variable
+    would clear something nothing reads.
+    """
+    from ma_provider import core
+
+    monkeypatch.setattr(core, "PUBLIC_BASE", "")
     assert smapi_rest.redirect_uri() == ""
 
 
