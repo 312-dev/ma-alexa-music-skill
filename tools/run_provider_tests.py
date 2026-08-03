@@ -21,6 +21,8 @@ tests that skip.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import pathlib
 import sys
 import traceback
@@ -109,7 +111,16 @@ def main(paths: list[str]) -> int:
                 continue
             for args, label in _cases(fn):
                 try:
-                    fn(*args)
+                    result = fn(*args)
+                    # An async test returns a coroutine and nothing here used
+                    # to await it, so every `async def test_` in the file was
+                    # reported as passing without a single assertion having
+                    # run. Python said so on stderr -- "coroutine ... was never
+                    # awaited" -- underneath a line reading "83 passed", which
+                    # is the one shape of broken check that is worse than no
+                    # check: it reads as evidence.
+                    if inspect.iscoroutine(result):
+                        asyncio.run(result)
                 except pytest.Skipped as err:
                     skipped += 1
                     print(f"s {name}{label} (no {err})")

@@ -637,6 +637,34 @@ class AmperePlayer(Player):
 
     async def play_media(self, media: PlayerMedia) -> None:
         """Publish MA's queue to the bridge, then tell Alexa to play it."""
+        # A newer command supersedes every pending retry, not just the one of
+        # its own kind. Measured 2026-08-03: a stop's confirm loop was still
+        # running when the next play started, read the new playback as its own
+        # stop having been dropped, and stopped the speaker three times over
+        # twenty seconds. The loops each cancelled their own predecessor and
+        # neither knew about the other.
+        self._supersede_confirms()
+        # Alexa speaker groups play natively; Music Assistant assumes they
+        # cannot. `_handle_play_media` marks a player as natively playing --
+        #
+        #     elif player.type != PlayerType.GROUP:
+        #         player.set_active_output_protocol("native")
+        #
+        # -- on the reasoning that a group delegates to a sync leader which
+        # manages its own protocol. That is true of a group MA assembled out of
+        # separate speakers and false of one Amazon assembled for us: "Whole
+        # Apartment" is a single endpoint that accepts transport commands on
+        # its own, and there is no leader to delegate to.
+        #
+        # Left unset, `_get_control_target(player, PAUSE, require_active=True)`
+        # finds no active protocol and returns None, and `_handle_cmd_pause`
+        # takes its fallback branch: "does not support pause, using STOP
+        # instead". So every pause on a group arrived here as a stop -- which
+        # is why a paused group reported idle, and why no `pause on Whole
+        # Apartment` ever appeared in the log. Four fixes modelled that as our
+        # own state handling being wrong. It was never reached.
+        if self.is_group:
+            self.set_active_output_protocol("native")
         provider = self.provider_instance
         items = provider.queue_items(media)
         tracks, self._titles_to_items = provider.publish_tracks(items)
@@ -685,8 +713,6 @@ class AmperePlayer(Player):
         self._attr_playback_state = PlaybackState.PLAYING
         self.update_state()
 
-        if self._play_confirm is not None:
-            self._play_confirm.cancel()
         self._play_confirm = asyncio.create_task(self._confirm_play(text, sent_at))
 
     async def _confirm_play(self, text: str, sent_at: float) -> None:
@@ -889,14 +915,37 @@ class AmperePlayer(Player):
     # so it can never fight a person, and it is bounded and says so when it
     # gives up.
 
+    def _supersede_confirms(self) -> None:
+        """Drop every pending retry, because something newer was asked for.
+
+        There are two of these loops -- one repeats a transport command, one
+        repeats the `run_custom` that starts playback -- and until this existed
+        each cancelled only its own predecessor. That left a retry able to
+        outlive the command it belonged to and fight the next one:
+
+            22:42:06  publish on Whole Apartment took 0.09s   <- a play starts
+            22:42:15  stop did not stick (Alexa reports PLAYING); resending
+            22:42:20  stop did not stick (Alexa reports PLAYING); resending
+            22:42:25  stop landed on attempt 3
+
+        Alexa was reporting PLAYING because playback had legitimately started
+        nine seconds after the stop, and the loop read that as its own command
+        having been dropped. Every retry loop here has to be cancellable by
+        anything newer, not just by another of its own kind; otherwise it is
+        not converging on what was asked for, it is arguing with it.
+        """
+        for attr in ("_transport_confirm", "_play_confirm"):
+            if (task := getattr(self, attr, None)) is not None:
+                task.cancel()
+                setattr(self, attr, None)
+
     def _confirm_transport(self, what: str, wanted: frozenset[str],
                            send: Any) -> None:
         """Check a transport command landed, and repeat it if it did not."""
-        if self._transport_confirm is not None:
-            # A newer command supersedes an older one rather than racing it.
-            # This is also what stops the loop arguing with the operator: press
-            # play while a pause is still converging and the pause gives up.
-            self._transport_confirm.cancel()
+        # A newer command supersedes an older one rather than racing it. This
+        # is also what stops the loop arguing with the operator: press play
+        # while a pause is still converging and the pause gives up.
+        self._supersede_confirms()
         self._transport_confirm = asyncio.create_task(
             self._converge_transport(what, wanted, send))
 
@@ -957,10 +1006,16 @@ class AmperePlayer(Player):
         return str(info.get("state") or "").upper() or None
 
     async def next_track(self) -> None:
+        # Changes what is playing, so it supersedes a retry the same way a
+        # transport command does. A stop still converging would otherwise stop
+        # the track this just moved to -- one of the shapes behind "a track
+        # change moves and then reverts".
+        self._supersede_confirms()
         await self._timed("next", self.state_api.next())
         self._resync_soon()
 
     async def previous_track(self) -> None:
+        self._supersede_confirms()
         await self._timed("previous", self.state_api.previous())
         self._resync_soon()
 

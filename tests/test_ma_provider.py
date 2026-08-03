@@ -10,6 +10,7 @@ importing a submodule does not drag in music_assistant.
 
 from __future__ import annotations
 
+import inspect
 import asyncio
 import contextlib
 import time
@@ -213,14 +214,17 @@ def _provider_module():
     return provider
 
 
-def _bare_player(provider):
+def _bare_player(provider, cls=None):
     """An AmperePlayer with no __init__ run: these tests touch one method.
 
     Only the attributes the methods under test actually read are set, since
     MA's Player.__init__ writes a default config through the whole config
     controller and standing that up would make these tests of MA.
+
+    `cls` takes a subclass, for the cases that need to stand in for something
+    MA exposes as a read-only property and so cannot simply be assigned.
     """
-    player = provider.AmperePlayer.__new__(provider.AmperePlayer)
+    player = (cls or provider.AmperePlayer).__new__(cls or provider.AmperePlayer)
     player.logger = SimpleNamespace(
         warning=lambda *a, **k: None, info=lambda *a, **k: None,
         debug=lambda *a, **k: None)
@@ -1312,6 +1316,11 @@ def test_both_bridges_present_the_same_call(local_queue_dir, fake_subsonic):
 # --- volume, which needed saying twice --------------------------------------
 
 
+async def _resolved(value):
+    """`current_volume` is awaited; None means Alexa would not say."""
+    return value
+
+
 @contextlib.contextmanager
 def _quick_confirm(provider, seconds=0.01):
     """Shorten the confirm delay without monkeypatch.
@@ -1329,20 +1338,35 @@ def _quick_confirm(provider, seconds=0.01):
 
 
 def _volume_player(provider, reported=None):
-    """A player whose only job is to record what it sent to Alexa."""
-    player = _bare_player(provider)
-    player.sent: list[float] = []
+    """A player whose only job is to record what it sent to Alexa.
+
+    The fake had drifted out of shape with what it stands in for -- it took no
+    `queue_delay` and answered `get_state`, where the confirm loop has read the
+    account-wide volume endpoint since it was found that an idle speaker
+    reports no volume at all. Both tests raised TypeError on the first line and
+    the in-container runner called that a pass, because it never awaited them.
+    """
+    sent: list[float] = []
 
     class FakeApi:
-        async def set_volume(self, level):
-            player.sent.append(level)
+        async def set_volume(self, level, queue_delay=None):
+            sent.append(level)
 
-        async def get_state(self):
-            if reported is None:
-                raise RuntimeError("state unavailable")
-            return {"volume": {"volume": reported}}
-
-    player.state_api = FakeApi()
+    # `state_api`, `provider_instance` and `name` are all read-only properties
+    # -- two on AmperePlayer, one inherited from Music Assistant's Player -- so
+    # the stand-ins are declared on a subclass rather than assigned onto the
+    # instance, where they would raise "has no setter".
+    fake_api = FakeApi()
+    fake_provider = SimpleNamespace(
+        current_volume=lambda _serial: _resolved(reported))
+    cls = type("VolumeTestPlayer", (provider.AmperePlayer,), {
+        "state_api": property(lambda self: fake_api),
+        "provider_instance": property(lambda self: fake_provider),
+        "name": property(lambda self: "Test Speaker"),
+    })
+    player = _bare_player(provider, cls=cls)
+    player.sent = sent
+    player.device = SimpleNamespace(device_serial_number="SERIAL1")
     player.update_state = lambda: None
     player._attr_volume_level = 0
     player._volume_wanted = None
@@ -1361,7 +1385,12 @@ async def test_a_volume_the_speaker_ignored_is_sent_again():
         await player.volume_set(36)
         await player._volume_confirm
 
-    assert player.sent == [0.36, 0.36], "the ignored command must be repeated"
+    # Once, then again for each attempt the loop has left. Written against the
+    # constant rather than a literal: this asserted exactly two sends from when
+    # there was a single resend, and stayed that way after the resend became a
+    # bounded loop, because nothing in the container was awaiting it.
+    assert player.sent == [0.36] * provider.VOLUME_ATTEMPTS, (
+        "the ignored command must be repeated, and a bounded number of times")
 
 
 async def test_a_volume_the_speaker_took_is_not_sent_again():
@@ -1441,3 +1470,88 @@ def test_a_volume_changed_on_the_device_is_still_picked_up():
 
     player._reconcile_volume(70)
     assert player._attr_volume_level == 70
+
+
+# --- retries that outlived their command -------------------------------------
+
+
+def _confirmable_player(provider):
+    """A player with both retry loops present and nothing else."""
+    player = _bare_player(provider)
+    player._transport_confirm = None
+    player._play_confirm = None
+    return player
+
+
+async def test_a_newer_command_cancels_a_retry_of_any_kind():
+    """Measured 2026-08-03 on the live group:
+
+        22:42:06  publish on Whole Apartment took 0.09s   <- a play starts
+        22:42:15  stop did not stick (Alexa reports PLAYING); resending
+        22:42:20  stop did not stick (Alexa reports PLAYING); resending
+        22:42:25  stop landed on attempt 3
+
+    The stop's confirm loop was still running when the next play began, read
+    the new playback as its own command having been dropped, and stopped the
+    speaker three times over twenty seconds. Each loop used to cancel only its
+    own predecessor, so a stop retry and a play retry could not see each other.
+    """
+    provider = _provider_module()
+    player = _confirmable_player(provider)
+
+    async def forever():
+        await asyncio.sleep(30)
+
+    stop_retry = asyncio.create_task(forever())
+    play_retry = asyncio.create_task(forever())
+    player._transport_confirm = stop_retry
+    player._play_confirm = play_retry
+
+    player._supersede_confirms()
+    await asyncio.sleep(0)
+
+    assert stop_retry.cancelled(), "a live stop retry must not outlive a new command"
+    assert play_retry.cancelled(), "nor a live play retry"
+    assert player._transport_confirm is None
+    assert player._play_confirm is None
+
+
+async def test_arming_a_transport_confirm_supersedes_a_play_confirm():
+    """The cross-kind case, which is the one that actually happened."""
+    provider = _provider_module()
+    player = _confirmable_player(provider)
+
+    async def forever():
+        await asyncio.sleep(30)
+
+    play_retry = asyncio.create_task(forever())
+    player._play_confirm = play_retry
+
+    async def send():
+        return None
+
+    player._reported_transport_state = send
+    player._confirm_transport("stop", frozenset({"PAUSED"}), send)
+    await asyncio.sleep(0)
+    assert play_retry.cancelled()
+    player._transport_confirm.cancel()
+
+
+def test_a_group_declares_itself_natively_playing():
+    """Music Assistant will not do it for a group, and without it every pause
+    on that group arrives here as a stop.
+
+    `_handle_play_media` marks a player as natively playing only when
+    `player.type != PlayerType.GROUP`, on the reasoning that a group delegates
+    to a sync leader. An Alexa speaker group has no leader to delegate to: it
+    is one endpoint that takes transport commands itself. Left unset,
+    `_get_control_target(player, PAUSE, require_active=True)` returns None and
+    `_handle_cmd_pause` takes its "does not support pause, using STOP instead"
+    branch.
+    """
+    provider = _provider_module()
+    source = inspect.getsource(provider.AmperePlayer.play_media)
+
+    assert "set_active_output_protocol" in source, (
+        "a group must declare native playback or MA converts its pause to stop")
+    assert "self.is_group" in source, "only a group needs it; MA sets it for the rest"
