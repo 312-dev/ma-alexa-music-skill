@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import pathlib
 import secrets
@@ -52,12 +53,14 @@ from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
 from . import core
+from . import setup_ops
 from .bridge import BridgeClient, BridgeError, LocalBridge
 from .stream_ref import encode_ref, is_live
 from .stream_route import MediaStreamRoute
 from .utterance import custom_command, sanitize
 from .webserver import DEFAULT_PORT, AmpereWebServer
 from . import wizard
+from .tasks import AmpereTasks
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ConfigValueType, ProviderConfig
@@ -175,7 +178,14 @@ async def get_config_entries(
     visible in the step it belongs to by the time the page comes back.
     """
     values = values or {}
-    if action:
+    if action == wizard.ACTION_UPLOAD:
+        # The one action that is not answered here. A library crawl is minutes
+        # of work, so it is handed to MA's task controller and the button
+        # returns at once with somewhere to watch it.
+        AmpereTasks(mass, logging.getLogger(__name__)).start_upload()
+        wizard.remember(action, setup_ops.Outcome(
+            True, "Started. Progress is in Music Assistant's task list."))
+    elif action:
         # Blocking: SMAPI is a series of HTTPS round trips and the library
         # crawl is Subsonic calls. MA calls this from the event loop, so it
         # goes to a worker thread rather than stalling playback for everyone.
@@ -956,6 +966,15 @@ class AmpereAlexaProvider(PlayerProvider):
         self.stream_route = MediaStreamRoute(self.mass, self.logger)
         self.stream_route.register()
 
+        # The library sync, on MA's own scheduler rather than a daemon thread
+        # of Ampere's. Registered whether or not it is switched on, because the
+        # schedule and its enabled flag are things MA renders and the operator
+        # edits; leaving it unregistered would hide the feature entirely.
+        self.tasks = AmpereTasks(
+            self.mass, self.logger,
+            executor=self.webserver._pool if self.webserver is not None else None)
+        self.tasks.register_sync()
+
     async def unload(self, is_removed: bool = False) -> None:
         """Take the audio route and the endpoint down with the provider.
 
@@ -964,6 +983,10 @@ class AmpereAlexaProvider(PlayerProvider):
         like a broken skill rather than a stale socket.
         """
         self.stream_route.unregister()
+        # Before the pool it runs on goes away with the webserver, and before
+        # anything else: its handler is bound to this instance, so a scheduled
+        # sync left registered would keep firing into a dead provider.
+        self.tasks.unregister_sync()
         if self.webserver is not None:
             await self.webserver.stop()
             self.webserver = None
