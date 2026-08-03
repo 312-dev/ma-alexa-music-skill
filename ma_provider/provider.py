@@ -454,6 +454,10 @@ class AmperePlayer(Player):
     # of relying on every writer to have run in the right order.
     _stopped_at = 0.0
     _played_at = 0.0
+    # The last thing anyone deliberately asked this player to do: play, pause
+    # or stop. Alexa reports a stopped queue and a paused one identically, so
+    # this is the only thing that can tell them apart.
+    _intent = "play"
     # A one-off catch-up poll after a control, so the correction to an
     # optimistic answer does not wait for the ten second cycle.
     _resync: asyncio.Task | None = None
@@ -675,6 +679,7 @@ class AmperePlayer(Player):
 
         self._attr_current_media = media
         self._played_at = time.monotonic()
+        self._intent = "play"
         self._attr_elapsed_time = 0
         self._attr_elapsed_time_last_updated = time.time()
         self._attr_playback_state = PlaybackState.PLAYING
@@ -786,6 +791,7 @@ class AmperePlayer(Player):
         self.update_state()
         self._resync_soon()
         self._played_at = time.monotonic()
+        self._intent = "play"
         self._confirm_transport("play", PLAYING_STATES, self.state_api.play)
 
     async def pause(self) -> None:
@@ -793,7 +799,9 @@ class AmperePlayer(Player):
         self._attr_playback_state = PlaybackState.PAUSED
         self.update_state()
         self._resync_soon()
-        self._played_at = time.monotonic()
+        # A pause is not a play, but it does end a stop: a paused player is
+        # one someone intends to resume.
+        self._intent = "pause"
         self._confirm_transport("pause", PAUSED_STATES, self.state_api.pause)
 
     async def stop(self) -> None:
@@ -810,6 +818,7 @@ class AmperePlayer(Player):
         # intent is what has to survive, so it is held here and consulted when
         # a reported PAUSED is turned into a state.
         self._stopped_at = time.monotonic()
+        self._intent = "stop"
         self._attr_playback_state = PlaybackState.IDLE
         self._attr_current_media = None
         self.update_state()
@@ -837,13 +846,30 @@ class AmperePlayer(Player):
             # how a stopped speaker went back to reporting paused. Later
             # reports are believed, because a play started by voice reaches
             # this provider no other way.
-            if time.monotonic() - self._stopped_at > STOP_SETTLE_SECONDS:
-                self._played_at = time.monotonic()
-                return PlaybackState.PLAYING
-            return PlaybackState.IDLE
+            # Distrusted only while a stop is the most recent thing anyone
+            # asked for. The first version dropped the second condition and
+            # suppressed PLAYING for twelve seconds after *any* stop, which
+            # turned a deliberate play in that window into idle -- three group
+            # pause cells failed on exactly that, because the suite plays again
+            # moments after stopping.
+            settling = (
+                self._intent == "stop"
+                and time.monotonic() - self._stopped_at <= STOP_SETTLE_SECONDS
+            )
+            if settling:
+                return PlaybackState.IDLE
+            self._played_at = time.monotonic()
+            self._intent = "play"
+            return PlaybackState.PLAYING
         if state in PAUSED_STATES:
-            stopped = self._stopped_at > self._played_at
-            return PlaybackState.IDLE if stopped else PlaybackState.PAUSED
+            # Only a stop turns a reported PAUSED into idle. Inferring that
+            # from timestamps was wrong twice: a boolean raced, and comparing
+            # a stop time against a play time still said "stopped" for a group
+            # that had since been asked to pause, because a pause is not a
+            # play and never moved the play clock. The intent is a third thing
+            # and is now recorded as one.
+            return (PlaybackState.IDLE if self._intent == "stop"
+                    else PlaybackState.PAUSED)
         if state in IDLE_STATES:
             return PlaybackState.IDLE
         return None
@@ -1362,8 +1388,19 @@ class AmperePlayer(Player):
         # not survive on one and get overwritten on the other. This is the
         # whole of the difference between them; anything else here would be a
         # second, quieter opinion about what Alexa meant.
-        self._attr_playback_state = (
-            self._playback_state_for(state) or PlaybackState.IDLE)
+        # A state Alexa did not name is not a claim that nothing is playing.
+        # Defaulting the unmapped case to IDLE is what turned a paused group
+        # into an idle one on every source: a group reports something this does
+        # not recognise, and the old dict literal quietly defaulted the same
+        # way. Leaving the last known state alone is the same rule the rest of
+        # `_apply_state` already follows for a field Alexa omitted.
+        resolved = self._playback_state_for(state)
+        if resolved is not None:
+            self._attr_playback_state = resolved
+        elif state:
+            self.logger.debug(
+                "%s: unmapped playback state %r, leaving it as %s",
+                self.name, state, self._attr_playback_state)
 
         # Logged because a group's state decides whether its members are hidden
         # from the player picker, and every theory about what a cluster device
