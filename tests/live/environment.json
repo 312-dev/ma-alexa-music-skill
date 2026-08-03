@@ -1,0 +1,181 @@
+{
+  "_generated": "2026-08-03T17:55:00Z",
+  "_source": "live Music Assistant 2.9.9 on the hetzner box, read-only inspection (no playback started)",
+  "_regenerate": "see tests/live/ENVIRONMENT.md",
+
+  "container": "app-14c1e46c-7716-e4e3-661b-45b5445b1e08",
+  "provider_instance": "ampere--3wyAVB8M",
+
+  "players": {
+    "single": [
+      {
+        "player_id": "ampere--3wyAVB8M:G2A1A603050507A4",
+        "name": "Bedroom Echo",
+        "serial": "G2A1A603050507A4"
+      },
+      {
+        "player_id": "ampere--3wyAVB8M:G2A1A6031026028E",
+        "name": "Bathroom Echo",
+        "serial": "G2A1A6031026028E"
+      },
+      {
+        "player_id": "ampere--3wyAVB8M:G6G22M0625320M40",
+        "name": "Kitchen Echo",
+        "serial": "G6G22M0625320M40"
+      },
+      {
+        "player_id": "ampere--3wyAVB8M:G2A0XL12229302V4",
+        "name": "Living Room Echo Studio",
+        "serial": "G2A0XL12229302V4"
+      }
+    ],
+    "group": [
+      {
+        "player_id": "ampere--3wyAVB8M:3b2beb3357bb4e79853dc6619be0dfd7",
+        "name": "Whole Apartment",
+        "serial": "3b2beb3357bb4e79853dc6619be0dfd7",
+        "members": [
+          "ampere--3wyAVB8M:G6G22M0625320M40",
+          "ampere--3wyAVB8M:G2A1A603050507A4",
+          "ampere--3wyAVB8M:G2A1A6031026028E",
+          "ampere--3wyAVB8M:G2A0XL12229302V4"
+        ],
+        "members_all_allowed": true,
+        "members_verified": "live players/all on 2026-08-03; every member is on the allowed list (Kitchen, Bedroom, Bathroom, Living Room Echo Studio). No excluded device is in this group."
+      }
+    ]
+  },
+
+  "excluded": [
+    {
+      "player_id": "ampere--3wyAVB8M:G6G22J0633840B05",
+      "name": "Living Room Echo",
+      "serial": "G6G22J0633840B05",
+      "reason": "user excluded - this is the plain Living Room Echo, NOT the Studio; also currently disabled in MA and unavailable in Home Assistant, so it does not appear in players/all"
+    },
+    {
+      "player_id": "ampere--3wyAVB8M:7b2c0191c89540adb404903cc9a98391",
+      "name": "Living Room TV Alexa",
+      "serial": "7b2c0191c89540adb404903cc9a98391",
+      "reason": "user excluded - also disabled in MA, absent from players/all"
+    },
+    {
+      "player_id": "ampere--3wyAVB8M:eeb2eea6b4174cf19db1acab6c59bb62",
+      "name": "Home Theater",
+      "serial": "eeb2eea6b4174cf19db1acab6c59bb62",
+      "reason": "user excluded - WARNING: this one IS enabled and available in players/all, so nothing but this list stops a test from driving it"
+    },
+    {
+      "player_id": "ampere--3wyAVB8M:f1648a9004eb4e70a18bcc636f184dd5",
+      "name": "Grayson's 2nd 2023 Samsung Smart Projector",
+      "serial": "f1648a9004eb4e70a18bcc636f184dd5",
+      "reason": "user excluded - also disabled in MA, absent from players/all"
+    },
+    {
+      "player_id": "ampere--3wyAVB8M:c1bbdd06939141b9b5788213c6c80a03",
+      "name": "Grayson's 2nd BMW Group - Amazon Alexa Car Integration",
+      "serial": "c1bbdd06939141b9b5788213c6c80a03",
+      "reason": "user excluded - also disabled in MA, absent from players/all"
+    }
+  ],
+
+  "sources": {
+    "streaming": {
+      "uri": "deezer--tyYQFjC6://track/916424",
+      "name": "Without Me",
+      "artist": "Eminem",
+      "album": "The Eminem Show",
+      "duration": 290,
+      "provider": "deezer",
+      "provider_instance": "deezer--tyYQFjC6",
+      "verified": "music/item_by_uri returned it live on 2026-08-03; Ampere has also already fetched and cached this exact stream to /opt/music-assistant/data/ampere/mastream/, so it is proven end-to-end playable"
+    },
+    "subsonic": {
+      "uri": "opensubsonic--etezT5sV://track/rmx7a7Q6z0lg5UxOqHd1Kk",
+      "library_uri": "library://track/15914",
+      "name": "Love Is Alive",
+      "artist": "Gary Wright",
+      "album": "The Dream Weaver",
+      "duration": 230,
+      "provider": "opensubsonic",
+      "provider_instance": "opensubsonic--etezT5sV",
+      "verified": "music/item_by_uri resolves the provider URI to library item 15914; play_count 3 in the library, so it has really been played here"
+    },
+    "radio": {
+      "uri": "somafm://radio/groovesalad",
+      "name": "SomaFM: Groove Salad",
+      "provider": "somafm",
+      "provider_instance": "somafm",
+      "verified": "music/item_by_uri returns is_playable=true, available=true; Kitchen Echo's last MA queue title is 'SomaFM: Groove Salad', so this station has actually been played through Ampere",
+      "note": "The MA radio library is EMPTY (music/radios/library_items returns []). There is no radio station in the library. SomaFM is an enabled music provider, and its stations are playable by URI without being library items. If a test insists on a library radio item it will have to create one first."
+    }
+  },
+
+  "playlists": {
+    "streaming": {
+      "uri": "deezer--tyYQFjC6://playlist/3133469542",
+      "name": "100% Justin Bieber",
+      "owner": "Deezer Artist Editor",
+      "provider": "deezer",
+      "provider_instance": "deezer--tyYQFjC6",
+      "track_count": 56,
+      "is_editable": false,
+      "is_dynamic": false,
+      "first_tracks": [
+        "deezer--tyYQFjC6://track/37027991",
+        "deezer--tyYQFjC6://track/5606967",
+        "deezer--tyYQFjC6://track/112662364",
+        "deezer--tyYQFjC6://track/112662368"
+      ],
+      "verified": "music/playlists/playlist_tracks returned 56 tracks live on 2026-08-03",
+      "note": "Deezer is NOT synced into the MA library (zero deezer rows in provider_mappings), so no Deezer playlist exists as a library item. This is a Deezer editorial playlist, addressable only by provider URI, and its contents can change on Deezer's side."
+    },
+    "subsonic": {
+      "uri": "opensubsonic--etezT5sV://playlist/dVe64uPkleCj29X39NpDd6",
+      "library_uri": "library://playlist/57",
+      "name": "Last Week's Jams",
+      "provider": "opensubsonic",
+      "provider_instance": "opensubsonic--etezT5sV",
+      "track_count": 24,
+      "is_editable": true,
+      "is_dynamic": false,
+      "verified": "music/playlists/playlist_tracks returned 24 tracks live on 2026-08-03 (first three: The Zephyr Song / Red Hot Chili Peppers, Chop Suey! / System of A Down, Gamesofluck / Parcels)",
+      "note": "Auto-refreshed weekly by the Subsonic server, so the contents (not the id) will drift. If a test needs stable contents, 'bedtime' (opensubsonic--etezT5sV://playlist/RKPWaVK19Lt26fswasvVYQ, library://playlist/59, 718 tracks) is hand-curated but large."
+    }
+  },
+
+  "extra": {
+    "ma_version": "2.9.9",
+    "ma_ws_url_in_container": "ws://127.0.0.1:8095/ws",
+    "ma_tailnet_url": "http://100.85.183.28:8095",
+    "ampere_endpoint_port": 5056,
+    "music_providers": {
+      "deezer": "deezer--tyYQFjC6",
+      "opensubsonic": "opensubsonic--etezT5sV",
+      "somafm": "somafm",
+      "builtin": "builtin"
+    },
+    "other_subsonic_playlists": {
+      "ListenBrainz Weekly Jams": "opensubsonic--etezT5sV://playlist/caiYUjRQTqLiz1z8N7UuzH",
+      "bedtime": "opensubsonic--etezT5sV://playlist/RKPWaVK19Lt26fswasvVYQ",
+      "cranked": "opensubsonic--etezT5sV://playlist/KzovFRveMfHdTfSo1jLpPc",
+      "golden hour": "opensubsonic--etezT5sV://playlist/rq7XdHDRtggG2Y6lNJthOE",
+      "good vibes": "opensubsonic--etezT5sV://playlist/Q7dMznHQZkvZhQzy39WAYr",
+      "hype mode": "opensubsonic--etezT5sV://playlist/OTnKKAfIGtn9sUsgefNGhY",
+      "slow shreds": "opensubsonic--etezT5sV://playlist/hzs3Qj7EC4gGeLdxZ9rkHM",
+      "sonic surge": "opensubsonic--etezT5sV://playlist/8FkqY2TIz1ZOlQ0OXxAbpP",
+      "strum stories": "opensubsonic--etezT5sV://playlist/f2APv9k4i6bnWYmncEvCW7",
+      "textured": "opensubsonic--etezT5sV://playlist/sZWuK3aJZjOuYtb3mX0e2W",
+      "verse vibes": "opensubsonic--etezT5sV://playlist/IV4KMpWAalcS2CqXMn5S7r"
+    },
+    "spare_streaming_track": {
+      "uri": "deezer--tyYQFjC6://track/4080495951",
+      "name": "Dreamweaver",
+      "artist": "Daedric",
+      "duration": 232,
+      "note": "also present in the Ampere mastream cache, so also proven playable"
+    }
+  },
+
+  "notes": "Gathered 2026-08-03 by read-only inspection of the live instance; no playback was started. THE CONTAINER NAME IS NOT STABLE: it is app-<nomad alloc id> and changes on every Music Assistant restart, including the restart that tools/ma_token.sh performs to mint a token. Re-derive it (see ENVIRONMENT.md) rather than trusting the value above. There is exactly ONE Alexa speaker group exposed by the Ampere provider ('Whole Apartment'), and all four of its members are allowed devices, so exercising the group does not drive an excluded speaker; no alternative group was needed. Beware a name collision: MA also has a DISABLED universal_group player 'ugp_sfvxyatc' that is likewise called 'Whole Apartment' - always select the group by player_id, never by display name. Home Theater is the only excluded device that is enabled and present in players/all, so it is the one an unfiltered test could accidentally hit. The MA library contains ONLY OpenSubsonic items plus builtin playlists - Deezer and SomaFM are enabled providers but are not synced into the library, so any Deezer or radio item must be addressed by its provider URI and will never show up in music/tracks/library_items, music/playlists/library_items or music/radios/library_items."
+}
