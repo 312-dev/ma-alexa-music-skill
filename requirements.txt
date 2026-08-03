@@ -8,4 +8,4 @@ cryptography==46.0.3
 # Optional. Only used when MDNS is set, to advertise <name>.local on the LAN,
 # which is a convenience for reaching the endpoint by name. Absent, mdns.py is
 # a no-op.
-zeroconf==0.148.0
+zeroconf==0.149.16
