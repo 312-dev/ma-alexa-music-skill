@@ -136,7 +136,6 @@ async def sign_in(
     next, not handed a traceback.
     """
     try:
-        import aiohttp
         from aiohttp import web
         from alexapy import AlexaLogin, AlexaProxy
         from music_assistant.helpers.auth import AuthenticationHelper
@@ -201,21 +200,29 @@ async def sign_in(
                 response = await proxy.all_handler(request)
                 if "Successfully logged in" in getattr(response, "text", ""):
                     finished = True
-                    # This is what releases `helper.authenticate()` below.
-                    # Without it the proxy completes, Amazon is satisfied, and
-                    # the wait here runs to its timeout anyway: a sign-in that
-                    # worked, reported as one that did not.
-                    async with aiohttp.ClientSession() as session:
-                        with contextlib.suppress(Exception):
-                            await session.get(helper.callback_url)
-                    return web.Response(
-                        text=(
-                            "<html><body><h2>Signed in.</h2>"
-                            "<p>You can close this window. Live updates will "
-                            "connect on their own.</p></body></html>"
-                        ),
-                        content_type="text/html",
-                    )
+                    # Send the *browser* to the callback rather than fetching
+                    # it from here.
+                    #
+                    # Both routes release `helper.authenticate()`, so the
+                    # difference is only in what the operator is left looking
+                    # at, and it is the whole difference. Music Assistant's
+                    # callback answers with `<body onload="window.close()">`,
+                    # so a browser that arrives there closes its own popup and
+                    # the settings page simply updates. Fetching it server side
+                    # consumes that page here, and the popup is left showing
+                    # whatever we invent instead, which is a dead end the
+                    # operator has to notice and dismiss.
+                    #
+                    # Music Assistant's own alexa provider fetches it server
+                    # side and hands back a page of its own, which is where
+                    # this started. Following it that far was a mistake: the
+                    # auto-closing popup is the native pattern and it is
+                    # already built.
+                    #
+                    # By this point `proxy.all_handler` has already captured
+                    # the token onto `login`, so nothing is lost by redirecting
+                    # away.
+                    return web.HTTPFound(helper.callback_url)
                 return response
 
             # One wildcard route, any method. Amazon's login is not two URLs:
