@@ -155,15 +155,12 @@ def test_no_action_key_collides_with_a_setting_key():
     """MA puts both in one namespace.
 
     An action sharing a key with a stored setting would have the action's own
-    name written over that setting the moment the button was pressed. Skipped
-    where the whole of Music Assistant is not installed, because reading the
-    settings half means importing the provider.
+    name written over that setting the moment the button was pressed.
     """
-    pytest.importorskip("music_assistant")
-    from ma_provider import provider
+    from ma_provider import settings as provider_settings
 
-    settings = {entry.key for entry in provider._settings_entries()}
-    assert settings.isdisjoint(set(wizard.ACTIONS))
+    keys = {entry.key for entry in provider_settings._settings_entries()}
+    assert keys.isdisjoint(set(wizard.ACTIONS))
 
 
 def test_no_two_entries_share_a_key():
@@ -234,3 +231,72 @@ def test_creating_the_skill_passes_the_public_base_through(monkeypatch):
                public_base="https://music.example.test")
     assert seen["public_base"] == "https://music.example.test"
     assert seen["alias"] == "ampere"
+
+
+# --- what a migration can actually persist -----------------------------------
+
+
+def test_every_generated_secret_is_a_declared_entry():
+    """Music Assistant drops values that have no matching entry.
+
+    It does it silently and reports success. Measured on 2026-08-03: a cutover
+    wrote eleven settings, two were declared and saved, and nine were
+    discarded. Nothing said so. The endpoint answered, healthz was green, ten
+    players registered, and the linked Alexa account was dead because the
+    signing key had gone.
+
+    So anything a migration has to be able to write must be declared, however
+    little it belongs in the UI.
+    """
+    from ma_provider import settings
+
+    declared = {entry.key for entry in settings._settings_entries()}
+    for key, _label in settings.GENERATED:
+        assert key in declared, key
+
+
+def test_the_generated_entries_are_hidden_and_optional():
+    """Declared so they can be saved, hidden so nobody edits them, optional so
+    an empty one cannot stop the provider loading and take every Echo player
+    off the list."""
+    from ma_provider import settings
+
+    generated = {key for key, _ in settings.GENERATED}
+    for entry in settings._settings_entries():
+        if entry.key in generated:
+            assert entry.hidden is True, entry.key
+            assert entry.required is False, entry.key
+
+
+def test_the_cutover_writes_only_keys_the_provider_declares():
+    """The script and the provider have to agree on every name.
+
+    A typo in either is not a crash. It is one setting quietly not arriving,
+    which is the same silent failure as the undeclared entries above.
+    """
+    import pathlib
+    import re
+
+    from ma_provider import settings
+
+    script = pathlib.Path(__file__).parent.parent / "tools" / "cutover.sh"
+    body = script.read_text()
+    block = body.split("values = {", 1)[1].split("}", 1)[0]
+    written = set(re.findall(r'"([a-z_]+)":', block))
+
+    declared = {entry.key for entry in settings._settings_entries()}
+    assert written <= declared, written - declared
+
+
+def test_the_special_setting_names_still_match_music_assistants_own():
+    """Two keys are spelled out rather than imported, so that the settings can
+    be read without the whole server installed. Spelling them out is only safe
+    while they still agree, and MA renaming one would otherwise show up as an
+    Amazon login that silently stopped being read."""
+    pytest.importorskip("music_assistant")
+    from music_assistant.constants import CONF_PASSWORD, CONF_USERNAME
+
+    from ma_provider import settings
+
+    assert settings.CONF_USERNAME == CONF_USERNAME
+    assert settings.CONF_PASSWORD == CONF_PASSWORD

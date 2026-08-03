@@ -96,8 +96,11 @@ echo "==> loading the settings into Music Assistant"
 # box. None of them crosses to the machine running this script, and none is
 # echoed: the payload is built and consumed inside one python process.
 "${SSH[@]}" bash -euo pipefail <<'REMOTE'
-ALLOC=$(nomad job status music-assistant |
-  awk '/^Allocations/{f=1;next} f && NF>1 && $1 !~ /^ID/ {print $1; exit}')
+ALLOC=$(nomad job allocs -json music-assistant |
+  python3 -c 'import json,sys
+running = [a["ID"] for a in json.load(sys.stdin) if a["ClientStatus"] == "running"]
+print(running[0] if running else "")')
+CONTAINER="app-$ALLOC"
 INSTANCE=$(python3 -c "
 import json
 cfg = json.load(open('/opt/music-assistant/data/settings.json'))
@@ -139,26 +142,49 @@ PY
 rm -f /tmp/.cutover-vars
 
 cp /opt/ampere/ma_cli.py /tmp/ma_cli.py
-docker cp /tmp/ma_cli.py "app-$ALLOC:/tmp/ma_cli.py" >/dev/null
-docker cp /opt/ampere/.ma-token "app-$ALLOC:/tmp/.ma-token" >/dev/null
-docker cp /tmp/.cutover-payload "app-$ALLOC:/tmp/.cutover-payload" >/dev/null
+docker cp /tmp/ma_cli.py "$CONTAINER:/tmp/ma_cli.py" >/dev/null
+docker cp /opt/ampere/.ma-token "$CONTAINER:/tmp/.ma-token" >/dev/null
+docker cp /tmp/.cutover-payload "$CONTAINER:/tmp/.cutover-payload" >/dev/null
 rm -f /tmp/.cutover-payload
 
 # The payload is handed over as a file, so no secret is ever an argv entry
 # that anything reading /proc could see.
-docker exec "app-$ALLOC" /app/venv/bin/python -c "
+docker exec "$CONTAINER" /app/venv/bin/python -c "
 import json, subprocess, sys
 payload = json.load(open('/tmp/.cutover-payload'))
 sys.argv = ['ma_cli.py', 'raw', 'config/providers/save', json.dumps(payload)]
 exec(open('/tmp/ma_cli.py').read())
+" >/dev/null
+docker exec "$CONTAINER" rm -f /tmp/.cutover-payload
+
+# Read back, and check the values are actually there.
+#
+# The save reporting success is not evidence that anything was written: Music
+# Assistant drops values with no matching config entry and says nothing. On the
+# first attempt at this migration that discarded nine settings of eleven, and
+# every other signal agreed it had worked. The endpoint answered, healthz was
+# green, ten players registered, and the linked account was dead.
+#
+# So the verdict is which keys came back non-empty, and only the key names are
+# printed. This is the check that has to be able to fail.
+docker exec "$CONTAINER" /app/venv/bin/python -c "
+import json, sys
+sys.argv = ['ma_cli.py', 'raw', 'config/providers/get',
+            json.dumps({'instance_id': '$INSTANCE'})]
+exec(open('/tmp/ma_cli.py').read())
 " | python3 -c "
 import json, sys
-raw = sys.stdin.read()
-# The reply echoes the saved config, which carries the values back. Only the
-# verdict is printed.
-print('    saved' if '\"error\"' not in raw else '    FAILED: ' + raw[:300])
-"
-docker exec "app-$ALLOC" rm -f /tmp/.cutover-payload /tmp/.ma-token
+want = ['signing_key', 'admin_secret', 'client_id', 'client_secret',
+        'link_secret', 'subsonic_url', 'subsonic_user', 'subsonic_password',
+        'public_base', 'serve_endpoint', 'endpoint_port']
+values = json.load(sys.stdin)['result']['values']
+missing = [k for k in want if not values.get(k, {}).get('value')]
+if missing:
+    print('    FAILED: not saved: ' + ', '.join(missing))
+    raise SystemExit(1)
+print('    saved and verified: ' + str(len(want)) + ' settings')
+" || { docker exec "$CONTAINER" rm -f /tmp/.ma-token /tmp/ma_cli.py; exit 1; }
+docker exec "$CONTAINER" rm -f /tmp/.ma-token /tmp/ma_cli.py
 REMOTE
 
 echo "==> stopping the standalone service"
@@ -167,8 +193,10 @@ echo "    alexa-music stopped (start it again to roll back)"
 
 echo "==> restarting Music Assistant so it picks the settings up"
 "${SSH[@]}" bash -euo pipefail <<'REMOTE'
-ALLOC=$(nomad job status music-assistant |
-  awk '/^Allocations/{f=1;next} f && NF>1 && $1 !~ /^ID/ {print $1; exit}')
+ALLOC=$(nomad job allocs -json music-assistant |
+  python3 -c 'import json,sys
+running = [a["ID"] for a in json.load(sys.stdin) if a["ClientStatus"] == "running"]
+print(running[0] if running else "")')
 nomad alloc restart "$ALLOC" >/dev/null
 REMOTE
 
@@ -182,8 +210,10 @@ for _ in $(seq 1 36); do
 done
 
 "${SSH[@]}" bash -euo pipefail <<'REMOTE'
-ALLOC=$(nomad job status music-assistant |
-  awk '/^Allocations/{f=1;next} f && NF>1 && $1 !~ /^ID/ {print $1; exit}')
+ALLOC=$(nomad job allocs -json music-assistant |
+  python3 -c 'import json,sys
+running = [a["ID"] for a in json.load(sys.stdin) if a["ClientStatus"] == "running"]
+print(running[0] if running else "")')
 echo "==> players: $(docker logs --since 5m "app-$ALLOC" 2>&1 |
   sed 's/\x1b\[[0-9;]*m//g' | grep -coE 'registered: ampere--[^ ]+' || true)"
 REMOTE
