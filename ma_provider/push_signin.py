@@ -64,17 +64,41 @@ async def sign_in(
         return push_auth.AuthState(
             detail=f"Live updates are unavailable: {err}", needs_login=True)
 
-    login = AlexaLogin(
-        url=url or "amazon.com",
-        email=email,
-        password=password,
-        otp_secret=otp_secret,
-        outputpath=lambda path: path,
-        # The default, restated because it is load-bearing. It is what points
-        # the login at the PKCE pages that mint the token; without it this
-        # whole flow would end with a cookie and nothing else.
-        oauth_login=True,
-    )
+    def _build(secret: str) -> Any:
+        return AlexaLogin(
+            url=url or "amazon.com",
+            email=email,
+            password=password,
+            otp_secret=secret,
+            outputpath=lambda path: path,
+            # The default, restated because it is load-bearing. It is what
+            # points the login at the PKCE pages that mint the token; without
+            # it this whole flow would end with a cookie and nothing else.
+            oauth_login=True,
+        )
+
+    # A bad two-factor seed raises out of the constructor, before any of the
+    # error handling below is in scope, and pyotp's message ("Non-base32 digit
+    # found") names the symptom and nothing an operator can act on.
+    #
+    # An unusable seed is also not a reason to refuse to sign in. The proxy
+    # puts Amazon's real pages in front of a person, so a six digit code can
+    # simply be typed; the seed only exists to save them that. So the failure
+    # is downgraded to signing in without it.
+    try:
+        login = _build(otp_secret)
+    except Exception as err:  # noqa: BLE001 - reported, not raised
+        logger.info(
+            "the saved two-factor secret is not a valid TOTP seed (%s); "
+            "signing in without it, so Amazon will ask for a code",
+            type(err).__name__)
+        try:
+            login = _build("")
+        except Exception as build_err:  # noqa: BLE001
+            return push_auth.AuthState(
+                detail=f"Could not start the sign-in: {build_err}",
+                needs_login=True,
+            )
 
     base = mass.webserver.base_url.rstrip("/")
     proxy_url = f"{base}{PROXY_PATH}"

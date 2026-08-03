@@ -258,6 +258,27 @@ async def _run_push_sign_in(
             "connect.")
         return
 
+    # The values handed to an action are the raw form values, and a
+    # SECURE_STRING that was saved earlier arrives still encrypted. Music
+    # Assistant's own alexa provider does not hit this because its
+    # authenticate button is pressed during first setup, when the fields hold
+    # what the operator just typed. Ampere's is pressed on a provider that is
+    # already configured, so the stored ciphertext is what turns up.
+    #
+    # Passing that through produced "Non-base32 digit found" from pyotp, which
+    # names the symptom and nothing else. decrypt_string is safe either way:
+    # it returns anything without the encryption marker untouched, so this
+    # handles the freshly-typed case and the stored case with one call.
+    def _plain(key: str) -> str:
+        raw = str(values.get(key) or "")
+        if not raw:
+            return ""
+        try:
+            return mass.config.decrypt_string(raw)
+        except Exception as err:  # noqa: BLE001 - a bad value, not a crash
+            logger.debug("could not decrypt %s: %s", key, type(err).__name__)
+            return raw
+
     auth = push_auth.PushAuth(
         store_path=str(storage / "ampere" / "push-auth.json"),
         url=str(values.get(CONF_AMAZON_URL) or "amazon.com"),
@@ -269,8 +290,8 @@ async def _run_push_sign_in(
         session_id=str(values.get("session_id") or ""),
         url=str(values.get(CONF_AMAZON_URL) or "amazon.com"),
         email=email,
-        password=str(values.get(CONF_PASSWORD) or ""),
-        otp_secret=str(values.get(CONF_OTP_SECRET) or ""),
+        password=_plain(CONF_PASSWORD),
+        otp_secret=_plain(CONF_OTP_SECRET),
         cookie_path=alexapy_compat.cookie_path(str(storage), email),
         logger=logger,
     )
