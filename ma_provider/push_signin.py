@@ -24,6 +24,7 @@ handed to `PushAuth` to be registered and kept.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from . import alexapy_compat, push_auth
@@ -31,11 +32,13 @@ from . import alexapy_compat, push_auth
 if TYPE_CHECKING:
     from music_assistant.mass import MusicAssistant
 
-# Routes on MA's webserver, live only for the duration of one sign-in. The
-# signin path is a wildcard because Amazon posts to several URLs under it and
-# the proxy has to see all of them.
+# Routes on MA's webserver, live only for the duration of one sign-in.
+#
+# PROXY_PATH is what the proxy rewrites Amazon's URLs to point at, so it is the
+# base and keeps its trailing slash. PROXY_WILDCARD is what is actually
+# registered: one entry, any method, matching every page underneath.
 PROXY_PATH = "/ampere/auth/proxy/"
-POST_PATH = "/ampere/auth/proxy/ap/signin/*"
+PROXY_WILDCARD = "/ampere/auth/proxy/*"
 
 
 # Amazon serves one page holding two forms, and which panel is expanded is
@@ -133,6 +136,7 @@ async def sign_in(
     next, not handed a traceback.
     """
     try:
+        import aiohttp
         from aiohttp import web
         from alexapy import AlexaLogin, AlexaProxy
         from music_assistant.helpers.auth import AuthenticationHelper
@@ -182,25 +186,49 @@ async def sign_in(
     await _prefer_signin_page(proxy, login, logger)
     finished = False
 
-    async def handler(request: web.Request) -> Any:
-        nonlocal finished
-        response = await proxy.all_handler(request)
-        if "Successfully logged in" in getattr(response, "text", ""):
-            finished = True
-            return web.Response(
-                text=(
-                    "<html><body><h2>Signed in.</h2>"
-                    "<p>You can close this window. Live updates will connect "
-                    "on their own.</p></body></html>"
-                ),
-                content_type="text/html",
-            )
-        return response
-
-    mass.webserver.register_dynamic_route(PROXY_PATH, handler, "GET")
-    mass.webserver.register_dynamic_route(POST_PATH, handler, "POST")
     try:
-        async with AuthenticationHelper(mass, session_id) as helper:
+        helper_context = AuthenticationHelper(mass, session_id)
+    except Exception as err:  # noqa: BLE001
+        await push_auth.close_quietly(login)
+        return push_auth.AuthState(
+            detail=f"Could not start the sign-in: {err}", needs_login=True)
+
+    try:
+        async with helper_context as helper:
+
+            async def handler(request: web.Request) -> Any:
+                nonlocal finished
+                response = await proxy.all_handler(request)
+                if "Successfully logged in" in getattr(response, "text", ""):
+                    finished = True
+                    # This is what releases `helper.authenticate()` below.
+                    # Without it the proxy completes, Amazon is satisfied, and
+                    # the wait here runs to its timeout anyway: a sign-in that
+                    # worked, reported as one that did not.
+                    async with aiohttp.ClientSession() as session:
+                        with contextlib.suppress(Exception):
+                            await session.get(helper.callback_url)
+                    return web.Response(
+                        text=(
+                            "<html><body><h2>Signed in.</h2>"
+                            "<p>You can close this window. Live updates will "
+                            "connect on their own.</p></body></html>"
+                        ),
+                        content_type="text/html",
+                    )
+                return response
+
+            # One wildcard route, any method. Amazon's login is not two URLs:
+            # a two-factor challenge lands on /ap/cvf/verify, a captcha
+            # somewhere else again, and each unregistered path is a 404 in the
+            # middle of a sign-in that was otherwise working. Music Assistant's
+            # own alexa provider registers only the base path and
+            # /ap/signin/*, and has the same gap.
+            #
+            # The catch-all matches a route whose path ends in "/*" by prefix,
+            # and a method of "*" against anything, so this one entry covers
+            # every page the flow can visit.
+            mass.webserver.register_dynamic_route(PROXY_WILDCARD, handler, "*")
             await helper.authenticate(proxy_url)
 
         if not await login.test_loggedin():
@@ -235,8 +263,5 @@ async def sign_in(
     finally:
         if not finished:
             logger.debug("sign-in ended without a success page")
-        for path, method in ((PROXY_PATH, "GET"), (POST_PATH, "POST")):
-            try:
-                mass.webserver.unregister_dynamic_route(path, method)
-            except Exception:  # noqa: BLE001 - teardown must not raise
-                pass
+        with contextlib.suppress(Exception):
+            mass.webserver.unregister_dynamic_route(PROXY_WILDCARD, "*")

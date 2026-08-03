@@ -103,6 +103,65 @@ def test_the_modifier_is_ordered_after_autofill():
     assert keys.index("autofill") < keys.index("ampere_clear_register_form")
 
 
+def _ma_catch_all_matches(registered: dict[str, object], method: str,
+                          path: str) -> bool:
+    """Music Assistant's route matcher, reproduced.
+
+    Copied from `helpers/webserver.py::_handle_catch_all` so the assumption
+    this design rests on is written down and checked, rather than being a thing
+    that was read once and remembered. Exact match first, then a prefix match
+    for any route whose path ends in "/*".
+    """
+    for key in (f"{method}.{path}", f"*.{path}"):
+        if key in registered:
+            return True
+    for route_key in registered:
+        route_method, route_path = route_key.split(".", 1)
+        if route_method in (method, "*") and route_path.endswith("/*"):
+            if path.startswith(route_path[:-2]):
+                return True
+    return False
+
+
+def test_every_page_amazons_login_can_visit_is_routed():
+    """The 404 that ended a working sign-in.
+
+    A two-factor challenge lands on /ap/cvf/verify. With only the base path and
+    /ap/signin/* registered -- which is what Music Assistant's own alexa
+    provider does -- that is a dead end in the middle of a flow that had
+    otherwise succeeded.
+    """
+    registered = {f"*.{push_signin.PROXY_WILDCARD}": object()}
+
+    for method, path in (
+        ("GET", "/ampere/auth/proxy/"),
+        ("GET", "/ampere/auth/proxy/ap/signin"),
+        ("POST", "/ampere/auth/proxy/ap/signin/146-931"),
+        ("GET", "/ampere/auth/proxy/ap/cvf/verify"),
+        ("POST", "/ampere/auth/proxy/ap/cvf/verify"),
+        ("GET", "/ampere/auth/proxy/ap/mfa"),
+        ("POST", "/ampere/auth/proxy/errors/validateCaptcha"),
+    ):
+        assert _ma_catch_all_matches(registered, method, path), f"{method} {path}"
+
+
+def test_the_old_two_route_registration_would_have_missed_it():
+    """Proves the test above is testing something."""
+    old = {
+        "GET./ampere/auth/proxy/": object(),
+        "POST./ampere/auth/proxy/ap/signin/*": object(),
+    }
+
+    assert not _ma_catch_all_matches(old, "POST", "/ampere/auth/proxy/ap/cvf/verify")
+
+
+def test_the_wildcard_does_not_swallow_unrelated_paths():
+    registered = {f"*.{push_signin.PROXY_WILDCARD}": object()}
+
+    assert not _ma_catch_all_matches(registered, "GET", "/api/players")
+    assert not _ma_catch_all_matches(registered, "GET", "/ampere/other")
+
+
 def test_the_pkce_query_survives_the_path_change():
     """Losing it turns an authorization request into an ordinary sign-in.
 
