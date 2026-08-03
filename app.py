@@ -32,9 +32,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html import escape
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 import logring
+import mastream_cache
 import mdns
 import oauth
 import queue_api
@@ -509,13 +510,15 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
             # length is known, because seeking an unknown duration is
             # meaningless. Navidrome serves the transcode with Accept-Ranges,
             # so the ranged GET that follows is satisfied by the proxy.
-            # Never for a Music Assistant track: MA serves realtime audio with
-            # no Content-Length and no Accept-Ranges, so the ranged GET that
-            # follows a scrub cannot be satisfied and the track would restart
-            # from the top instead of moving. A control that is offered and
-            # then misbehaves is worse than one that is greyed out.
+            # A Music Assistant track can be scrubbed only when it is being
+            # buffered here, because MA's own audio is realtime and answers no
+            # range. With the buffer on, the ranged GET that follows a scrub
+            # lands on a complete file and is answered exactly, so the control
+            # is offered; with it off it is greyed out, because a control that
+            # is offered and then misbehaves is worse than one that is not.
             {"type": "ADJUST", "name": "SEEK_POSITION",
-             "enabled": bool(song.get("duration")) and not ma_ref},
+             "enabled": bool(song.get("duration"))
+             and (not ma_ref or mastream_cache.ENABLED)},
         ],
         "rules": {"feedbackEnabled": False},
         "stream": {
@@ -654,8 +657,18 @@ def item_at(content_id: str, index: int, queue_id: str = "") -> dict | None:
     song = song_at(content_id, index, queue_id)
     if song is None:
         return None
-    total = len(queue_order(content_id, queue_id))
-    return build_item(song, index, total, continuation_mode(content_id) != "stop")
+    songs = queue_order(content_id, queue_id)
+
+    # Alexa asks about an item before it plays it, so this is the read-ahead:
+    # by the time it comes back for the audio the buffer is usually already
+    # complete, and a scrub or a room change lands on a real file. Started from
+    # this item rather than from the top, because the tracks worth having are
+    # the ones about to play.
+    mastream_cache.prefetch(
+        [s["ma_ref"] for s in songs[index:] if s.get("ma_ref")]
+    )
+    return build_item(song, index, len(songs),
+                      continuation_mode(content_id) != "stop")
 
 
 # --------------------------------------------------------------------------
@@ -1647,20 +1660,28 @@ def mastream(ref: str, expires: int, sig: str):
     only here, against a base this service holds in its own config, so a
     published queue can name an item but can never name a host.
 
-    What Music Assistant returns is a realtime stream: `200`, no
-    `Content-Length`, no `Accept-Ranges`. That is the whole known weakness of
-    this path, and how Alexa reacts to it is the question phase 2 exists to
-    answer, so a range request that arrives here is logged rather than quietly
-    forwarded and forgotten.
+    Served from the buffer when there is one, which is what makes these tracks
+    seekable and lets them survive being moved between rooms: `send_file` with
+    `conditional=True` answers a range with a real `206` and `Content-Range`,
+    exactly as the Navidrome proxy already does.
+
+    Falling back to streaming from Music Assistant is deliberate rather than
+    defensive. A full disk, a slow fetch or a disabled cache should cost
+    seeking, which is what phase 2 shipped without, and never cost playback.
     """
     if not verify("mastream", ref, expires, sig):
         return jsonify({"error": "bad or expired signature"}), 403
     if not stream_ref.is_ref(ref):
         return jsonify({"error": "not a Music Assistant reference"}), 400
+
+    if buffered := mastream_cache.ensure(ref):
+        return send_file(buffered, mimetype="audio/mpeg", conditional=True)
+
     if rng := request.headers.get("Range"):
         logger.warning(
-            "Alexa sent %s for a Music Assistant track; that source cannot "
-            "answer a range and will serve from the beginning", rng,
+            "Alexa sent %s for an unbuffered Music Assistant track; that "
+            "source cannot answer a range and will serve from the beginning",
+            rng,
         )
     return _proxy(f"{MA_STREAM_BASE}{stream_ref.stream_path(ref)}", "audio/mpeg")
 

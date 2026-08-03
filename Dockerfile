@@ -6,7 +6,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py subsonic.py oauth.py queuestate.py signature.py queue_api.py \
-     handoff.py mdns.py smapi_rest.py catalog_sync.py logring.py ./
+     handoff.py mdns.py smapi_rest.py catalog_sync.py logring.py \
+     mastream_cache.py ./
 COPY setup_ui/ setup_ui/
 
 # The bridge and the Music Assistant provider both have to know how an MA item

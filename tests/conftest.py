@@ -19,6 +19,10 @@ os.environ.setdefault("SIGNING_KEY", "test-signing-key-not-a-real-secret")
 os.environ.setdefault("ADMIN_TOKEN", "test-admin-token")
 os.environ.setdefault("PUBLIC_BASE", "https://example.test")
 os.environ.setdefault("QUEUE_STATE_DIR", os.path.join(_TMP, "queuestate"))
+os.environ.setdefault("MA_CACHE_DIR", os.path.join(_TMP, "mastream"))
+# Off by default, so publishing a queue in a test does not try to reach a Music
+# Assistant that is not there. The cache's own suite turns it back on.
+os.environ.setdefault("MA_CACHE_PREFETCH", "0")
 os.environ.setdefault("SUBSONIC_USER", "tester")
 os.environ.setdefault("SUBSONIC_PASSWORD", "not-a-real-password")
 os.environ.setdefault("OAUTH_CLIENT_ID", "ma-alexa")

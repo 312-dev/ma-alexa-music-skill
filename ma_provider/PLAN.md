@@ -98,9 +98,9 @@ Testing it is not cheap. Upstream's companion API has never been deployed on
 this box, so that provider has never played audio here. Settling the question
 means standing up the prototype service and creating a custom skill.
 
-**"Subsonic-only is a hard limit of what the bridge can serve."** In
-`ma_provider/README.md`. True of the current code, false of the architecture.
-The proxy is generic; the coupling is one line.
+**"Subsonic-only is a hard limit of what the bridge can serve."** Settled and
+false, as expected: phases 2 and 3 removed it. Deezer tracks with no Subsonic
+id play, seek and report metadata.
 
 **A stub catalog was considered and rejected.** The idea was to drop
 `catalog_sync.py` and upload a single placeholder entity, since the handoff
@@ -118,7 +118,9 @@ Working today, on the deployed instance:
 - Every Echo registered, plus `Whole Apartment` as `type=group`
 - Bridge reachable from the MA container
 
-Not yet done: **nobody has played a track through it.** That is phase 1.
+Phases 1 to 3 are done. Any track Music Assistant can play now reaches an
+Echo, whatever provider it comes from, with metadata, artwork, skipping,
+seeking and multi-room. Phase 4 (live radio streams) is the next one open.
 
 ## Target architecture
 
@@ -156,14 +158,14 @@ The grouping is reasoned from how those services deliver audio, not measured.
 
 ## Phases
 
-| Phase | Delivers | Size | Risk |
-|---|---|---|---|
-| 1. Play one track | Confirms the premise | none | none |
-| 2. MA as source, unbuffered | Group B plays, degraded | 200-400 lines | low |
-| 3. Buffering cache | Group B at parity with Navidrome | 400-800 lines, new subsystem | **high** |
-| 4. Live streams | Group C | 100-200 lines | low |
-| 5. Fold bridge into MA | One deployable | 3,195-line Flask to aiohttp port | medium, broad |
-| 6. Upstream merge | Ships to everyone | negotiation | outside our control |
+| Phase | Delivers | Size | Risk | Status |
+|---|---|---|---|---|
+| 1. Play one track | Confirms the premise | none | none | **done** 2026-08-02 |
+| 2. MA as source, unbuffered | Group B plays, degraded | 200-400 lines | low | **done** 2026-08-03 |
+| 3. Buffering cache | Group B at parity with Navidrome | 400-800 lines, new subsystem | **high** | **done** 2026-08-03 |
+| 4. Live streams | Group C | 100-200 lines | low | open |
+| 5. Fold bridge into MA | One deployable | 3,195-line Flask to aiohttp port | medium, broad | open |
+| 6. Upstream merge | Ships to everyone | negotiation | outside our control | open |
 
 ### Phase 1: play one track
 
@@ -171,39 +173,66 @@ No new code. Queue Navidrome tracks in MA, send to a single Echo under the
 Ampere provider, then to `Whole Apartment`. Confirms the handoff, the queue
 publish, the stream proxy and group distribution in one shot.
 
-### Phase 2: MA as source, unbuffered
+### Phase 2: MA as source, unbuffered — done 2026-08-03
 
-Publish MA item references instead of, or alongside, Subsonic ids. Branch
-`stream()` on which kind of id it holds. Resolve to an MA stream URL **at fetch
-time**, never at publish time, matching how `subsonic.stream_url(song_id)` is
-already called lazily.
+Shipped as `ma_provider/stream_route.py` plus the `ext:` queue carrying track
+objects as well as Subsonic ids. It answered its three questions, and none of
+the answers were what the phase was braced for.
 
-Deliberately ships degraded: no seek, and vulnerable to MA's session scoping.
-Its real purpose is to answer empirically what phase 3 must handle. Treat it as
-a timeboxed spike whose code may be thrown away.
+**Does Alexa tolerate a `200`-only, `Content-Length`-less source?** Yes,
+completely. A chunked response with `Accept-Ranges: none` played on an Echo
+with correct per-track metadata, advanced across track boundaries, and skipped.
+A 14-track Deezer album played start to finish this way.
 
-Questions it should answer:
+**How often does it send `Range`?** Never, on a first fetch. Zero range
+requests across four stream fetches. Ranges come from the two things phase 3
+addresses, scrubbing and moving audio between rooms, and from nothing else.
 
-- Does Alexa tolerate a `200`-only, `Content-Length`-less source at all?
-- How often does it actually send `Range` in practice?
-- Does an MA queue session survive a full Alexa queue?
+**Does an MA queue session survive a full Alexa queue?** The question turned
+out not to apply. It assumed the reference would be one of MA's own
+session-scoped stream URLs. Keying the route on the item's **uri** instead
+removes sessions from the problem entirely: every track resolves independently
+at fetch time, so track twelve resolves as well an hour later as track one did
+at the start. The estimate-breaking unknown named under phase 3 was answered by
+the shape of phase 2 rather than by any code in phase 3.
 
-### Phase 3: buffering cache
+The one thing that carried over as a real limit: with no length and no ranges,
+seeking had to be withdrawn and a room-to-room move restarted the track.
 
-The real work, and the piece most likely to overrun.
+### Phase 3: buffering cache — done 2026-08-03
 
-- Pull each track from MA once, buffer to a complete seekable object
-- Serve it with `Content-Length`, `Accept-Ranges` and correct `206` responses
-- Pre-fetch far enough ahead that Alexa never waits
-- Evict on a size or age bound
-- Survive MA's queue session rolling underneath a live Alexa queue
+Shipped as `mastream_cache.py`. Much smaller than estimated, because the design
+that survived is the simple one.
 
-That last point is the estimate-breaking unknown. Alexa owns its queue for
-hours and may fetch track 12 long after track 1. Eager buffering solves it but
-does not scale: a 50-track queue would mean 50 transcodes up front. So this
-needs lazy buffering plus either keeping MA's session alive for the life of the
-Alexa queue, or re-resolving items when the session changes. Neither has been
-prototyped.
+The plan called for lazy buffering with a partial-object server and prefetch
+depth tuning, and rated it the highest-risk phase. One measurement collapsed
+it: **Music Assistant produces a complete track in about 4.5 seconds**, first
+byte in 0.1.
+
+```
+bytes=9058264  total=4.726s  firstbyte=0.206s
+bytes=8503423  total=4.376s  firstbyte=0.101s
+```
+
+At that speed there is no reason to serve a partial object at all. Buffer the
+whole track to disk, then hand Alexa an ordinary file that answers ranges
+exactly. Everything intricate in the original plan existed to avoid a wait that
+is a few seconds, and is usually zero because publishing runs ahead of the
+utterance and prefetching starts there.
+
+Measured over the public path once buffered:
+
+```
+HTTP/2 200   accept-ranges: bytes   content-length: 12815717
+HTTP/2 206   content-range: bytes 5000000-12815716/12815717
+```
+
+Which is what Navidrome has always done, and is why Subsonic tracks always
+behaved. A Deezer track now seeks: sought to 120s, read back 140s twenty
+seconds later.
+
+Still open from the original phase 3 list: nothing. Eviction is by size and
+age, prefetch is bounded, and the session question dissolved in phase 2.
 
 ### Phase 4: live streams
 

@@ -328,3 +328,86 @@ when you are looking at the streaming code:
    re-requests a URL minted when the track began. Ampere signs for 12 hours.
 
 Ampere pins all three in `tests/test_security.py` for that reason.
+
+## Serving Music Assistant's own sources
+
+### Alexa plays a stream with no length and no ranges
+
+Music Assistant serves realtime audio: always `200`, no `Content-Length`, no
+`Accept-Ranges`, chunked transfer encoding. The expectation was that Alexa
+would refuse it, or stall, or behave strangely at track boundaries.
+
+It does none of that. A 14-track Deezer album played start to finish through a
+chunked, length-less stream, with correct per-track metadata and working skip.
+Alexa sent **zero** range requests across four stream fetches.
+
+Ranges come from exactly two things: scrubbing the progress bar, and moving
+audio between rooms. Neither happens on a first fetch, which is why a source
+that cannot answer one looks perfect right up until someone touches it.
+
+### A stream reference must not be a stream URL
+
+MA's own per-track stream URL is scoped to a queue session:
+
+```
+/single/{session_id}/{queue_id}/{queue_item_id}/{player_id}.{fmt}
+```
+
+Alexa is handed the whole track list at `Initiate` and may fetch track twelve
+an hour later, long after MA has rolled that session. Keying on the item's
+**uri** instead removes sessions from the problem: every track resolves
+independently at fetch time and stays resolvable for as long as it exists.
+
+This dissolved what had been written down as the estimate-breaking unknown of
+the buffering work. It was not solved by the cache; it was solved by choosing a
+different name for a track one phase earlier.
+
+### The route is on port 8097, not 8095
+
+Music Assistant runs two webservers: the API and frontend on 8095, and a
+separate streams server on 8097. `mass.streams.register_dynamic_route`
+registers against the second. Asking 8095 for that path returns a bare `404`
+with an empty body, which reads exactly like a route that was never registered
+at all.
+
+### Buffer the whole track, because it takes about five seconds
+
+The obvious design for serving a non-seekable source seekably is intricate:
+serve ranges out of a growing file, or force a constant bitrate so byte offsets
+map to time. Both exist to avoid waiting for a complete object.
+
+One measurement removed the need for either. Music Assistant produces a
+complete track in about 4.5 seconds, first byte in 0.1:
+
+```
+bytes=9058264  total=4.726s  firstbyte=0.206s
+bytes=8503423  total=4.376s  firstbyte=0.101s
+```
+
+So the whole track is buffered to disk and then served as an ordinary file,
+which answers ranges exactly and needs no cleverness at all. The wait is
+usually zero anyway: a queue is published a second or two before the utterance
+and several before the first audio fetch, and prefetching starts at publish.
+
+:::tip[Measure before designing around a cost]
+The buffering work was rated the highest-risk phase of the plan and estimated
+at 400 to 800 lines with a new subsystem. It came in far smaller, because every
+complicated part of the design existed to avoid a five-second wait that nobody
+had timed.
+:::
+
+### mediaProgress and mediaLength are seconds
+
+`/api/np/player` returns both in **seconds**, despite names that read like
+milliseconds:
+
+```
+{'mediaLength': 226, 'mediaProgress': 11, 'allowScrubbing': False}
+{'mediaLength': 226, 'mediaProgress': 21, ...}   # ten seconds later
+```
+
+Dividing them by 1000 made the reported position advance at a thousandth of
+real time, and made the duration round to zero. The zero was invisible, because
+the code carries a field forward when a poll omits it, so Music Assistant's own
+duration silently stood in for Alexa's. Two tests asserted the wrong value
+against the wrong input and passed, because both halves were wrong together.

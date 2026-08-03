@@ -70,6 +70,27 @@ restart of the process but not a reload of the module.
 past the last track of the requested content. Stations ignore the setting and
 always continue.
 
+## Music Assistant sources
+
+Only relevant when the Music Assistant provider is publishing queues that
+contain tracks with no Subsonic id, such as Spotify, Tidal or Deezer. Those are
+fetched back out of Music Assistant and buffered here so they behave like any
+other file: a real length, real byte ranges, and therefore scrubbing and
+room-to-room moves.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MA_STREAM_BASE` | `http://127.0.0.1:8097` | Where Music Assistant's **streams** server answers. Not the API port (8095): a provider's dynamic route is registered against the streams server, and 8095 answers that path with an empty `404` that looks exactly like a route that does not exist. Deliberately configuration rather than something the published queue carries, so publishing cannot point the proxy at another host. |
+| `MA_STREAM_CACHE` | `1` | Set to `0` to serve these tracks straight through from Music Assistant instead of buffering them. They still play, but they lose seeking and a room-to-room move restarts the track, so the seek control is not offered. |
+| `MA_CACHE_DIR` | `/data/mastream` | Where buffered tracks are written. |
+| `MA_CACHE_MAX_BYTES` | `1073741824` | Size bound, about a hundred tracks. Least recently played goes first. |
+| `MA_CACHE_TTL` | `86400` | A buffered track older than this is dropped on the next sweep. |
+| `MA_CACHE_PREFETCH` | `2` | How many tracks ahead to buffer. Publishing runs ahead of the utterance, so the head of a queue is usually ready before anything asks for it. |
+| `MA_CACHE_WAIT` | `45` | How long a request waits for a track that is still being fetched, before falling back to the unbuffered stream. A whole track takes about five seconds. |
+
+Losing the buffer costs seeking, never playback: a failed or disabled fetch
+falls back to streaming from Music Assistant rather than failing the request.
+
 ## Subsonic
 
 | Variable | Default | Purpose |

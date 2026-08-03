@@ -44,6 +44,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 
 import handoff
+import mastream_cache
 import subsonic
 from ma_provider import stream_ref
 
@@ -369,6 +370,15 @@ def publish(tracks: list, name: str = "", start_offset_ms: int = 0) -> dict:
     }
     _write(record)
     _evict()
+
+    # The first tracks start buffering now, before Alexa has been told
+    # anything. Publishing runs a second or two ahead of the utterance and
+    # several ahead of the first audio fetch, and a track takes about five
+    # seconds to buffer, so the head of a queue is usually ready before
+    # anything asks for it. This is the one point in the flow where nothing
+    # has asked yet; from the first Item onwards the read-ahead in item_at
+    # takes over.
+    mastream_cache.prefetch([s["ma_ref"] for s in songs if s.get("ma_ref")])
     return record
 
 

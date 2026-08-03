@@ -68,14 +68,26 @@ def test_a_stream_signature_does_not_work_on_the_music_assistant_route(app):
 # --- the controls that cannot work on this source ---------------------------
 
 
-def test_seeking_is_not_offered_on_a_music_assistant_track(app):
-    """MA serves realtime audio: no length, no ranges, so no scrubbing.
+def _seek_enabled(app, song, index=0, total=3):
+    controls = {c["name"]: c for c in app.build_item(song, index, total)["controls"]}
+    return controls["SEEK_POSITION"]["enabled"]
+
+
+def test_seeking_is_offered_on_a_buffered_music_assistant_track(app):
+    """Phase 3. The buffer makes the ranged GET behind a scrub answerable."""
+    assert _seek_enabled(app, ma_song()) is True
+
+
+def test_seeking_is_not_offered_when_the_buffer_is_off(app, monkeypatch):
+    """MA's own audio is realtime: no length, no ranges, so no scrubbing.
 
     A control that is declared and then misbehaves is worse than one that is
     greyed out, and a scrub that cannot be answered restarts the track.
     """
-    controls = {c["name"]: c for c in app.build_item(ma_song(), 0, 3)["controls"]}
-    assert controls["SEEK_POSITION"]["enabled"] is False
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "ENABLED", False)
+    assert _seek_enabled(app, ma_song()) is False
 
 
 def test_seeking_is_still_offered_on_a_subsonic_track(app):
@@ -143,9 +155,12 @@ def test_the_route_refuses_a_reference_that_is_not_a_music_assistant_uri(client,
     assert client.get(f"/mastream/{evil}/{expires}/{sig}").status_code == 400
 
 
-def test_the_route_fetches_music_assistant_and_nowhere_else(client, app):
+def test_the_route_fetches_music_assistant_and_nowhere_else(client, app, monkeypatch):
     """The reference names an item; the host is the bridge's own config."""
-    url, expires = app.signed_url("mastream", REF)
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "ENABLED", False)
+    _url, expires = app.signed_url("mastream", REF)
     sig = app.sign("mastream", REF, expires)
 
     with mock.patch.object(app_module, "_proxy") as proxy:
@@ -171,3 +186,66 @@ def test_a_published_music_assistant_queue_survives_the_whole_path(app, tmp_path
 
     assert item["metadata"]["name"]["speech"]["text"] == "Dancing On My Own"
     assert f"/mastream/{REF}/" in item["stream"]["uri"]
+
+
+# --- what the buffer buys: real range support -------------------------------
+
+
+@pytest.fixture
+def buffered(monkeypatch, tmp_path):
+    """A cache holding one complete track, without touching the network."""
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "CACHE_DIR", tmp_path / "mastream")
+    monkeypatch.setattr(mastream_cache, "ENABLED", True)
+    mastream_cache.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = mastream_cache.path_for(REF)
+    path.write_bytes(b"ID3" + bytes(range(256)) * 40)
+    return path
+
+
+def _signed(app):
+    _url, expires = app.signed_url("mastream", REF)
+    return expires, app.sign("mastream", REF, expires)
+
+
+def test_a_buffered_track_is_served_with_a_length_and_accepts_ranges(
+    client, app, buffered
+):
+    """Exactly what Music Assistant's own stream cannot do."""
+    expires, sig = _signed(app)
+    resp = client.get(f"/mastream/{REF}/{expires}/{sig}")
+
+    assert resp.status_code == 200
+    assert resp.headers["Accept-Ranges"] == "bytes"
+    assert int(resp.headers["Content-Length"]) == buffered.stat().st_size
+
+
+def test_a_range_is_answered_with_a_206_and_the_right_bytes(client, app, buffered):
+    """The case that breaks unbuffered playback.
+
+    Moving audio between rooms sends no directive at all: Amazon re-pulls the
+    same URL with a Range header. Answering that with a 200 from byte zero is
+    what restarted the track in the new room.
+    """
+    expires, sig = _signed(app)
+    whole = buffered.read_bytes()
+    resp = client.get(
+        f"/mastream/{REF}/{expires}/{sig}", headers={"Range": "bytes=1000-1099"}
+    )
+
+    assert resp.status_code == 206
+    assert resp.data == whole[1000:1100]
+    assert resp.headers["Content-Range"] == f"bytes 1000-1099/{len(whole)}"
+
+
+def test_an_open_ended_range_runs_to_the_end(client, app, buffered):
+    """`Range: bytes=N-` is the shape Alexa actually sends."""
+    expires, sig = _signed(app)
+    whole = buffered.read_bytes()
+    resp = client.get(
+        f"/mastream/{REF}/{expires}/{sig}", headers={"Range": "bytes=5000-"}
+    )
+
+    assert resp.status_code == 206
+    assert resp.data == whole[5000:]

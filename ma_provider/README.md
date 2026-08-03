@@ -27,15 +27,29 @@ The bridge, reachable over HTTPS from the MA container, with:
 - `ADMIN_TOKEN` set,
 - `queue_api.bp` registered and the `ext:` branch wired into `resolve_tracks`.
 
-Every track you want to play must exist on the Subsonic server the bridge
-streams from. A Spotify or Tidal item sitting in the MA queue has no id the
-bridge can resolve and is dropped from the published list, with a warning in
-MA's log.
+## Where the audio comes from
 
-This is a limit of the current implementation rather than of the design. The
-bridge's proxy takes any URL; only the id resolution assumes Subsonic. Serving
-MA's own sources is planned, and the work it needs is set out in
-[PLAN.md](PLAN.md).
+Two sources, chosen per track, and the choice is not visible to Alexa.
+
+A track that exists on the Subsonic server is streamed from there, exactly as
+it always was. Everything else, a Spotify or Tidal or Deezer track that has no
+Subsonic id at all, is served back out of Music Assistant through a route the
+provider registers on MA's streams server (`stream_route.py`), buffered to disk
+by the bridge, and handed to Alexa as an ordinary seekable file.
+
+Subsonic wins whenever a track has both. Not for quality: for cost. Navidrome
+serves a finite file the bridge can proxy straight through, while an MA track
+has to be copied to disk first before it answers a byte range. Both end up
+seekable; only one of them spends disk to get there.
+
+The reference that travels with a published queue is the item's **MA uri** and
+nothing else. Not a stream URL, which MA scopes to a queue session that will
+have rolled over long before Alexa asks for track twelve; not a queue item id,
+which dies with the queue. A uri resolves to audio on its own, for as long as
+the track exists.
+
+Set **Play tracks that are not on the Subsonic server** to off to go back to
+skipping them.
 
 ## Deployment: bind-mount
 
@@ -294,6 +308,23 @@ run of otherwise correct ones.
 
 Only the first item carries the offset. A `GetNextItem` that inherited it would
 drop the same interval off every remaining track.
+
+### Position and length are seconds, whatever the names say
+
+`/api/np/player` returns `mediaProgress` and `mediaLength`, and both are in
+**seconds**. Measured 2026-08-03 against a live Echo:
+
+```
+{'mediaLength': 226, 'mediaProgress': 11, 'allowScrubbing': False}
+{'mediaLength': 226, 'mediaProgress': 21, ...}   # ten seconds later
+```
+
+They were divided by 1000 here for months, on the belief that the
+millisecond-shaped names meant milliseconds. That made the position advance at
+a thousandth of real time, which is the whole of "the scrubber never moves",
+and it made Alexa's duration round to zero, which nothing noticed because the
+carry-forward quietly kept MA's own duration in its place. Two tests encoded
+the same assumption and passed, because both halves were wrong together.
 
 ## Known wart: once Alexa is playing, Alexa owns the position
 

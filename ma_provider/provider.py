@@ -879,11 +879,12 @@ class AmpereAlexaProvider(PlayerProvider):
             Assistant through the route in `stream_route.py`
 
         **Subsonic wins whenever it is available**, and that is a deliberate
-        preference rather than an ordering accident. Navidrome serves a finite
-        file with `Accept-Ranges`, so those tracks seek, and survive being moved
-        between rooms, and report a duration. Music Assistant serves realtime
-        audio that does none of that. Routing a track through MA when Subsonic
-        already has it would trade working features for nothing.
+        preference rather than an ordering accident. Navidrome serves the audio
+        as a finite file the bridge can proxy straight through; a Music
+        Assistant track has to be buffered to disk first before it behaves the
+        same way. Both end up seekable, but only one of them costs a copy, so
+        routing a track through MA when Subsonic already has it would buy
+        nothing and spend disk.
 
         The second return value is title -> queue_item_id, used later to guess
         which MA item a polled Alexa title corresponds to. Alexa reports what
@@ -911,8 +912,8 @@ class AmpereAlexaProvider(PlayerProvider):
 
         if from_ma:
             self.logger.info(
-                "%s of %s tracks are not on the Subsonic server and will stream "
-                "from Music Assistant (no seeking on those)",
+                "%s of %s tracks are not on the Subsonic server and will be "
+                "served from Music Assistant instead",
                 from_ma, len(items),
             )
         if skipped:
