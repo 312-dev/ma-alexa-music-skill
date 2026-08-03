@@ -47,6 +47,15 @@ CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
 CONF_LINK_SECRET = "link_secret"
 
+# Live updates. The status entry holds no value and exists to render a
+# sentence; the action is a button. Neither is a setting in the usual sense,
+# which is why they are grouped under a category of their own rather than
+# scattered among the credentials they sit next to.
+CONF_PUSH_ENABLED = "push_enabled"
+CONF_PUSH_STATUS = "push_status"
+ACTION_PUSH_SIGN_IN = "push_sign_in"
+PUSH_CATEGORY = "Live updates"
+
 
 
 def _settings_entries() -> tuple[ConfigEntry, ...]:
@@ -237,8 +246,81 @@ def _settings_entries() -> tuple[ConfigEntry, ...]:
             ),
             required=False,
         ),
+        *_push_entries(),
         *_generated_entries(),
     )
+
+
+# --------------------------------------------------------------------------
+# live updates
+# --------------------------------------------------------------------------
+#
+# Amazon can push device state instead of being asked for it on a timer, and
+# the difference is worth a settings group of its own: measured against
+# Amazon's own event clock, a push arrives within a tenth of a second of Amazon
+# knowing, where a poll adds up to its whole interval on top.
+#
+# It needs a bearer token, which the ordinary credential fields above cannot
+# produce. Hence a button rather than a field: there is nothing here for anyone
+# to type.
+
+
+def _push_entries() -> tuple[ConfigEntry, ...]:
+    """The live-updates group: a switch, a status line and a sign-in button."""
+    return (
+        ConfigEntry(
+            key=CONF_PUSH_ENABLED,
+            type=ConfigEntryType.BOOLEAN,
+            label="Live updates",
+            default_value=True,
+            category=PUSH_CATEGORY,
+            description=(
+                "Let Amazon report volume, playback and track position the "
+                "moment they change, instead of asking every few seconds. "
+                "Polling continues either way, more slowly, so nothing is "
+                "lost if the connection drops."
+            ),
+            required=False,
+        ),
+        ConfigEntry(
+            key=CONF_PUSH_STATUS,
+            type=ConfigEntryType.LABEL,
+            label=push_status_text(),
+            category=PUSH_CATEGORY,
+            required=False,
+        ),
+        ConfigEntry(
+            key=ACTION_PUSH_SIGN_IN,
+            type=ConfigEntryType.ACTION,
+            label="Connect Amazon for live updates",
+            action=ACTION_PUSH_SIGN_IN,
+            category=PUSH_CATEGORY,
+            description=(
+                "Opens Amazon's own sign-in page so a captcha or a two-factor "
+                "prompt can be answered. This is a separate authorization from "
+                "the developer account used to create the skill, because "
+                "Amazon issues them from different places: this one is the "
+                "account your Echo devices are registered to."
+            ),
+            required=False,
+        ),
+    )
+
+
+# Rewritten by the provider as the connection state changes, so the label above
+# is rendered fresh on every settings load without this module needing to know
+# anything about Music Assistant. A module level string is enough: there is one
+# provider instance per Amazon account and the status is about the account.
+_PUSH_STATUS = "Not connected. Live updates are off until you connect."
+
+
+def set_push_status(text: str) -> None:
+    global _PUSH_STATUS
+    _PUSH_STATUS = text
+
+
+def push_status_text() -> str:
+    return _PUSH_STATUS
 
 
 # The values this provider generates for itself. Declared, and hidden.

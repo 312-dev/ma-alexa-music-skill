@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import contextlib
 import logging
 import os
 import pathlib
@@ -51,7 +52,8 @@ from music_assistant_models.player import DeviceInfo, PlayerMedia
 from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
-from . import core
+from . import alexapy_compat, core
+from . import push, push_auth, push_events, push_router, push_signin, settings
 from . import setup_ops
 from .bridge import BridgeClient, BridgeError, LocalBridge
 from .stream_ref import encode_ref, is_live
@@ -78,6 +80,7 @@ from .settings import (  # noqa: E402
     CONF_OTP_SECRET, CONF_PASSWORD, CONF_PUBLIC_BASE, CONF_SERVE_ENDPOINT,
     CONF_SIGNING_KEY, CONF_SUBSONIC_PASSWORD, CONF_SUBSONIC_URL,
     CONF_SUBSONIC_USER, CONF_USERNAME, GENERATED, _settings_entries,
+    ACTION_PUSH_SIGN_IN, CONF_PUSH_ENABLED,
 )
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
@@ -117,6 +120,19 @@ PLAYER_FEATURES: set[PlayerFeature] = {
 # enough to notice a track change without turning the Amazon API into a
 # heartbeat.
 POLL_INTERVAL = 10
+
+# What the poll slows to once the push stream is delivering. Polling is never
+# switched off, only slowed: push says what changed and cannot say what was
+# missed while disconnected, so this is the floor that repairs state after any
+# gap, and the interval to poll immediately at when a stream reopens.
+#
+# Two values because the pinned alexapy cannot notice a stream that stops
+# delivering without closing. Where it can (1.30.0's read_timeout), a stall is
+# detected within five minutes and the poll can afford to be lazy. Where it
+# cannot, an undetected stall degrades silently to exactly this interval, so it
+# is kept to something a person would find merely slow rather than broken.
+PUSH_POLL_INTERVAL_SUPERVISED = 60
+PUSH_POLL_INTERVAL_UNSUPERVISED = 30
 
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
@@ -194,7 +210,12 @@ async def get_config_entries(
     visible in the step it belongs to by the time the page comes back.
     """
     values = values or {}
-    if action == wizard.ACTION_UPLOAD:
+    if action == ACTION_PUSH_SIGN_IN:
+        # Not handed to the wizard runner like the others. That runs in a
+        # worker thread and takes no `mass`, and this needs both an event loop
+        # and MA's webserver to put Amazon's login pages in front of a person.
+        await _run_push_sign_in(mass, instance_id, values)
+    elif action == wizard.ACTION_UPLOAD:
         # The one action that is not answered here. A library crawl is minutes
         # of work, so it is handed to MA's task controller and the button
         # returns at once with somewhere to watch it.
@@ -211,6 +232,59 @@ async def get_config_entries(
         )
 
     return (*_settings_entries(), *await asyncio.to_thread(wizard.entries))
+
+
+async def _run_push_sign_in(
+    mass: MusicAssistant,
+    instance_id: str | None,
+    values: dict[str, ConfigValueType],
+) -> None:
+    """Sign in to Amazon and keep the token live updates need.
+
+    Reads credentials from the form values rather than from saved config, so
+    this works during first setup, before anything has been stored, which is
+    exactly when an operator is most likely to press it.
+
+    On success the running provider is told, so live updates come up without a
+    restart. During first setup there is no running provider yet and the token
+    on disk is picked up the next time it loads, which is moments later.
+    """
+    logger = logging.getLogger(__name__)
+    storage = pathlib.Path(mass.storage_path)
+    email = str(values.get(CONF_USERNAME) or "")
+    if not email:
+        settings.set_push_status(
+            "Fill in the Amazon account email and password first, then "
+            "connect.")
+        return
+
+    auth = push_auth.PushAuth(
+        store_path=str(storage / "ampere" / "push-auth.json"),
+        url=str(values.get(CONF_AMAZON_URL) or "amazon.com"),
+        email=email,
+        logger=logger,
+    )
+    state = await push_signin.sign_in(
+        mass, auth,
+        session_id=str(values.get("session_id") or ""),
+        url=str(values.get(CONF_AMAZON_URL) or "amazon.com"),
+        email=email,
+        password=str(values.get(CONF_PASSWORD) or ""),
+        otp_secret=str(values.get(CONF_OTP_SECRET) or ""),
+        cookie_path=alexapy_compat.cookie_path(str(storage), email),
+        logger=logger,
+    )
+    settings.set_push_status(state.detail)
+    if not state.ok or instance_id is None:
+        return
+
+    provider = mass.get_provider(instance_id)
+    if isinstance(provider, AmpereAlexaProvider):
+        with contextlib.suppress(Exception):
+            await provider.push_stream.stop()
+        provider.push_auth = auth
+        provider.push_stream.auth = auth
+        await provider.push_stream.start()
 
 
 class AlexaDevice:
@@ -447,8 +521,13 @@ class AmperePlayer(Player):
         name = media.title or (items[0].name if items else "") or label
 
         offset_ms = self._seek_offset_ms(media)
-        await self._timed("publish", provider.bridge.publish_queue(
+        content_id = await self._timed("publish", provider.bridge.publish_queue(
             tracks, name, offset_ms))
+
+        # The one moment this association is known for certain. Alexa echoes
+        # this id back on every now-playing event for the session, and those
+        # events name no device at all, so without this they cannot be placed.
+        provider.router.note_publish(self.player_id, str(content_id or ""))
 
         # The published queue is claimed by phrase, not by id. There is no
         # utterance that names an arbitrary track list, so the bridge maps one
@@ -677,6 +756,101 @@ class AmperePlayer(Player):
         # user action turning into one volume change belongs. All this does is
         # keep the slider honest about what was asked for while that plays out.
         self._attr_volume_level = self._volume_wanted
+
+    # -- push ----------------------------------------------------------------
+
+    def apply_push(self, event: push_events.PushEvent) -> None:
+        """Act on one directive Amazon sent about this player.
+
+        Synchronous, and called from the stream's reader. Everything here is
+        assignment to attributes MA already reads, so there is nothing to await
+        and nothing that should be allowed to block a socket.
+
+        Deliberately narrow. Volume, playback state and position are the three
+        things that lag visibly at a ten second poll, and they are the three
+        things a directive states unambiguously. Track *identity* is left to
+        the poll: the now-playing payload does carry a title, but adopting it
+        here would mean two independent paths racing to set current_media, and
+        the poll's version is the one that has been matched against the MA
+        queue.
+        """
+        if event.command == push_events.VOLUME_CHANGE:
+            self._push_volume(event)
+        elif event.command == push_events.AUDIO_PLAYER_STATE:
+            self._push_player_state(event)
+        elif event.command == push_events.NOW_PLAYING:
+            self._push_now_playing(event)
+        else:
+            return
+        self.update_state()
+
+    def _push_volume(self, event: push_events.PushEvent) -> None:
+        volume = event.payload.get("volumeSetting")
+        if isinstance(volume, int):
+            # Through the same reconciliation the poll uses, not around it. A
+            # push is faster but it is not more authoritative than a volume
+            # this process asked for two seconds ago and is still defending;
+            # bypassing that would reintroduce the snap-back it exists to stop.
+            self._reconcile_volume(volume)
+        muted = event.payload.get("isMuted")
+        if isinstance(muted, bool):
+            self._attr_volume_muted = muted
+
+    def _push_player_state(self, event: push_events.PushEvent) -> None:
+        state = str(event.payload.get("audioPlayerState") or "")
+        if state == "PLAYING":
+            self._attr_playback_state = PlaybackState.PLAYING
+        elif state in ("INTERRUPTED", "PAUSED"):
+            self._attr_playback_state = PlaybackState.PAUSED
+        elif state in ("FINISHED", "IDLE", "STOPPED"):
+            self._attr_playback_state = PlaybackState.IDLE
+
+    def _push_now_playing(self, event: push_events.PushEvent) -> None:
+        """The event that carries the position, which is the point of all this.
+
+        **The units here are milliseconds and the polled API's are seconds.**
+        Both were measured on 2026-08-03: the poll answered
+        `{'mediaLength': 226, 'mediaProgress': 11}` for a 226 second track,
+        and a push for an 811 second track read `{'mediaLength': 811000,
+        'mediaProgress': 638}`. Feeding one into the other's units is not a
+        subtle bug -- it is the "scrubber never moves" fault that was already
+        found and fixed once in `_apply_state`, running a thousand times the
+        other way.
+        """
+        data = event.now_playing
+        state = str(data.get("playerState") or "")
+        if state == "PLAYING":
+            self._attr_playback_state = PlaybackState.PLAYING
+        elif state == "PAUSED":
+            self._attr_playback_state = PlaybackState.PAUSED
+
+        progress = data.get("progress")
+        if not isinstance(progress, dict):
+            return
+        elapsed = progress.get("mediaProgress")
+        if isinstance(elapsed, (int, float)):
+            self._attr_elapsed_time = float(elapsed) / 1000.0
+            # Amazon's clock, not ours, when it gave one. MA extrapolates the
+            # position from this timestamp, so using local time would add the
+            # delivery delay to every reading.
+            self._attr_elapsed_time_last_updated = event.at or time.time()
+
+    def use_push_poll_interval(self, slow: bool) -> None:
+        """Slow the poll while push is delivering, restore it when it is not.
+
+        Reversible on purpose and driven by the stream's own health rather than
+        by configuration. The failure this guards against is a stream that is
+        connected and silent: if that is ever mistaken for a healthy one, the
+        only cost is this interval instead of ten seconds.
+        """
+        if slow:
+            self._attr_poll_interval = (
+                PUSH_POLL_INTERVAL_SUPERVISED
+                if alexapy_compat.supports_read_timeout()
+                else PUSH_POLL_INTERVAL_UNSUPERVISED
+            )
+        else:
+            self._attr_poll_interval = POLL_INTERVAL
 
     # -- state ---------------------------------------------------------------
 
@@ -1013,6 +1187,25 @@ class AmpereAlexaProvider(PlayerProvider):
         self.tasks.register_sync()
         self.tasks.register_binding_keepalive()
 
+        # Live updates. Built here and started in loaded_in_mass, so a stream
+        # that cannot connect delays nothing: the provider is fully functional
+        # without it and merely slower to notice things.
+        self.router = push_router.PushRouter()
+        self.push_auth = push_auth.PushAuth(
+            store_path=str(
+                pathlib.Path(self.mass.storage_path) / "ampere" / "push-auth.json"
+            ),
+            url=str(self.config.get_value(CONF_AMAZON_URL) or "amazon.com"),
+            email=str(self.config.get_value(CONF_USERNAME) or ""),
+            logger=self.logger,
+        )
+        self.push_stream = push.PushStream(
+            auth=self.push_auth,
+            on_event=self._on_push_event,
+            logger=self.logger,
+            on_health=self._on_push_health,
+        )
+
     async def unload(self, is_removed: bool = False) -> None:
         """Take the audio route and the endpoint down with the provider.
 
@@ -1020,6 +1213,11 @@ class AmpereAlexaProvider(PlayerProvider):
         port would make the new one fail to bind, and the failure would look
         like a broken skill rather than a stale socket.
         """
+        # First, because it holds a socket and a reconnect loop. A stream left
+        # supervising a provider that is going away would keep rebuilding
+        # itself and delivering events to players that no longer exist.
+        with contextlib.suppress(Exception):
+            await self.push_stream.stop()
         self.stream_route.unregister()
         # Before the pool it runs on goes away with the webserver, and before
         # anything else: its handler is bound to this instance, so a scheduled
@@ -1032,6 +1230,69 @@ class AmpereAlexaProvider(PlayerProvider):
     async def loaded_in_mass(self) -> None:
         await self._login()
         await self.discover_players()
+        await self._start_push()
+
+    async def _start_push(self) -> None:
+        """Bring up live updates if they are switched on and authorised.
+
+        Every failure path here is a log line and a status string, never a
+        raise. This runs after discovery precisely so that a broken push
+        connection cannot cost the operator their players.
+        """
+        if not self.config.get_value(CONF_PUSH_ENABLED, True):
+            settings.set_push_status("Live updates are switched off.")
+            return
+        if not await self.push_auth.restore():
+            settings.set_push_status(self.push_auth.state.detail)
+            self.logger.info(
+                "live updates are not connected: %s", self.push_auth.state.detail)
+            return
+        settings.set_push_status("Connecting...")
+        await self.push_stream.start()
+
+    def _on_push_event(self, event: push_events.PushEvent) -> None:
+        """One directive, placed on a player and applied.
+
+        Events for devices this provider does not expose arrive here too --
+        Amazon streams the whole account, including sessions belonging to other
+        music providers entirely -- so an event that cannot be placed is
+        dropped rather than guessed at.
+        """
+        player_id = self.router.resolve(event, self.instance_id)
+        if player_id is None:
+            return
+        player = self.mass.players.get_player(player_id)
+        if player is None or not isinstance(player, AmperePlayer):
+            return
+        # A state event names both a device and Alexa's own queue id, which is
+        # the only way a later now-playing event for a queue this process did
+        # not publish can be attributed at all.
+        self.router.learn_from(event, player_id)
+        player.apply_push(event)
+
+    def _on_push_health(self, connected: bool) -> None:
+        """Slow the poll while the stream is up, restore it when it is not."""
+        settings.set_push_status(
+            "Connected. Amazon is reporting changes as they happen."
+            if connected else
+            f"Reconnecting. {self.push_stream.last_error or ''}".strip()
+        )
+        # This provider's own players, not every player MA knows about. The
+        # poll interval is a statement about how Ampere learns things and has
+        # no business being applied to a Chromecast.
+        for player in self.players:
+            if isinstance(player, AmperePlayer):
+                player.use_push_poll_interval(connected)
+        if connected:
+            # Everything that happened while the stream was down is invisible
+            # to it, so the first thing a reconnect does is ask.
+            self.mass.create_task(self._repoll_all())
+
+    async def _repoll_all(self) -> None:
+        for player in self.players:
+            if isinstance(player, AmperePlayer):
+                with contextlib.suppress(Exception):
+                    await player.poll()
 
     async def discover_players(self) -> None:
         """Enumerate Echo devices and speaker groups.
