@@ -13,7 +13,21 @@ from unittest import mock
 
 import pytest
 
-import app as app_module
+import io
+
+import core as app_module
+
+
+def _upstream(body: bytes = b"audio"):
+    """A stand-in for a live fetch of Music Assistant.
+
+    `fetch_upstream` hands back an open response for an adapter to pipe, so a
+    double has to be that shape rather than a tuple: the route no longer builds
+    a response itself, which is the whole point of the framework-free core.
+    """
+    return app_module.Upstream(200, {"Content-Type": "audio/mpeg"},
+                               io.BytesIO(body))
+
 import queue_api
 from ma_provider import stream_ref
 
@@ -163,11 +177,11 @@ def test_the_route_fetches_music_assistant_and_nowhere_else(client, app, monkeyp
     _url, expires = app.signed_url("mastream", REF)
     sig = app.sign("mastream", REF, expires)
 
-    with mock.patch.object(app_module, "_proxy") as proxy:
-        proxy.return_value = ("", 200)
+    with mock.patch.object(app_module, "fetch_upstream") as proxy:
+        proxy.return_value = _upstream()
         client.get(f"/mastream/{REF}/{expires}/{sig}")
 
-    (upstream, _content_type), _ = proxy.call_args
+    (upstream, _range, _content_type), _ = proxy.call_args
     assert upstream == f"{app_module.MA_STREAM_BASE}/ampere_stream/{REF}.mp3"
 
 
@@ -269,8 +283,8 @@ def test_an_unbuffered_plain_fetch_streams_through_rather_than_waiting(
 
     with mock.patch.object(mastream_cache, "ensure") as ensure, \
             mock.patch.object(mastream_cache, "prefetch") as prefetch, \
-            mock.patch.object(app_module, "_proxy") as proxy:
-        proxy.return_value = ("", 200)
+            mock.patch.object(app_module, "fetch_upstream") as proxy:
+        proxy.return_value = _upstream()
         client.get(f"/mastream/{REF}/{expires}/{sig}")
 
     ensure.assert_not_called()
@@ -294,8 +308,8 @@ def test_a_range_on_an_unbuffered_track_waits_for_the_buffer(
 
     with mock.patch.object(mastream_cache, "ensure") as ensure:
         ensure.return_value = None
-        with mock.patch.object(app_module, "_proxy") as proxy:
-            proxy.return_value = ("", 200)
+        with mock.patch.object(app_module, "fetch_upstream") as proxy:
+            proxy.return_value = _upstream()
             client.get(f"/mastream/{REF}/{expires}/{sig}",
                        headers={"Range": "bytes=1000-"})
 
@@ -356,11 +370,11 @@ def test_a_station_still_streams(client, app, monkeypatch):
     _url, expires = app.signed_url("mastream", STATION_REF)
     sig = app.sign("mastream", STATION_REF, expires)
 
-    with mock.patch.object(app_module, "_proxy") as proxy:
-        proxy.return_value = ("", 200)
+    with mock.patch.object(app_module, "fetch_upstream") as proxy:
+        proxy.return_value = _upstream()
         client.get(f"/mastream/{STATION_REF}/{expires}/{sig}")
 
-    (upstream, _ct), _ = proxy.call_args
+    (upstream, _range, _ct), _ = proxy.call_args
     assert upstream.endswith(f"/ampere_stream/{STATION_REF}.mp3")
 
 

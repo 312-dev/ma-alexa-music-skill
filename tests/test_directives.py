@@ -572,7 +572,7 @@ def test_only_the_first_item_carries_the_offset(client, tmp_path, monkeypatch):
 
 def test_content_that_did_not_come_from_ma_has_no_offset(client):
     """A Subsonic album cannot carry a seek; the lookup must not reach for one."""
-    import app as app_module
+    import core as app_module
 
     assert app_module.start_offset("al:al1") == 0
     assert app_module.start_offset("") == 0
@@ -587,7 +587,7 @@ def test_a_music_assistant_queue_is_not_extended_by_the_bridge(monkeypatch):
     it knew while the speakers play on. Measured 2026-08-02 with
     AFTER_CONTENT=radio and a one track queue.
     """
-    import app as app_module
+    import core as app_module
 
     monkeypatch.setattr(app_module, "effective_after_content", lambda: "radio")
 

@@ -39,18 +39,16 @@ import os
 import pathlib
 import tempfile
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-
-from flask import Blueprint, jsonify, request
 
 import handoff
 import mastream_cache
 import subsonic
+from answers import Json
 from ma_provider import stream_ref
 
 logger = logging.getLogger("ma-music-skill.queue-api")
-
-bp = Blueprint("queue_api", __name__)
 
 # Same key app.py signs stream URLs with. If SIGNING_KEY is unset both modules
 # fall back to their own random key, which is fine here: nothing outside this
@@ -424,32 +422,38 @@ def start_offset_ms(token: str) -> int:
 # --------------------------------------------------------------------------
 
 
-def _authorized() -> bool:
-    # Deliberately a copy of app._authorized rather than an import: this module
-    # is imported by app, and importing back would be a cycle.
+def authorized(headers: Mapping[str, str]) -> bool:
+    """The handoff endpoint's own admission check.
+
+    Deliberately narrower than the admin plane's: this one is called by Music
+    Assistant, which may be on the same host or another one, so it is a token
+    check without the source-address rule. Publishing a queue reveals nothing
+    and can only ever cost the caller their own playback.
+    """
     expected = os.environ.get("ADMIN_TOKEN")
-    return bool(expected) and request.headers.get("X-Admin-Token") == expected
+    return bool(expected) and headers.get("X-Admin-Token") == expected
 
 
-@bp.post("/queue")
-def publish_queue():
-    if not _authorized():
-        return jsonify({"error": "unauthorized"}), 401
+def publish_request(body: object, headers: Mapping[str, str]) -> Json:
+    """`POST /queue`, minus the framework."""
+    if not authorized(headers):
+        return Json(401, {"error": "unauthorized"})
 
-    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        body = {}
     tracks = body.get("tracks")
     bad = "tracks must be a non-empty list of song ids or Music Assistant tracks"
     if not isinstance(tracks, list) or not tracks:
-        return jsonify({"error": bad}), 400
+        return Json(400, {"error": bad})
     if not all(isinstance(t, (str, dict)) for t in tracks):
-        return jsonify({"error": bad}), 400
+        return Json(400, {"error": bad})
     if any(isinstance(t, dict) and t.get("source") != "ma" for t in tracks):
-        return jsonify({"error": "a track object must set source to 'ma'"}), 400
+        return Json(400, {"error": "a track object must set source to 'ma'"})
 
     try:
         offset = int(body.get("start_offset_ms") or 0)
     except (TypeError, ValueError):
-        return jsonify({"error": "start_offset_ms must be an integer"}), 400
+        return Json(400, {"error": "start_offset_ms must be an integer"})
 
     record = publish(tracks, str(body.get("name") or ""), offset)
     logger.info(
@@ -457,38 +461,34 @@ def publish_queue():
         record["token"], len(record["tracks"]), record["requested"], record["name"],
         f" starting at {record['start_offset_ms']}ms" if record["start_offset_ms"] else "",
     )
-    return jsonify(
-        {
-            "content_id": f"{CONTENT_PREFIX}:{record['token']}",
-            "count": len(record["tracks"]),
-            "requested": record["requested"],
-        }
-    )
+    return Json(200, {
+        "content_id": f"{CONTENT_PREFIX}:{record['token']}",
+        "count": len(record["tracks"]),
+        "requested": record["requested"],
+    })
 
 
-@bp.get("/queue/<token>")
-def show_queue(token: str):
-    if not _authorized():
-        return jsonify({"error": "unauthorized"}), 401
+def show_request(token: str, headers: Mapping[str, str]) -> Json:
+    """`GET /queue/<token>`, minus the framework."""
+    if not authorized(headers):
+        return Json(401, {"error": "unauthorized"})
 
     record = _newest() if token == CURRENT else _read(_path(token))
     if record is None or _expired(record):
-        return jsonify({"error": "unknown queue"}), 404
-    return jsonify(
-        {
-            "content_id": f"{CONTENT_PREFIX}:{record['token']}",
-            "name": record.get("name", ""),
-            "count": len(record.get("tracks", [])),
-            "requested": record.get("requested", 0),
-            "published": record.get("published", 0),
-            "tracks": [
-                {
-                    "id": s.get("id"),
-                    "title": s.get("title"),
-                    "artist": s.get("artist"),
-                    "album": s.get("album"),
-                }
-                for s in record.get("tracks", [])
-            ],
-        }
-    )
+        return Json(404, {"error": "unknown queue"})
+    return Json(200, {
+        "content_id": f"{CONTENT_PREFIX}:{record['token']}",
+        "name": record.get("name", ""),
+        "count": len(record.get("tracks", [])),
+        "requested": record.get("requested", 0),
+        "published": record.get("published", 0),
+        "tracks": [
+            {
+                "id": s.get("id"),
+                "title": s.get("title"),
+                "artist": s.get("artist"),
+                "album": s.get("album"),
+            }
+            for s in record.get("tracks", [])
+        ],
+    })

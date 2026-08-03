@@ -11,7 +11,7 @@ import pytest
 from flask import Flask
 
 import app as app_module
-from setup_ui import access
+import access
 from setup_ui import views
 
 

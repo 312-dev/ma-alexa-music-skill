@@ -7,6 +7,7 @@ the signature actually gates access.
 
 from __future__ import annotations
 
+import io
 import time
 
 
@@ -196,16 +197,16 @@ def test_access_token_not_accepted_as_refresh_token(client):
 def test_a_stream_url_is_not_bound_to_whichever_device_asked_first(
         client, fake_subsonic, monkeypatch):
     """The second Echo presents the identical URL and must be served."""
-    import app as app_module
+    import core as app_module
 
     seen = []
 
-    def fake_proxy(upstream, content_type_default):
+    def fake_fetch(upstream, range_header=None, default_content_type=""):
         seen.append(upstream)
-        return app_module.Response(b"audio", status=200,
-                                   headers={"Content-Type": "audio/mpeg"})
+        return app_module.Upstream(200, {"Content-Type": "audio/mpeg"},
+                                   io.BytesIO(b"audio"))
 
-    monkeypatch.setattr(app_module, "_proxy", fake_proxy)
+    monkeypatch.setattr(app_module, "fetch_upstream", fake_fetch)
     url, _expires = app_module.signed_url("stream", "t1")
     path = url[url.index("/stream/"):]
 
@@ -221,7 +222,7 @@ def test_a_range_request_is_forwarded_and_its_answer_preserved(
     A 200 with the whole file here would restart the song in every room, which
     is what a transfer must not do.
     """
-    import app as app_module
+    import core as app_module
 
     class FakeUpstream:
         status = 206

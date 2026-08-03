@@ -17,15 +17,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-import app as app_module
+import app as flask_module
+import core as app_module
 from setup_ui import bp as setup_bp
 import smapi_rest
 from setup_ui import qr, smapi, state as store, validate, views
 
 # The parent wires this up in app.py. Registering once here keeps the suite
 # independent of whether that has happened yet.
-if "setup" not in app_module.app.blueprints:
-    app_module.app.register_blueprint(setup_bp)
+if "setup" not in flask_module.app.blueprints:
+    flask_module.app.register_blueprint(setup_bp)
 
 
 ADMIN = "test-admin-token"
@@ -470,7 +471,7 @@ def test_stations_page_no_longer_demands_a_restart(cfg):
 
 def test_saved_settings_take_effect_without_a_restart(cfg, app):
     """The point of the change: the form is a real settings page."""
-    import app as bridge
+    import core as bridge
     cfg.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
                                      "radio_tracks_per_artist": "4"})
     assert bridge.effective_after_content() == "stop"
@@ -485,7 +486,7 @@ def test_saved_settings_take_effect_without_a_restart(cfg, app):
 
 def test_saving_settings_drops_the_stale_pools(cfg):
     """Cached pools were built under the old numbers."""
-    import app as bridge
+    import core as bridge
     bridge._RADIO_CACHE["a1"] = ["a1", "a2"]
     bridge._QUEUE_CACHE["rad:a1"] = [{"id": "t1"}]
     cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
@@ -495,7 +496,7 @@ def test_saving_settings_drops_the_stale_pools(cfg):
 
 
 def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch):
-    import app as bridge
+    import core as bridge
     monkeypatch.setattr(bridge, "AFTER_CONTENT", "genre")
     # No saved value in this test's store, so the module constant wins.
     assert bridge.effective_after_content() == "genre"
@@ -614,7 +615,7 @@ def test_refusal_covers_login_too(monkeypatch, client):
 
 
 def setup_rules():
-    for rule in app_module.app.url_map.iter_rules():
+    for rule in flask_module.app.url_map.iter_rules():
         if not rule.endpoint.startswith("setup."):
             continue
         if rule.endpoint in ("setup.static", "setup.login", "setup.verify",
@@ -1578,7 +1579,7 @@ def test_ingestion_success_unlocks_continue_without_a_reload(ui, monkeypatch):
 
 
 def test_playlists_shuffle_only_when_the_setting_is_on(cfg):
-    import app as bridge
+    import core as bridge
     assert bridge.shuffle_by_default("pl:x") is False
     cfg.post("/setup/stations", data={
         "after_content": "stop", "radio_artists": "12",

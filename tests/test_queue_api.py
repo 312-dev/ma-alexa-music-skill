@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-import app as app_module
+import core as app_module
 import handoff
 import queue_api
 
@@ -28,15 +28,19 @@ def isolated_store(tmp_path, monkeypatch):
 
 @pytest.fixture
 def queue_client():
-    """A client for a bare app carrying only the blueprint.
+    """A client for a bare app carrying only the handoff blueprint.
 
-    app.py does not register it yet, and this suite must not depend on when it
-    does.
+    The blueprint lives in the Flask adapter rather than in `queue_api`, which
+    is imported by the framework-free core and so cannot import Flask. Mounting
+    it alone here keeps this suite about the wire contract rather than about
+    everything else the real app happens to serve.
     """
     from flask import Flask
 
+    import app as flask_module
+
     application = Flask(__name__)
-    application.register_blueprint(queue_api.bp)
+    application.register_blueprint(flask_module.queue_bp)
     application.config.update(TESTING=True)
     return application.test_client()
 

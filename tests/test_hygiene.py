@@ -12,11 +12,14 @@ import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
+import textwrap
 import time
 
 import pytest
 
-import app as app_module
+import core as app_module
 import queuestate
 from conftest import directive
 
@@ -203,3 +206,52 @@ def test_every_module_the_app_imports_is_in_the_image():
     }
     missing = sorted(modules - copied)
     assert not missing, f"not COPYed into the image: {', '.join(missing)}"
+
+
+def test_the_core_does_not_depend_on_a_web_framework():
+    """The property the whole split exists to create.
+
+    `core` and everything it imports must load with Flask unavailable, because
+    the same code has to run under aiohttp inside Music Assistant. Nothing
+    stops someone adding `from flask import jsonify` to a module the core
+    reaches; the import would work locally, the tests would pass, and the
+    failure would surface only when Music Assistant tried to load the provider.
+
+    Checked by import under a blocked meta-path rather than by grepping for the
+    word, so a transitive dependency several modules deep is caught too. That
+    is not hypothetical: `queue_api` was exactly such a dependency, and reading
+    the import lines of `core` alone would never have found it.
+
+    Run in a subprocess because pytest has already imported Flask into this
+    one, and an import that is already satisfied never consults the finder.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    probe = textwrap.dedent(
+        """
+        import sys, importlib.abc
+
+        class Blocker(importlib.abc.MetaPathFinder):
+            def find_spec(self, name, path=None, target=None):
+                if name.split(".")[0] == "flask":
+                    raise ImportError("flask reached the core via " + name)
+                return None
+
+        sys.meta_path.insert(0, Blocker())
+        import core  # noqa: F401
+        assert not [m for m in sys.modules if m.split(".")[0] == "flask"]
+        """
+    )
+    env = {
+        **os.environ,
+        "PUBLIC_BASE": "https://example.test",
+        "PREWARM": "0",
+        "SUBSONIC_USER": "tester",
+        "SUBSONIC_PASSWORD": "not-a-real-password",
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=root, env=env, capture_output=True, text=True,
+    )
+    assert done.returncode == 0, (
+        "core no longer imports without Flask:\n" + done.stderr
+    )

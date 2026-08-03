@@ -1,4 +1,9 @@
-"""Who is allowed to reach the setup UI, and from where.
+"""Who is allowed to reach the admin plane, and from where.
+
+Lives at the root rather than inside the wizard because it is not the wizard's
+rule. `/captures`, `/diag` and `/setup` are all admin plane and all answer the
+same question, and the core has to be able to ask it without importing a web
+framework, which importing anything from `setup_ui` would drag in.
 
 The bridge has two planes on one port and they have opposite exposure needs.
 The data plane has to be reachable from the public internet, because Amazon

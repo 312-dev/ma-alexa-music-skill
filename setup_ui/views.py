@@ -25,10 +25,12 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import catalog_sync
 import logring
+import access
+import core as bridge
 import smapi_rest
 import subsonic
 
-from . import (access, captures, qr, smapi, state as store,
+from . import (captures, qr, smapi, state as store,
                steps as wizard_steps, validate)
 
 bp = Blueprint(
@@ -634,8 +636,6 @@ def alias_save():
 
 def station_context() -> dict:
     current = store.load()
-    import app as bridge  # lazy: app registers this blueprint, so not at import
-
     return {
         "modes": bridge.AFTER_CONTENT_MODES,
         "live": {
@@ -665,8 +665,6 @@ def stations():
 def stations_save():
     if (gate := _configuration_gate()) is not None:
         return gate
-    import app as bridge
-
     mode = (request.form.get("after_content") or "").strip().lower()
     if mode not in bridge.AFTER_CONTENT_MODES:
         mode = bridge.AFTER_CONTENT
@@ -703,8 +701,6 @@ def stations_preview():
     seed = (request.args.get("seed") or "").strip()
     if not seed:
         return fragment("_pool.html", back="/setup/stations", seed="", error="", pool=None)
-
-    import app as bridge
 
     try:
         hits = subsonic.search(seed, songs=0, albums=0, artists=5)

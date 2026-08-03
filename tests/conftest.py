@@ -32,7 +32,13 @@ os.environ.setdefault("PREWARM", "0")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as app_module  # noqa: E402
+# The behaviour under test lives in `core`, which imports no web framework.
+# `app` is only the Flask adapter over it, and is imported separately so that
+# the one fixture that needs a test client can reach it. Everything else in
+# this file patches the core, because that is where the caches and the
+# Navidrome calls actually are.
+import core as app_module  # noqa: E402
+import app as flask_module  # noqa: E402
 
 
 # --- fake library -----------------------------------------------------------
@@ -181,8 +187,8 @@ def fake_subsonic(monkeypatch):
 
 @pytest.fixture
 def client():
-    app_module.app.config.update(TESTING=True)
-    return app_module.app.test_client()
+    flask_module.app.config.update(TESTING=True)
+    return flask_module.app.test_client()
 
 
 @pytest.fixture

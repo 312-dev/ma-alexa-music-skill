@@ -5,8 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py subsonic.py oauth.py queuestate.py signature.py queue_api.py \
-     handoff.py mdns.py smapi_rest.py catalog_sync.py logring.py \
+COPY app.py core.py answers.py access.py subsonic.py oauth.py queuestate.py signature.py \
+     queue_api.py handoff.py mdns.py smapi_rest.py catalog_sync.py logring.py \
      mastream_cache.py ./
 COPY setup_ui/ setup_ui/
 
