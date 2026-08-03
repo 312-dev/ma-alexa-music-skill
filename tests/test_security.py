@@ -225,15 +225,24 @@ def test_a_range_request_is_forwarded_and_its_answer_preserved(
     from ma_provider import core as app_module
 
     class FakeUpstream:
+        """Navidrome answering a range request.
+
+        It sends the 500 bytes it promises. That used to be `b""`, which the
+        Flask test client accepted because it never checked; a real HTTP client
+        waits for the length the header declared, so a fake that lies about it
+        hangs the test rather than failing it.
+        """
+
         status = 206
         headers = {"Content-Type": "audio/mpeg", "Accept-Ranges": "bytes",
                    "Content-Range": "bytes 500-999/1000", "Content-Length": "500"}
 
-        def read(self, *_):
-            return b""
+        def __init__(self):
+            self._left = b"\x00" * 500
 
-        def __iter__(self):
-            return iter([b"tail"])
+        def read(self, size=-1):
+            chunk, self._left = self._left, b""
+            return chunk
 
     sent = {}
 

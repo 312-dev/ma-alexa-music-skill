@@ -1,25 +1,21 @@
 """Who is allowed to reach the admin plane, and from where.
 
-Lives at the root rather than inside the wizard because it is not the wizard's
-rule. `/captures`, `/diag` and `/setup` are all admin plane and all answer the
-same question, and the core has to be able to ask it without importing a web
-framework, which importing anything from `setup_ui` would drag in.
+Ampere has two planes on one port and they have opposite exposure needs. The
+data plane has to be reachable from the public internet, because Amazon calls
+it directly and there is no way to ask them to come from somewhere else.
+`/captures` replays that inbound traffic and `/diag` names the music server, so
+the admin plane is the operator's and Amazon never needs it at all.
 
-The bridge has two planes on one port and they have opposite exposure needs.
-The data plane has to be reachable from the public internet, because Amazon
-calls it directly and there is no way to ask them to come from somewhere else.
-The admin plane can create skills against the operator's Amazon account, read
-their whole library and rewrite settings, and Amazon never needs it at all.
+Serving both on one public surface behind one shared secret means the admin
+plane is exposed by construction, and the only thing between an attacker and it
+is a token they can guess at line rate. So it is narrowed by source address:
+private, loopback, link-local and carrier-grade NAT ranges are allowed by
+default and everything else is refused. Tailscale lives in 100.64.0.0/10, which
+is why CGNAT is on the list rather than off it.
 
-Serving both on the same public surface behind one shared secret means the
-admin plane is exposed by construction and the only thing between an attacker
-and it is a token they can guess at line rate. So this narrows it two ways:
-
-- By source address. Private, loopback, link-local and carrier-grade NAT ranges
-  are allowed by default, everything else is refused. Tailscale lives in
-  100.64.0.0/10, which is why CGNAT is on the list rather than off it.
-- By failure count. Repeated bad tokens from one address lock that address out
-  for a while, so a token cannot be brute forced even from an allowed network.
+There was a second narrowing, a per-address lockout after repeated bad tokens.
+It guarded the setup wizard's login form, and that form is gone: setup is part
+of Music Assistant's settings now, behind Music Assistant's own authentication.
 
 Behind a reverse proxy every request appears to come from the proxy, so the
 real client has to be read out of X-Forwarded-For. Trusting that header blindly
@@ -32,8 +28,6 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import threading
-import time
 
 # Loopback, RFC1918, link-local, unique-local v6, and CGNAT. CGNAT is included
 # deliberately: 100.64.0.0/10 is where Tailscale addresses live, and reaching
@@ -45,12 +39,6 @@ _PRIVATE = [
         "::1/128", "fc00::/7", "fe80::/10",
     )
 ]
-
-LOCKOUT_THRESHOLD = int(os.environ.get("SETUP_LOCKOUT_THRESHOLD", "5"))
-LOCKOUT_SECONDS = int(os.environ.get("SETUP_LOCKOUT_SECONDS", "900"))
-
-_FAILURES: dict[str, tuple[int, float]] = {}
-_LOCK = threading.Lock()
 
 
 def _networks(raw: str) -> list:
@@ -168,31 +156,3 @@ def address_allowed(ip: str) -> bool:
     return any(address in net for net in networks)
 
 
-def locked_out(ip: str) -> int:
-    """Seconds remaining on a lockout, or 0."""
-    with _LOCK:
-        count, until = _FAILURES.get(ip, (0, 0.0))
-    if count < LOCKOUT_THRESHOLD:
-        return 0
-    return max(0, int(until - time.time()))
-
-
-def record_failure(ip: str) -> None:
-    with _LOCK:
-        count, _ = _FAILURES.get(ip, (0, 0.0))
-        _FAILURES[ip] = (count + 1, time.time() + LOCKOUT_SECONDS)
-        # Bounded, so a spray from many addresses cannot grow this forever.
-        if len(_FAILURES) > 4096:
-            for key, (_, until) in list(_FAILURES.items()):
-                if until < time.time():
-                    _FAILURES.pop(key, None)
-
-
-def record_success(ip: str) -> None:
-    with _LOCK:
-        _FAILURES.pop(ip, None)
-
-
-def reset() -> None:
-    with _LOCK:
-        _FAILURES.clear()

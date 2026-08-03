@@ -27,22 +27,16 @@ def isolated_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def queue_client():
-    """A client for a bare app carrying only the handoff blueprint.
+def queue_client(client):
+    """The handoff routes, on the adapter that actually serves them.
 
-    The blueprint lives in the Flask adapter rather than in `queue_api`, which
-    is imported by the framework-free core and so cannot import Flask. Mounting
-    it alone here keeps this suite about the wire contract rather than about
-    everything else the real app happens to serve.
+    This used to mount a bare Flask app carrying only the handoff blueprint,
+    to keep the suite about the wire contract rather than everything else the
+    app happened to serve. The blueprint is gone and /queue is now two routes
+    on the aiohttp adapter, which the shared client already speaks, so the
+    separation is no longer worth its own app.
     """
-    from flask import Flask
-
-    import app as flask_module
-
-    application = Flask(__name__)
-    application.register_blueprint(flask_module.queue_bp)
-    application.config.update(TESTING=True)
-    return application.test_client()
+    return client
 
 
 def publish(queue_client, tracks, name="", start_offset_ms=None):

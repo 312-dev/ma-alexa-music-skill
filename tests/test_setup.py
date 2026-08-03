@@ -1,9 +1,14 @@
-"""The /setup wizard.
+"""The checks and classifications setup is built out of.
 
 Nothing here may touch the network or run the ASK CLI, so the four functions
 that would (validate.resolve, validate.peer_cert, validate.http_get,
 validate.http_post_json) and the single seam every ask invocation goes through
 (smapi.run) are replaced for every test in this module.
+
+These used to be interleaved with tests that posted forms at a Flask wizard.
+That wizard is gone: the operations it wrapped are covered by
+tests/test_setup_ops.py and the form it rendered by tests/test_wizard.py. What
+is left here is the layer underneath both, which never had a framework in it.
 """
 
 from __future__ import annotations
@@ -17,26 +22,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-import app as flask_module
 from ma_provider import core as app_module
 from ma_provider import core as _core
 from ma_provider import setup_state as _setup_state
-from setup_ui import bp as setup_bp
 from ma_provider import smapi_rest
 from ma_provider import setup_smapi as smapi
 from ma_provider import setup_ops
 from ma_provider import setup_state as store
+from ma_provider import setup_steps
 from ma_provider import setup_validate as validate
-from setup_ui import qr, views
-
-# The parent wires this up in app.py. Registering once here keeps the suite
-# independent of whether that has happened yet.
-if "setup" not in flask_module.app.blueprints:
-    flask_module.app.register_blueprint(setup_bp)
-
-
-ADMIN = "test-admin-token"
-HEADERS = {"X-Admin-Token": ADMIN}
 
 
 # --- fixtures ---------------------------------------------------------------
@@ -46,8 +40,7 @@ HEADERS = {"X-Admin-Token": ADMIN}
 def isolated(monkeypatch, tmp_path):
     """No sockets, no subprocesses, no shared state between tests."""
     monkeypatch.setattr(_setup_state, "STATE_DIR", pathlib.Path(tmp_path / "state"))
-    monkeypatch.setenv("ADMIN_TOKEN", ADMIN)
-    monkeypatch.setenv("PUBLIC_BASE", "https://ampere.example.com")
+    monkeypatch.setattr(_core, "PUBLIC_BASE", "https://ampere.example.com")
 
     monkeypatch.setattr(validate, "resolve", lambda host: ["93.184.216.34"])
     monkeypatch.setattr(
@@ -78,35 +71,10 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(smapi, "ask_on_path", lambda: False)
     monkeypatch.setattr(smapi, "ask_configured", lambda: False)
 
-    views._SMAPI_CACHE.update(at=0.0, value=None)
-    views._VENDORS.update(at=0.0, value=None)
-    views.wizard_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
-    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
-    views._BINDING.update(at=0.0, value=None)
-    views._UPLOAD.update(running=False, phase="", percent=None, results=None,
-                         message="", done_at=0.0, cancel=False, auto=False)
-    views.TOKENS = validate.Tokens()
+    setup_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
+    setup_steps._INGESTION.update(at=0.0, sig="", ok=False)
+    setup_steps._TRAFFIC.update(at=0.0, ok=False)
     yield
-
-
-@pytest.fixture
-def anon(client):
-    return client
-
-
-@pytest.fixture
-def ui(client):
-    """A client that carries the admin header, which authed() accepts."""
-    class Authed:
-        def get(self, path, **kw):
-            kw.setdefault("headers", {}).update(HEADERS)
-            return client.get(path, **kw)
-
-        def post(self, path, **kw):
-            kw.setdefault("headers", {}).update(HEADERS)
-            return client.post(path, **kw)
-
-    return Authed()
 
 
 def capture_file(name: str, body: dict) -> pathlib.Path:
@@ -177,51 +145,6 @@ def test_missing_enablement_names_the_silent_fallback():
 # --- status screen ----------------------------------------------------------
 
 
-def test_status_page_renders(ui):
-    resp = ui.get("/setup/status")
-    assert resp.status_code == 200
-    assert b"ER_INGESTION" in resp.data
-
-
-def test_setup_root_leads_to_the_wizard_while_unfinished(ui):
-    """The wizard is the job in front of you until there is a skill."""
-    resp = ui.get("/setup")
-    assert resp.status_code == 302
-    assert "/setup/wizard" in resp.headers["Location"]
-
-
-def test_status_shows_the_last_request_from_amazon(ui):
-    capture_file(
-        "20260731T101500000000-Alexa.Media.Search.GetPlayableContent.json",
-        {"headers": {"SignatureCertChainUrl": "https://s3.amazonaws.com/echo.api/x"},
-         "body": {"header": {"namespace": "Alexa.Media.Search",
-                             "name": "GetPlayableContent"}}},
-    )
-    body = ui.get("/setup/status").data.decode()
-    assert "Alexa.Media.Search.GetPlayableContent" in body
-    assert "seconds ago" in body
-
-
-def test_status_says_so_when_amazon_has_never_called(ui, monkeypatch, tmp_path):
-    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(tmp_path / "empty"))
-    body = ui.get("/setup/status").data.decode()
-    assert "nothing yet" in body
-    assert "not calling this bridge" in body
-
-
-def test_status_never_prints_a_secret(ui):
-    body = ui.get("/setup/status").data.decode()
-    assert ADMIN not in body
-    assert os.environ["SIGNING_KEY"] not in body
-    assert "set</span>" in body
-
-
-def test_status_poll_does_not_shell_out(ui):
-    """smapi.run raises in this module, so a poll that ran ask would fail here."""
-    assert ui.get("/setup/status").status_code == 200
-    assert ui.get("/setup/status").status_code == 200
-
-
 # --- endpoint validation ----------------------------------------------------
 
 
@@ -271,16 +194,6 @@ def test_unrelated_wildcard_does_not_derive_wildcard():
         "ampere.example.com", ["*.other.net", "ampere.example.com"]) == "Trusted"
 
 
-def test_cert_type_is_surfaced_on_the_page(ui, monkeypatch):
-    monkeypatch.setattr(
-        validate, "peer_cert",
-        lambda host, port, timeout=8.0: {"subjectAltName": (("DNS", "*.example.com"),)},
-    )
-    body = ui.get("/setup/endpoint").data.decode()
-    assert "sslCertificateType" in body
-    assert "Wildcard" in body
-
-
 def test_post_probe_failure_blames_the_proxy(monkeypatch):
     monkeypatch.setattr(validate, "http_post_json",
                         lambda url, body, timeout=12.0: (400, "no json",
@@ -293,103 +206,13 @@ def test_post_probe_failure_blames_the_proxy(monkeypatch):
     assert row["diag"]["status"] == 400
 
 
-def test_check_rows_render_expandable_response_details(ui):
-    body = ui.get("/setup/endpoint").data.decode()
-    assert "Response details" in body
-
-
 def test_the_checker_does_not_use_the_blocklisted_default_agent():
     """Cloudflare's free tier answers Python-urllib with 403; Amazon and
     browsers pass. The checks must not report an outage that is not there."""
     assert "Ampere" in validate._UA
 
 
-def test_endpoint_page_gates_the_wizard(ui, monkeypatch):
-    monkeypatch.setattr(validate, "resolve", lambda host: ["10.0.0.1"])
-    body = ui.get("/setup/endpoint").data.decode()
-    assert "stays locked" in body
-    assert store.load()["endpoint_ok"] is False
-
-
-def test_skill_creation_refuses_without_a_passing_endpoint(ui):
-    store.update(endpoint_ok=False)
-    body = ui.post("/setup/wizard/skill", data={"vendor_id": "M1", "alias": "ampere"}).data.decode()
-    assert "Blocked" in body
-    assert "/setup/endpoint" in body
-
-
 # --- external proof ---------------------------------------------------------
-
-
-def test_unseen_token_is_pending(ui):
-    token = views.TOKENS.mint()
-    assert views.TOKENS.status(token) == "pending"
-    assert "waiting for the scan" in ui.get(f"/setup/endpoint/proof?token={token}").data.decode()
-
-
-def test_hitting_the_link_marks_it_seen(anon):
-    token = views.TOKENS.mint()
-    resp = anon.get(f"/setup/verify/{token}")
-    assert resp.status_code == 200
-    assert b"Got it" in resp.data
-    assert views.TOKENS.status(token) == "seen"
-
-
-def test_verify_needs_no_cookie(anon):
-    """The phone is on cellular and has never seen this site before."""
-    token = views.TOKENS.mint()
-    assert anon.get(f"/setup/verify/{token}").status_code == 200
-
-
-def test_expired_token_is_rejected(anon, monkeypatch):
-    views.TOKENS = validate.Tokens(ttl=1)
-    token = views.TOKENS.mint()
-    views.TOKENS._tokens[token]["born"] = time.time() - 60
-    assert anon.get(f"/setup/verify/{token}").status_code == 410
-    assert views.TOKENS.status(token) in ("expired", "unknown")
-
-
-def test_unknown_token_is_404(anon):
-    assert anon.get("/setup/verify/never-minted").status_code == 404
-
-
-def test_proof_row_flips_to_green_after_the_hit(ui, anon):
-    token = views.TOKENS.mint()
-    anon.get(f"/setup/verify/{token}")
-    body = ui.get(f"/setup/endpoint/proof?token={token}").data.decode()
-    assert "confirmed" in body
-
-
-# --- QR ---------------------------------------------------------------------
-
-
-def test_qr_encodes_a_verify_url():
-    matrix = qr.encode("https://ampere.example.com/setup/verify/abcdefghijkl")
-    assert matrix is not None
-    size = len(matrix)
-    assert size == len(matrix[0])
-    # Three finder patterns, so three dark corners with a light ring inside.
-    for row, col in ((0, 0), (0, size - 7), (size - 7, 0)):
-        assert matrix[row][col] == 1
-        assert matrix[row + 1][col + 1] == 0
-
-
-def test_qr_refuses_rather_than_shipping_something_unscannable():
-    assert qr.encode("x" * 5000) is None
-
-
-def test_qr_svg_is_self_contained():
-    svg = qr.svg(qr.encode("https://ampere.example.com/setup/verify/abc"))
-    assert svg.startswith("<svg")
-    assert "http://www.w3.org/2000/svg" in svg
-    assert "src=" not in svg
-
-
-def test_page_shows_the_url_as_text_even_with_a_qr(ui):
-    token = views.TOKENS.mint()
-    body = ui.get(f"/setup/endpoint/proof?token={token}").data.decode()
-    assert f"/setup/verify/{token}" in body
-    assert "WiFi" in body
 
 
 # --- alias ------------------------------------------------------------------
@@ -400,7 +223,6 @@ def cfg(ui, monkeypatch):
     """An authed client whose wizard is complete: configuration pages open."""
     _all_steps_done(monkeypatch)
     return ui
-
 
 
 def library(monkeypatch, artists=(), albums=(), songs=()):
@@ -450,58 +272,7 @@ def test_alias_flags_a_brand(monkeypatch):
     assert result["rows"][0]["kind"] == "brand"
 
 
-def test_alias_page_explains_why_it_matters(cfg):
-    body = cfg.get("/setup/alias").data.decode()
-    assert "before" in body
-    assert "catalog" in body
-
-
-def test_alias_page_reports_a_collision(cfg, monkeypatch):
-    library(monkeypatch, artists=["Jukebox The Ghost"])
-    body = cfg.post("/setup/alias", data={"candidate": "jukebox"}).data.decode()
-    assert "Jukebox The Ghost" in body
-
-
 # --- stations ---------------------------------------------------------------
-
-
-def test_stations_page_lists_every_after_content_mode(cfg):
-    body = cfg.get("/setup/stations").data.decode()
-    for mode in app_module.AFTER_CONTENT_MODES:
-        assert f'value="{mode}"' in body
-
-
-def test_stations_page_no_longer_demands_a_restart(cfg):
-    """Saved values take effect live now; the old caveat must not resurface."""
-    body = cfg.get("/setup/stations").data.decode()
-    assert "restart" not in body
-    assert "take effect immediately" in body
-
-
-def test_saved_settings_take_effect_without_a_restart(cfg, app):
-    """The point of the change: the form is a real settings page."""
-    from ma_provider import core as bridge
-    cfg.post("/setup/stations", data={"after_content": "stop", "radio_artists": "5",
-                                     "radio_tracks_per_artist": "4"})
-    assert bridge.effective_after_content() == "stop"
-    assert bridge.effective_radio_artists() == 5
-    assert bridge.effective_radio_tracks_per_artist() == 4
-    assert bridge.continuation_mode("ar:a1") == "stop"
-
-    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "9",
-                                     "radio_tracks_per_artist": "4"})
-    assert bridge.continuation_mode("ar:a1") == "radio"
-
-
-def test_saving_settings_drops_the_stale_pools(cfg):
-    """Cached pools were built under the old numbers."""
-    from ma_provider import core as bridge
-    bridge._RADIO_CACHE["a1"] = ["a1", "a2"]
-    bridge._QUEUE_CACHE["rad:a1"] = [{"id": "t1"}]
-    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "6",
-                                     "radio_tracks_per_artist": "6"})
-    assert not bridge._RADIO_CACHE
-    assert not bridge._QUEUE_CACHE
 
 
 def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch):
@@ -509,65 +280,6 @@ def test_environment_remains_the_default_when_nothing_is_saved(app, monkeypatch)
     monkeypatch.setattr(bridge, "AFTER_CONTENT", "genre")
     # No saved value in this test's store, so the module constant wins.
     assert bridge.effective_after_content() == "genre"
-
-
-def test_saving_stations_persists(cfg):
-    cfg.post("/setup/stations", data={"after_content": "radio", "radio_artists": "7",
-                                     "radio_tracks_per_artist": "3"})
-    saved = store.load()
-    assert saved["after_content"] == "radio"
-    assert saved["radio_artists"] == 7
-
-
-def test_saving_stations_refuses_an_unknown_mode(cfg):
-    cfg.post("/setup/stations", data={"after_content": "teleport",
-                                     "radio_artists": "7",
-                                     "radio_tracks_per_artist": "3"})
-    assert store.load()["after_content"] in app_module.AFTER_CONTENT_MODES
-
-
-def test_station_preview_shows_the_artist_pool(cfg):
-    body = cfg.get("/setup/stations/preview?seed=Gregory").data.decode()
-    assert "Blind Pilot" in body
-    assert "Iron and Wine" in body
-
-
-def test_station_preview_calls_out_a_degraded_pool(cfg, monkeypatch):
-    monkeypatch.setattr(app_module.subsonic, "similar_artists",
-                        lambda artist_id, count=20: [])
-    app_module._RADIO_CACHE.clear()
-    body = cfg.get("/setup/stations/preview?seed=Gregory").data.decode()
-    assert "seed artist alone" in body
-
-
-
-
-def test_configuration_pages_wait_for_the_wizard(ui):
-    for path in ("/setup/alias", "/setup/stations",
-                 "/setup/stations/preview?seed=x"):
-        resp = ui.get(path)
-        assert resp.status_code == 302, path
-        assert resp.headers["Location"].endswith("/setup/wizard"), path
-
-
-def test_saving_stations_waits_for_the_wizard_too(ui):
-    """The gate covers writes, not just page views."""
-    resp = ui.post("/setup/stations", data={"after_content": "stop",
-                                            "radio_artists": "5",
-                                            "radio_tracks_per_artist": "4"})
-    assert resp.status_code == 302
-    assert not store.load().get("after_content")
-
-
-def test_sidebar_locks_configuration_until_setup_is_done(ui, monkeypatch):
-    # The body of the status page may link to configuration wherever it likes;
-    # the gate bounces those clicks. The sidebar is what must read as locked.
-    body = ui.get("/setup/status").data.decode()
-    assert "navlocked" in body
-
-    _all_steps_done(monkeypatch)
-    body = ui.get("/setup/status").data.decode()
-    assert "navlocked" not in body
 
 
 # --- smapi seam -------------------------------------------------------------
@@ -588,13 +300,6 @@ def test_manifest_is_a_music_skill_with_an_https_endpoint():
     assert endpoint["sslCertificateType"] == "Wildcard"
 
 
-def test_wizard_catalogs_cover_every_kind():
-    from ma_provider import catalog_sync
-
-    assert set(views.CATALOG_KINDS) == set(catalog_sync.CATALOGS)
-    assert views.CATALOG_KINDS == catalog_sync.TYPES
-
-
 def test_enablement_cycle_deletes_before_setting(monkeypatch):
     calls = []
 
@@ -611,73 +316,6 @@ def test_enablement_cycle_deletes_before_setting(monkeypatch):
 # --- auth -------------------------------------------------------------------
 
 
-def test_setup_refuses_to_serve_without_an_admin_token(monkeypatch, client):
-    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
-    resp = client.get("/setup", headers=HEADERS)
-    assert resp.status_code == 503
-    assert b"ADMIN_TOKEN is not set" in resp.data
-
-
-def test_refusal_covers_login_too(monkeypatch, client):
-    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
-    assert client.get("/setup/login").status_code == 503
-
-
-def setup_rules():
-    for rule in flask_module.app.url_map.iter_rules():
-        if not rule.endpoint.startswith("setup."):
-            continue
-        if rule.endpoint in ("setup.static", "setup.login", "setup.verify",
-                             "setup.oauth_callback"):
-            continue
-        yield rule
-
-
-def test_every_route_requires_auth(anon):
-    checked = 0
-    for rule in setup_rules():
-        method = "POST" if "POST" in rule.methods else "GET"
-        resp = anon.open(rule.rule, method=method)
-        assert resp.status_code == 401, f"{method} {rule.rule} was not gated"
-        checked += 1
-    assert checked >= 12
-
-
-def test_the_route_list_is_not_empty():
-    assert len(list(setup_rules())) >= 12
-
-
-def test_wrong_token_is_rejected(client):
-    resp = client.post("/setup/login", data={"token": "nope", "target": "/setup"})
-    assert resp.status_code == 401
-    assert client.get("/setup/status").status_code == 401
-
-
-def test_login_sets_a_working_cookie(client):
-    resp = client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
-    assert resp.status_code == 302
-    assert client.get("/setup/status").status_code == 200
-
-
-def test_login_will_not_redirect_off_setup(client):
-    resp = client.post("/setup/login",
-                       data={"token": ADMIN, "target": "https://evil.example/"})
-    assert resp.headers["Location"] == "/setup"
-
-
-def test_cookie_dies_when_the_admin_token_rotates(client, monkeypatch):
-    client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
-    assert client.get("/setup/status").status_code == 200
-    monkeypatch.setenv("ADMIN_TOKEN", "a-different-token")
-    assert client.get("/setup/status").status_code == 401
-
-
-def test_logout_clears_the_cookie(client):
-    client.post("/setup/login", data={"token": ADMIN, "target": "/setup"})
-    client.get("/setup/logout")
-    assert client.get("/setup/status").status_code == 401
-
-
 # --- state ------------------------------------------------------------------
 
 
@@ -690,13 +328,6 @@ def test_state_tolerates_an_unwritable_directory(monkeypatch):
     monkeypatch.setattr(_setup_state, "STATE_DIR", pathlib.Path("/proc/nowhere"))
     assert store.load()["alias"] == ""
     assert store.save({"alias": "x"}) is False
-
-
-def test_no_subsonic_password_is_ever_written(ui):
-    ui.post("/setup/wizard/subsonic", data={"url": "http://nav.test",
-                                            "user": "tester",
-                                            "password": "hunter2"})
-    assert "hunter2" not in json.dumps(store.load())
 
 
 # --- wizard, with the CLI faked out ------------------------------------------
@@ -757,285 +388,16 @@ def test_the_manifest_category_is_a_valid_enum():
     assert category == "STREAMING_SERVICE"
 
 
-def test_wizard_creates_a_skill_once_the_endpoint_passes(ui, monkeypatch):
-    created = fake_rest(monkeypatch)
-    store.update(endpoint_ok=True, cert_type="Wildcard")
-    body = ui.post("/setup/wizard/skill", data={"alias": "ampere"}).data.decode()
-    assert "amzn1.ask.skill.abc" in body
-    assert store.load()["skill_id"] == "amzn1.ask.skill.abc"
-    assert len(created["skills"]) == 1
-
-
-def test_skill_creation_requires_being_connected(ui, monkeypatch):
-    """No CLI to fall back on now, so this has to say so plainly."""
-    monkeypatch.setattr(smapi_rest, "connected", lambda: False)
-    store.update(endpoint_ok=True)
-    assert "Connect to Amazon first" in ui.post(
-        "/setup/wizard/skill", data={"alias": "ampere"}).data.decode()
-
-
-def test_created_manifest_carries_the_derived_cert_type(ui, monkeypatch):
-    created = fake_rest(monkeypatch)
-    store.update(endpoint_ok=True, cert_type="Wildcard")
-    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
-    # _unwrap is what actually reaches Amazon, so assert through it.
-    sent = smapi_rest._unwrap(created["skills"][0])
-    endpoint = sent["apis"]["music"]["endpoint"]
-    assert endpoint["sslCertificateType"] == "Wildcard"
-
-
-def test_the_manifest_never_double_wraps(ui, monkeypatch):
-    """smapi.manifest() is already {"manifest": ...}; wrapping again is rejected."""
-    created = fake_rest(monkeypatch)
-    store.update(endpoint_ok=True)
-    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
-    assert "manifest" not in smapi_rest._unwrap(created["skills"][0])
-
-
-def test_the_manifest_points_at_icons_that_exist(ui, monkeypatch):
-    """A manifest naming a missing icon fails the whole update with
-    RESOURCE_NOT_FOUND, which reads as a skill problem rather than a file one."""
-    created = fake_rest(monkeypatch)
-    store.update(endpoint_ok=True)
-    ui.post("/setup/wizard/skill", data={"alias": "ampere"})
-    locale = smapi_rest._unwrap(
-        created["skills"][0])["publishingInformation"]["locales"]["en-US"]
-    shipped = pathlib.Path(__file__).resolve().parent.parent / "icons"
-    for key in ("smallIconUri", "largeIconUri"):
-        name = locale[key].split("/icons/")[-1]
-        assert (shipped / name).is_file(), f"{key} names {name}, which is not shipped"
-
-
-def test_wizard_creates_every_catalog_kind(ui, monkeypatch):
-    created = fake_rest(monkeypatch)
-    store.update(skill_id="amzn1.ask.skill.abc")
-    body = ui.post("/setup/wizard/catalogs").data.decode()
-    for kind in views.CATALOG_KINDS:
-        assert kind in body
-    assert len(created["catalogs"]) == len(views.CATALOG_KINDS)
-
-
-def test_every_catalog_is_associated_with_the_skill(ui, monkeypatch):
-    """Association has to happen before upload or content cannot resolve."""
-    created = fake_rest(monkeypatch)
-    store.update(skill_id="amzn1.ask.skill.abc")
-    ui.post("/setup/wizard/catalogs")
-    assert len(created["associations"]) == len(views.CATALOG_KINDS)
-    assert all(skill == "amzn1.ask.skill.abc" for skill, _ in created["associations"])
-
-
-def test_catalog_creation_needs_a_skill_first(ui, monkeypatch):
-    fake_rest(monkeypatch)
-    assert "Create the skill first" in ui.post("/setup/wizard/catalogs").data.decode()
-
-
-def test_status_refresh_shouts_about_missing_enablement(ui, monkeypatch):
-    """The nastiest state in the project: healthy everywhere, silent in the room."""
-    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
-    monkeypatch.setattr(smapi_rest, "enablement_status", lambda skill_id: False)
-    store.update(skill_id="amzn1.ask.skill.abc")
-    body = ui.post("/setup/status/refresh").data.decode()
-    assert "not enabled" in body
-    assert "default music provider" in body
-
-
-def test_status_reports_a_healthy_enablement(ui, monkeypatch):
-    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
-    monkeypatch.setattr(smapi_rest, "enablement_status", lambda skill_id: True)
-    store.update(skill_id="amzn1.ask.skill.abc")
-    assert "Enabled for development" in ui.post("/setup/status/refresh").data.decode()
-
-
-def test_status_says_when_it_is_not_connected(ui, monkeypatch):
-    monkeypatch.setattr(smapi_rest, "connected", lambda: False)
-    store.update(skill_id="amzn1.ask.skill.abc")
-    assert "not connected" in ui.post("/setup/status/refresh").data.decode()
-
-
-def test_subsonic_step_reports_a_failure(ui, monkeypatch):
-    monkeypatch.setattr(validate, "subsonic_ping",
-                        lambda url, user, password, timeout=8.0: {
-                            "ok": False, "detail": "server said 40: Wrong username"})
-    body = ui.post("/setup/wizard/subsonic",
-                   data={"url": "http://nav.test", "user": "x",
-                         "password": "y"}).data.decode()
-    assert "Wrong username" in body
-    assert store.load()["subsonic_url"] == ""
-
-
 # --- progressive enhancement -------------------------------------------------
-
-
-def test_partials_come_back_wrapped_in_the_layout_without_htmx(ui):
-    body = ui.post("/setup/status/refresh").data.decode()
-    assert "<html" in body
-    assert "vendor/basecoat/basecoat.css" in body
-
-
-def test_partials_stay_bare_for_htmx(ui):
-    body = ui.post("/setup/status/refresh",
-                   headers={"HX-Request": "true"}).data.decode()
-    assert "<html" not in body
-
-
-def test_minting_a_proof_without_js_lands_back_on_the_page(ui):
-    resp = ui.post("/setup/endpoint/proof")
-    assert resp.status_code == 302
-    assert resp.headers["Location"].startswith("/setup/endpoint?token=")
-
-
-def test_endpoint_page_renders_the_qr_inline(ui):
-    resp = ui.post("/setup/endpoint/proof")
-    token = resp.headers["Location"].split("token=")[1]
-    body = ui.get(f"/setup/endpoint?token={token}").data.decode()
-    assert "<svg" in body
-    assert "vendor/htmx.min.js" in body
-
-
-def test_vendored_assets_are_served_locally(ui):
-    for asset in ("vendor/basecoat/basecoat.css", "vendor/htmx.min.js", "setup.css"):
-        assert ui.get(f"/setup/static/{asset}").status_code == 200
-
-
-def test_no_page_links_a_cdn(ui):
-    for path in ("/setup", "/setup/endpoint", "/setup/alias",
-                 "/setup/wizard", "/setup/stations", "/setup/login"):
-        body = ui.get(path).data.decode()
-        assert "unpkg.com" not in body
-        assert "cdn.jsdelivr.net" not in body
 
 
 # --- the OAuth callback is open, and has to defend itself -------------------
 
 
-def test_callback_rejects_a_response_it_did_not_ask_for(client):
-    """It is reachable from anywhere, so state is the only thing guarding it."""
-    setup_ops._PENDING.clear()
-    body = client.get("/setup/oauth/callback?code=x&state=whatever").data.decode()
-    assert "did not match" in body
-
-
-def test_callback_rejects_a_mismatched_state(client, monkeypatch):
-    setup_ops._PENDING.update({"state": "real", "verifier": "v", "at": time.time(),
-                           "client_id": "c", "client_secret": "s"})
-    body = client.get("/setup/oauth/callback?code=x&state=forged").data.decode()
-    assert "did not match" in body
-    setup_ops._PENDING.clear()
-
-
-def test_callback_rejects_an_expired_request(client):
-    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time() - 1000,
-                           "client_id": "c", "client_secret": "s"})
-    body = client.get("/setup/oauth/callback?code=x&state=s").data.decode()
-    assert "expired" in body
-    setup_ops._PENDING.clear()
-
-
-def test_callback_reports_an_error_from_amazon(client):
-    body = client.get(
-        "/setup/oauth/callback?error=access_denied&error_description=nope"
-    ).data.decode()
-    assert "access_denied" in body
-
-
-def test_a_good_callback_stores_the_token(client, monkeypatch):
-    seen = {}
-
-    def complete(code, client_id, client_secret, verifier):
-        seen.update(code=code, client_id=client_id, verifier=verifier)
-        return {"refresh_token": "r"}
-
-    monkeypatch.setattr(smapi_rest, "complete", complete)
-    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
-                           "client_id": "cid", "client_secret": "sec"})
-    body = client.get("/setup/oauth/callback?code=abc&state=s").data.decode()
-    assert "Connected" in body
-    assert seen == {"code": "abc", "client_id": "cid", "verifier": "v"}
-    # Single use: the pending request is consumed even on success.
-    assert not setup_ops._PENDING
-
-
-def test_callback_sends_the_operator_back_to_the_origin_they_came_from(client, monkeypatch):
-    """Amazon redirects to the public hostname, where the admin plane does not
-    serve. The way back must point at the address the wizard was driven from."""
-    monkeypatch.setattr(smapi_rest, "complete",
-                        lambda *a, **kw: {"refresh_token": "r"})
-    setup_ops._PENDING.update({"state": "s", "verifier": "v", "at": time.time(),
-                           "client_id": "cid", "client_secret": "sec",
-                           "origin": "http://100.85.183.28:5056"})
-    body = client.get("/setup/oauth/callback?code=abc&state=s").data.decode()
-    assert 'href="http://100.85.183.28:5056/setup/wizard"' in body
-
-
-def test_callback_without_a_known_origin_does_not_link_into_the_blocked_plane(client):
-    setup_ops._PENDING.clear()
-    body = client.get("/setup/oauth/callback?code=x&state=whatever").data.decode()
-    assert 'href="/setup/wizard"' not in body
-    assert "address you use for setup" in body
-
-
-def test_connect_refuses_without_an_https_public_base(ui, monkeypatch):
-    monkeypatch.setenv("PUBLIC_BASE", "http://192.168.1.50:5056")
-    body = ui.post("/setup/wizard/amazon/begin",
-                   data={"client_id": "c", "client_secret": "s"}).data.decode()
-    assert "https" in body
-
-
-def test_connect_needs_both_halves(ui):
-    body = ui.post("/setup/wizard/amazon/begin", data={"client_id": "c"}).data.decode()
-    assert "client secret" in body
-
-
 # --- teardown ---------------------------------------------------------------
 
 
-def test_teardown_refuses_without_an_exact_confirmation(ui, monkeypatch):
-    store.update(skill_id="amzn1.ask.skill.abc")
-    deleted = []
-    monkeypatch.setattr(smapi_rest, "delete_skill", lambda s: deleted.append(s))
-    body = ui.post("/setup/wizard/teardown", data={"confirm": "wrong"}).data.decode()
-    assert "Type the skill id" in body
-    assert deleted == []
-    assert store.load()["skill_id"] == "amzn1.ask.skill.abc"
-
-
-def test_teardown_removes_the_skill_and_its_catalogs(ui, monkeypatch):
-    store.update(skill_id="amzn1.ask.skill.abc",
-                 catalogs={"artists": "cat-1", "albums": "cat-2"})
-    removed = {"skills": [], "catalogs": []}
-    monkeypatch.setattr(smapi_rest, "delete_skill",
-                        lambda s: removed["skills"].append(s))
-    monkeypatch.setattr(smapi_rest, "delete_catalog",
-                        lambda c: removed["catalogs"].append(c))
-    body = ui.post("/setup/wizard/teardown",
-                   data={"confirm": "amzn1.ask.skill.abc"}).data.decode()
-    assert "deleted" in body
-    assert removed["skills"] == ["amzn1.ask.skill.abc"]
-    assert sorted(removed["catalogs"]) == ["cat-1", "cat-2"]
-    assert store.load()["skill_id"] == ""
-
-
 # --- the sign-in page has to be usable by someone who did not deploy it -----
-
-
-def test_login_page_says_where_to_find_the_token(anon):
-    body = anon.get("/setup/status").data.decode()
-    assert "ADMIN_TOKEN" in body
-    # The three places a self-hoster would actually have put it.
-    for hint in ("printenv ADMIN_TOKEN", "nomad var get", ".env"):
-        assert hint in body, hint
-
-
-def test_login_page_covers_having_lost_the_token(anon):
-    body = anon.get("/setup/status").data.decode()
-    assert "openssl rand" in body
-    assert "signs out every existing session" in body
-
-
-def test_login_page_never_contains_the_token(anon, monkeypatch):
-    """The page explains where the secret lives. It must not be the secret."""
-    monkeypatch.setenv("ADMIN_TOKEN", "super-secret-value")
-    assert b"super-secret-value" not in anon.get("/setup/status").data
 
 
 # --- the stepper ------------------------------------------------------------
@@ -1053,168 +415,10 @@ def _all_steps_done(monkeypatch):
                  enabled=True)
 
 
-def test_the_wizard_resumes_at_the_first_unfinished_step(ui, monkeypatch):
-    monkeypatch.setattr(app_module.subsonic, "BASE", "")
-    resp = ui.get("/setup/wizard")
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/wizard/server")
-
-
-def test_a_later_step_is_locked_until_the_earlier_ones_are_done(ui):
-    resp = ui.get("/setup/wizard/enable")
-    assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/setup/wizard")
-
-
-def test_a_finished_step_can_be_revisited(ui, monkeypatch):
-    """Going back to review is not the same as redoing."""
-    _all_steps_done(monkeypatch)
-    assert ui.get("/setup/wizard/server").status_code == 200
-
-
-def test_each_step_offers_back_and_continue(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    body = ui.get("/setup/wizard/alias").data.decode()
-    assert "/setup/wizard/amazon" in body   # back
-    assert "/setup/wizard/skill" in body    # continue
-
-
-def test_continue_is_disabled_on_an_unfinished_step(ui, monkeypatch):
-    # Explicitly unfinished. The suite now sets a music server by default,
-    # because subsonic.configured() gates real behaviour elsewhere, so a test
-    # about an incomplete step has to say which step is incomplete. Cleared on
-    # the module rather than in the environment: the step asks subsonic
-    # whether it is configured, and subsonic stopped reading the variable when
-    # Music Assistant started supplying the value directly.
-    monkeypatch.setattr(app_module.subsonic, "BASE", "")
-    body = ui.get("/setup/wizard/server").data.decode()
-    assert 'title="Complete this step to unlock Continue."' in body
-    assert '>Continue</a>' not in body
-
-
-def test_wizard_alias_step_prefills_the_default(ui, monkeypatch):
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
-    store.update(endpoint_ok=True)
-    body = ui.get("/setup/wizard/alias").data.decode()
-    assert 'value="ampere"' in body
-    assert "placeholder" not in body
-    # The old separate checker linked into the gated configuration pages.
-    assert "Check it against my library" not in body
-
-
-def test_wizard_alias_save_checks_and_advances_when_clear(ui, monkeypatch):
-    resp = ui.post("/setup/wizard/alias", data={"alias": "ampere"},
-                   headers={"HX-Request": "true"})
-    assert resp.status_code == 204
-    assert resp.headers.get("HX-Refresh") == "true"
-    assert store.load()["alias"] == "ampere"
-
-
-def test_wizard_alias_save_surfaces_a_collision_but_still_saves(ui, monkeypatch):
-    library(monkeypatch, artists=["Jukebox The Ghost"])
-    body = ui.post("/setup/wizard/alias", data={"alias": "jukebox"},
-                   headers={"HX-Request": "true"}).data.decode()
-    assert "Jukebox The Ghost" in body
-    assert "Continue with" in body
-    assert store.load()["alias"] == "jukebox"
-
-
 def _skill_step_ready(monkeypatch):
     monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
     monkeypatch.setattr(smapi_rest, "connected", lambda: True)
     store.update(endpoint_ok=True, alias="ampere")
-
-
-def test_skill_step_prefills_the_detected_vendor(ui, monkeypatch):
-    """A value the wizard can read is shown filled in, never as a placeholder."""
-    _skill_step_ready(monkeypatch)
-    monkeypatch.setattr(smapi_rest, "vendors",
-                        lambda: [{"id": "M1REAL", "name": "Grayson"}])
-    body = ui.get("/setup/wizard/skill").data.decode()
-    assert 'value="M1REAL"' in body
-    assert "placeholder" not in body
-    assert 'data-reset="sk-vendor"' in body
-    assert 'value="ampere"' in body          # alias arrives filled too
-
-
-def test_skill_step_offers_a_dropdown_when_the_account_has_several_vendors(ui, monkeypatch):
-    _skill_step_ready(monkeypatch)
-    monkeypatch.setattr(smapi_rest, "vendors", lambda: [
-        {"id": "M1A", "name": "one"}, {"id": "M1B", "name": "two"}])
-    body = ui.get("/setup/wizard/skill").data.decode()
-    assert "<select" in body
-    assert "M1A" in body and "M1B" in body
-
-
-def test_creating_the_skill_uses_the_vendor_from_the_form(ui, monkeypatch):
-    _skill_step_ready(monkeypatch)
-    seen = {}
-
-    def create(manifest, vendor=""):
-        seen["vendor"] = vendor
-        return "amzn1.ask.skill.new"
-
-    monkeypatch.setattr(smapi_rest, "create_skill", create)
-    ui.post("/setup/wizard/skill", data={"vendor_id": "M1CHOSEN",
-                                         "alias": "ampere"},
-            headers={"HX-Request": "true"})
-    assert seen["vendor"] == "M1CHOSEN"
-    assert store.load()["skill_id"] == "amzn1.ask.skill.new"
-
-
-def test_a_created_skill_replaces_the_form_and_refuses_duplicates(ui, monkeypatch):
-    """The create button must not be able to mint duplicates."""
-    created = fake_rest(monkeypatch)
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    store.update(endpoint_ok=True, alias="ampere",
-                 skill_id="amzn1.ask.skill.already")
-    body = ui.get("/setup/wizard/skill").data.decode()
-    # The step title still says Create the skill; the button must be gone.
-    assert '<button type="submit" class="btn">Create the skill</button>' not in body
-    assert "amzn1.ask.skill.already" in body
-
-    resp = ui.post("/setup/wizard/skill", data={"alias": "ampere"},
-                   headers={"HX-Request": "true"})
-    assert resp.status_code == 204          # acknowledged, nothing created
-    assert created["skills"] == []
-    assert store.load()["skill_id"] == "amzn1.ask.skill.already"
-
-
-def test_a_preexisting_music_skill_is_surfaced_with_removal_guidance(ui, monkeypatch):
-    fake_rest(monkeypatch)
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    store.update(endpoint_ok=True, alias="ampere")
-    monkeypatch.setattr(smapi_rest, "list_skills", lambda: [
-        {"skillId": "amzn1.ask.skill.old", "apis": ["music"],
-         "nameByLocale": {"en-US": "Old Bridge"}, "stage": "development"},
-        {"skillId": "amzn1.ask.skill.game", "apis": ["custom"],
-         "nameByLocale": {"en-US": "Trivia"}, "stage": "development"},
-    ])
-    body = ui.get("/setup/wizard/skill").data.decode()
-    assert "already has a music skill" in body
-    assert "Old Bridge" in body
-    assert "Trivia" not in body             # non-music skills are not noise
-
-
-def test_removing_a_leftover_skill_requires_confirmation(ui, monkeypatch):
-    fake_rest(monkeypatch)
-    monkeypatch.setattr(smapi_rest, "list_skills", lambda: [])
-    removed = []
-    monkeypatch.setattr(smapi_rest, "delete_skill", removed.append)
-    store.update(endpoint_ok=True)
-
-    body = ui.post("/setup/wizard/skill/remove",
-                   data={"skill_id": "amzn1.ask.skill.old"},
-                   headers={"HX-Request": "true"}).data.decode()
-    assert "confirmation" in body
-    assert removed == []
-
-    body = ui.post("/setup/wizard/skill/remove",
-                   data={"skill_id": "amzn1.ask.skill.old", "confirm": "yes"},
-                   headers={"HX-Request": "true"}).data.decode()
-    assert "Deleted amzn1.ask.skill.old" in body
-    assert removed == ["amzn1.ask.skill.old"]
 
 
 def test_the_manifest_declares_every_required_music_request():
@@ -1227,63 +431,6 @@ def test_the_manifest_declares_every_required_music_request():
         assert request_name in body, request_name
 
 
-def test_a_skill_that_fails_validation_is_deleted_and_explained(ui, monkeypatch):
-    """Creation returning a skillId is not acceptance."""
-    created = fake_rest(monkeypatch, skill_status=lambda sid: {
-        "manifest": {"lastUpdateRequest": {
-            "status": "FAILED",
-            "errors": [{"message": "An interface is missing"}]}}})
-    store.update(endpoint_ok=True, alias="ampere")
-    body = ui.post("/setup/wizard/skill", data={"alias": "ampere"},
-                   headers={"HX-Request": "true"}).data.decode()
-    assert "Amazon rejected the manifest" in body
-    assert "An interface is missing" in body
-    assert created["deleted"] == ["amzn1.ask.skill.abc"]
-    assert not store.load().get("skill_id")
-
-
-def test_catalog_step_reuses_orphans_and_records_before_association(ui, monkeypatch):
-    """A created-but-unassociated catalog must be found again, not re-minted."""
-    boom = {"raise": True}
-
-    def associate(skill_id, catalog_id):
-        if boom["raise"]:
-            raise smapi_rest.SmapiError("association exploded")
-
-    created = fake_rest(monkeypatch, associate_catalog=associate,
-                        list_catalogs=lambda: [
-                            {"id": "cat-orphan", "title": "Ampere artists"}])
-    store.update(endpoint_ok=True, skill_id="amzn1.ask.skill.a")
-
-    ui.post("/setup/wizard/catalogs", headers={"HX-Request": "true"})
-    saved = store.load()["catalogs"]
-    assert saved["artists"] == "cat-orphan"       # reused, not re-created
-    assert all(saved.values())                    # recorded despite failures
-    assert ("artists", "AMAZON.MusicGroup") not in created["catalogs"]
-
-    boom["raise"] = False                          # association healed
-    resp = ui.post("/setup/wizard/catalogs", headers={"HX-Request": "true"})
-    assert resp.status_code == 204                 # every kind associated
-    assert store.load()["catalogs"] == saved       # nothing minted twice
-
-
-def test_a_vanished_skill_undoes_the_step_and_offers_repair(ui, monkeypatch):
-    """A recorded id is not proof: the skill can die outside the wizard."""
-    fake_rest(monkeypatch, skill_status=lambda sid: (_ for _ in ()).throw(
-        smapi_rest.SmapiError("GET failed: 404", status=404)))
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    store.update(endpoint_ok=True, alias="ampere",
-                 skill_id="amzn1.ask.skill.gone", enabled=True)
-    body = ui.get("/setup/wizard/skill").data.decode()
-    assert "no longer exists" in body
-    assert "/setup/wizard/skill/forget" in body
-
-    resp = ui.post("/setup/wizard/skill/forget", headers={"HX-Request": "true"})
-    assert resp.status_code == 204
-    assert store.load()["skill_id"] == ""
-    assert store.load()["enabled"] is False
-
-
 def test_a_lookup_blip_does_not_undo_the_skill_step(monkeypatch):
     """Only a definitive 404 counts as gone; a 500 or timeout must not."""
     from ma_provider import setup_steps as wizard_steps
@@ -1293,482 +440,7 @@ def test_a_lookup_blip_does_not_undo_the_skill_step(monkeypatch):
     assert wizard_steps._skill_done({"skill_id": "amzn1.ask.skill.x"}) is True
 
 
-def test_recreating_the_skill_reattaches_recorded_catalogs(ui, monkeypatch):
-    created = fake_rest(monkeypatch)
-    store.update(endpoint_ok=True, alias="ampere",
-                 catalogs={"artists": "cat-1", "albums": "cat-2"})
-    ui.post("/setup/wizard/skill", data={"alias": "ampere"},
-            headers={"HX-Request": "true"})
-    assert ("amzn1.ask.skill.abc", "cat-1") in created["associations"]
-    assert ("amzn1.ask.skill.abc", "cat-2") in created["associations"]
-
-
-def test_upload_runs_as_a_job_and_reports_progress(ui, monkeypatch):
-    """A minutes-long build cannot live inside one request."""
-    ran = {}
-
-    class Immediate:
-        def __init__(self, target, daemon=None):
-            ran["target"] = target
-        def start(self):
-            ran["target"]()
-
-    monkeypatch.setattr(views.threading, "Thread", Immediate)
-    monkeypatch.setattr(views.catalog_sync, "collect",
-                        lambda progress=None: {"artists": [{"id": "a1"}]})
-    monkeypatch.setattr(views.catalog_sync, "apply_timestamps",
-                        lambda kind, entities, saved: (entities, "hash"))
-    monkeypatch.setattr(smapi_rest, "upload_catalog",
-                        lambda catalog_id, payload: "up-1")
-    store.update(endpoint_ok=True, skill_id="amzn1.ask.skill.a",
-                 catalogs={"artists": "cat-1"})
-
-    body = ui.post("/setup/wizard/upload",
-                   headers={"HX-Request": "true"}).data.decode()
-    assert store.load()["uploads"]["artists"] == "up-1"
-    assert "Reload" in body                    # the job already finished here
-
-    # The finished poll answers with a reload script (the leave guard has to
-    # come off before the reload, or the dialog would fire on success), so
-    # the rail and the ingestion panel re-derive together.
-    resp = ui.get("/setup/wizard/upload/progress",
-                  headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert b"location.reload()" in resp.data
-    assert b"removeEventListener" in resp.data
-
-
-def test_autosync_interval_is_floored_above_the_rate_limit(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    ui.post("/setup/wizard/autosync", data={"enabled": "1", "hours": "1"},
-            headers={"HX-Request": "true"})
-    assert store.load()["auto_sync_hours"] == views.AUTO_SYNC_MIN_HOURS
-
-    ui.post("/setup/wizard/autosync", data={"enabled": "1", "hours": "24"},
-            headers={"HX-Request": "true"})
-    assert store.load()["auto_sync_hours"] == 24
-
-    ui.post("/setup/wizard/autosync", data={"hours": "24"},
-            headers={"HX-Request": "true"})     # checkbox off = disabled
-    assert store.load()["auto_sync_hours"] == 0
-
-
-def test_autosync_due_respects_interval_and_floor(ui):
-    now = 1_000_000.0
-    state = {"catalogs": {"artists": "c1"}, "auto_sync_hours": 6,
-             "last_auto_sync": 0}
-    assert views._auto_sync_due(state, now) is True
-    state["last_auto_sync"] = now - 3600
-    assert views._auto_sync_due(state, now) is False
-    # An interval below the floor behaves as the floor, not as written.
-    state["auto_sync_hours"] = 1
-    state["last_auto_sync"] = now - 2 * 3600
-    assert views._auto_sync_due(state, now) is False
-    assert views._auto_sync_due({"auto_sync_hours": 0,
-                                 "catalogs": {"a": "c"}}, now) is False
-
-
-def test_binding_keepalive_staleness_and_traffic_guard(ui, monkeypatch, tmp_path):
-    now = 1_000_000.0
-    assert views._binding_stale(
-        {"skill_id": "s", "enabled": True, "enabled_at": now - 3600}, now) is False
-    assert views._binding_stale(
-        {"skill_id": "s", "enabled": True, "enabled_at": now - 5 * 3600}, now) is True
-    assert views._binding_stale({"skill_id": "s", "enabled": False}, now) is False
-    assert views._binding_stale({"enabled": True}, now) is False
-
-    # No captures: no active session, keep-alive may run.
-    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(tmp_path / "empty"))
-    assert views._recent_traffic() is False
-    # A fresh capture marks an active session, which must block the cycle.
-    live = tmp_path / "live"
-    live.mkdir()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-    (live / f"{stamp}-Alexa.Audio.PlayQueue.GetNextItem.json").write_text("{}")
-    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(live))
-    assert views._recent_traffic() is True
-    # An old one does not.
-    old = tmp_path / "old"
-    old.mkdir()
-    (old / "20200101T000000000000-Alexa.Audio.PlayQueue.GetNextItem.json"
-     ).write_text("{}")
-    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(old))
-    assert views._recent_traffic() is False
-    # A name this service did not write falls back to mtime, which errs
-    # toward "playing" rather than risking a cycle mid-song.
-    odd = tmp_path / "odd"
-    odd.mkdir()
-    (odd / "stray.json").write_text("{}")
-    monkeypatch.setattr(_core, "LOG_DIR", pathlib.Path(odd))
-    assert views._recent_traffic() is True
-
-
-def test_scheduled_runs_ignore_the_parting_beacon(ui):
-    views._UPLOAD.update(running=True, cancel=False, auto=True)
-    ui.post("/setup/wizard/upload/stop")
-    assert views._UPLOAD["cancel"] is False
-
-
-def test_scheduled_upload_cycles_enablement_and_skips_unchanged(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    monkeypatch.setattr(views.catalog_sync, "collect",
-                        lambda progress=None: {"artists": [{"id": "a"}]})
-    monkeypatch.setattr(views.catalog_sync, "apply_timestamps",
-                        lambda kind, entities, saved: (entities, "hash-1"))
-    monkeypatch.setattr(smapi_rest, "upload_catalog",
-                        lambda catalog_id, payload: "up-9")
-    cycled = []
-    # Patched where the work now lives. The view still has a wrapper of the
-    # same name, and patching that would have left this test passing while
-    # the scheduled path called the real thing.
-    monkeypatch.setattr(setup_ops, "cycle_enablement", lambda sid: (
-        cycled.append(sid) or setup_ops.Outcome(True, "cycled")))
-
-    views._UPLOAD.update(running=True, auto=True, cancel=False)
-    views._run_upload(auto=True)
-    assert cycled == ["amzn1.ask.skill.a"]
-    kinds = {r["kind"]: r for r in views._UPLOAD["results"]}
-    assert kinds["enablement"]["ok"] is True
-
-    # Second run with identical content: nothing uploads, nothing cycles.
-    uploads_called = []
-    monkeypatch.setattr(smapi_rest, "upload_catalog",
-                        lambda catalog_id, payload: uploads_called.append(1))
-    views._UPLOAD.update(running=True, auto=True, cancel=False)
-    views._run_upload(auto=True)
-    assert not uploads_called
-    assert cycled == ["amzn1.ask.skill.a"]
-    kinds = {r["kind"]: r for r in views._UPLOAD["results"]}
-    assert kinds["artists"]["detail"] == "unchanged, skipped"
-
-
-def test_leaving_the_upload_page_stops_the_job(ui, monkeypatch):
-    # The parting beacon flags the job; the next progress tick aborts it
-    # without recording anything.
-    views._UPLOAD.update(running=True, cancel=False)
-    resp = ui.post("/setup/wizard/upload/stop")
-    assert resp.status_code == 204
-    assert views._UPLOAD["cancel"] is True
-
-    called = []
-    monkeypatch.setattr(views.catalog_sync, "collect",
-                        lambda progress=None: called.append("collect"))
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    views._run_upload()
-    assert not called                      # aborted before the crawl began
-    assert views._UPLOAD["message"].startswith("Stopped")
-    assert views._UPLOAD["running"] is False
-    assert store.load().get("uploads") in (None, {})
-
-
-def test_the_status_page_says_what_the_scheduler_will_do_and_when(ui, monkeypatch):
-    """A process whose whole job is acting while nobody watches must say so.
-
-    Before this the scheduler logged only to a ring buffer that a restart
-    empties, so "when did the keep-alive last run" could be answered only by
-    catching it in the act.
-    """
-    _all_steps_done(monkeypatch)
-    store.update(enabled_at=time.time(), auto_sync_hours=12,
-                 last_auto_sync=time.time() - 3600)
-    body = ui.get("/setup/status").data.decode()
-    assert "Scheduler" in body
-    assert "every 12 hours" in body
-    assert "Binding keep-alive" in body
-    assert "armed" in body
-
-
-def test_the_status_page_calls_out_a_binding_a_cycle_could_not_fix(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    store.update(reactive_armed=False, reactive_misses=4,
-                 reactive_cycled_at=time.time() - 900)
-    body = ui.get("/setup/status").data.decode()
-    assert "re-cycling did not fix it" in body
-    assert "4 more" in body
-
-
-def test_the_cycle_endpoint_answers_json_for_a_caller_that_is_not_a_browser(
-        ui, monkeypatch):
-    """Home Assistant calls this a couple of minutes before the wake alarm.
-
-    Pre-emption is the only way to guarantee a fresh binding at one named
-    instant; neither the keep-alive clock nor the miss detector can promise
-    that, and the alarm-driven routine is the moment nobody retries.
-    """
-    _all_steps_done(monkeypatch)
-    monkeypatch.setattr(smapi_rest, "delete_enablement", lambda sid: None)
-    monkeypatch.setattr(smapi_rest, "set_enablement", lambda sid: None)
-    monkeypatch.setattr(smapi_rest, "get_manifest",
-                        lambda sid: {"manifest": {"apis": {}}})
-    monkeypatch.setattr(smapi_rest, "update_manifest", lambda sid, m: None)
-
-    resp = ui.post("/setup/skill/cycle")
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["ok"] is True
-    assert body["enabled_at"] > 0
-
-
-def test_the_cycle_endpoint_reports_failure_with_a_non_200(ui, monkeypatch):
-    """A caller scheduling around this has to be able to tell it did not work."""
-    _all_steps_done(monkeypatch)
-
-    def refuse(sid):
-        raise smapi_rest.SmapiError("nope")
-
-    monkeypatch.setattr(smapi_rest, "get_manifest",
-                        lambda sid: {"manifest": {"apis": {}}})
-    monkeypatch.setattr(smapi_rest, "update_manifest", lambda sid, m: None)
-    monkeypatch.setattr(smapi_rest, "delete_enablement", lambda sid: None)
-    monkeypatch.setattr(smapi_rest, "set_enablement", refuse)
-
-    resp = ui.post("/setup/skill/cycle")
-    assert resp.status_code == 503
-    assert resp.get_json()["ok"] is False
-
-
-def test_the_health_endpoint_exposes_the_binding_measurement(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    store.update(reactive_armed=False, reactive_misses=2)
-    body = ui.get("/setup/skill/health").get_json()
-    assert body["armed"] is False
-    assert body["misses_since_cycle"] == 2
-    assert body["degraded"] is True
-
-
-def test_the_admin_plane_still_guards_the_cycle_endpoint(client):
-    """It runs SMAPI against the operator's Amazon account, header or nothing."""
-    assert client.post("/setup/skill/cycle").status_code == 401
-
-
-def test_enablement_can_be_cycled_and_disabled_from_the_panel(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    calls = []
-    monkeypatch.setattr(smapi_rest, "delete_enablement",
-                        lambda sid: calls.append(("del", sid)))
-    monkeypatch.setattr(smapi_rest, "set_enablement",
-                        lambda sid: calls.append(("set", sid)))
-    monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: True)
-    monkeypatch.setattr(smapi_rest, "get_manifest",
-                        lambda sid: {"manifest": {"apis": {}}})
-    monkeypatch.setattr(smapi_rest, "update_manifest",
-                        lambda sid, m: calls.append(("manifest", sid)))
-
-    body = ui.get("/setup/status").data.decode()
-    assert "Cycle enablement" in body
-    assert ">Disable</button>" in body
-
-    body = ui.post("/setup/skill/enable",
-                   headers={"HX-Request": "true"}).data.decode()
-    # The re-provision nudge runs first, then the delete-set cycle.
-    assert calls.index(("manifest", "amzn1.ask.skill.a")) \
-        < calls.index(("del", "amzn1.ask.skill.a"))
-    assert ("set", "amzn1.ask.skill.a") in calls
-    assert "Re-provisioned and enabled for development." in body
-    assert store.load()["enabled_at"]
-
-    monkeypatch.setattr(smapi_rest, "enablement_status", lambda sid: False)
-    body = ui.post("/setup/skill/disable",
-                   headers={"HX-Request": "true"}).data.decode()
-    assert calls[-1] == ("del", "amzn1.ask.skill.a")
-    assert store.load()["enabled"] is False
-    assert "Disabled." in body
-    assert "not bound" in body
-
-
-def test_ingestion_success_unlocks_continue_without_a_reload(ui, monkeypatch):
-    # The polled panel observing voice ready must (1) seed the step gate's
-    # cache so done flips immediately and (2) swap the rail and stepnav
-    # out of band so Continue goes live with no page reload.
-    _all_steps_done(monkeypatch)
-    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
-    body = ui.get("/setup/wizard/ingestion",
-                  headers={"HX-Request": "true"}).data.decode()
-    assert 'hx-swap-oob="outerHTML"' in body
-    assert 'id="stepnav"' in body
-    assert '>Continue</a>' in body
-    assert views.wizard_steps._INGESTION["ok"] is True
-
-    # Ingestion still pending: no out of band swap rides along.
-    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
-    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
-        "ingestionSteps": [{"name": "ER_INGESTION", "status": "IN_PROGRESS"}]})
-    body = ui.get("/setup/wizard/ingestion",
-                  headers={"HX-Request": "true"}).data.decode()
-    assert "hx-swap-oob" not in body
-
-
-def test_playlists_shuffle_only_when_the_setting_is_on(cfg):
-    from ma_provider import core as bridge
-    assert bridge.shuffle_by_default("pl:x") is False
-    cfg.post("/setup/stations", data={
-        "after_content": "stop", "radio_artists": "12",
-        "radio_tracks_per_artist": "12", "shuffle_playlists": "1"})
-    assert store.load()["shuffle_playlists"] is True
-    assert bridge.shuffle_by_default("pl:x") is True
-    assert bridge.shuffle_by_default("al:x") is False   # albums never default on
-
-    cfg.post("/setup/stations", data={
-        "after_content": "stop", "radio_artists": "12",
-        "radio_tracks_per_artist": "12"})
-    assert bridge.shuffle_by_default("pl:x") is False
-
-
-def test_logs_page_shows_the_ring_tail_and_captures(ui, anon):
-    assert anon.get("/setup/logs").status_code == 401
-    logging.getLogger("ma-music-skill").info("ring probe line 4711")
-    capture_file(
-        "20260101T000000-Alexa.Media.Search.GetPlayableContent.json",
-        {"headers": {"Signature": "x"},
-         "body": {"header": {"namespace": "Alexa.Media.Search",
-                             "name": "GetPlayableContent"}}})
-    body = ui.get("/setup/logs").data.decode()
-    assert "ring probe line 4711" in body
-    assert "GetPlayableContent" in body
-    assert "signed" in body
-
-
-def test_ingestion_table_reports_real_step_statuses(ui, monkeypatch):
-    # The panel must show what Amazon actually said, not placeholders: the
-    # per-step statuses, and an honest "no report yet" before any exist.
-    _all_steps_done(monkeypatch)
-    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
-        "status": "IN_PROGRESS",
-        "ingestionSteps": [
-            {"name": "ER_INGESTION", "status": "IN_PROGRESS"},
-            {"name": "SLU_MODELING", "status": "PENDING"},
-        ]})
-    body = ui.get("/setup/wizard/ingestion").data.decode()
-    assert "ingesting" in body
-    assert "IN_PROGRESS" in body
-    assert "PENDING" in body
-
-    monkeypatch.setattr(smapi_rest, "upload_status",
-                        lambda c, u: {"ingestionSteps": []})
-    body = ui.get("/setup/wizard/ingestion").data.decode()
-    assert "queued" in body
-    assert "no report yet" in body
-
-    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
-        "status": "IN_PROGRESS",
-        "ingestionSteps": [{"name": "ER_INGESTION", "status": "SUCCEEDED"}]})
-    body = ui.get("/setup/wizard/ingestion").data.decode()
-    assert "voice ready" in body
-    assert "SUCCEEDED" in body
-
-
-def test_continue_is_disabled_while_an_upload_runs(ui, monkeypatch):
-    # Even a step that already counts as done must not hand out Continue
-    # while a fresh run is in flight; leaving the page would stop it.
-    _all_steps_done(monkeypatch)
-    views._UPLOAD.update(running=True, phase="reading the library")
-    body = ui.get("/setup/wizard/upload").data.decode()
-    assert 'title="An upload is running.' in body
-    assert '>Continue</a>' not in body
-
-
-def test_upload_step_is_not_done_until_ingestion_succeeds(ui, monkeypatch):
-    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
-    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
-        "ingestionSteps": [{"name": "ER_INGESTION", "status": "IN_PROGRESS"}]})
-    state = {"catalogs": {"artists": "c1"}, "uploads": {"artists": "u1"}}
-    assert views.wizard_steps._upload_done(state) is False
-
-    views.wizard_steps._INGESTION.update(at=0.0, sig="", ok=False)
-    monkeypatch.setattr(smapi_rest, "upload_status", lambda c, u: {
-        "ingestionSteps": [{"name": "ER_INGESTION", "status": "SUCCEEDED"}]})
-    assert views.wizard_steps._upload_done(state) is True
-
-
-def test_upload_page_shows_the_running_phase(ui, monkeypatch):
-    views._UPLOAD.update(running=True, phase="uploading tracks")
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    monkeypatch.setattr(smapi_rest, "connected", lambda: True)
-    monkeypatch.setattr(smapi_rest, "skill_status", lambda sid: {
-        "manifest": {"lastUpdateRequest": {"status": "SUCCEEDED"}}})
-    store.update(endpoint_ok=True, alias="ampere",
-                 skill_id="amzn1.ask.skill.a", catalogs={"artists": "c1"})
-    body = ui.get("/setup/wizard/upload").data.decode()
-    assert "uploading tracks" in body
-    # No second start button while the job is running.
-    assert "Build and upload the catalogs</button>" not in body
-
-
-def test_amazon_step_offers_copyable_console_values(ui, monkeypatch):
-    """Every value the Amazon console asks for is a copy row, not prose."""
-    monkeypatch.setenv("SUBSONIC_URL", "http://nav.test")
-    store.update(endpoint_ok=True)
-    body = ui.get("/setup/wizard/amazon").data.decode()
-    assert body.count("data-copy") >= 4
-    assert 'value="Ampere"' in body          # Security Profile Name
-    assert "cp-privacy-url" in body          # Consent Privacy Notice URL
-    assert "cp-return-url" in body           # Allowed Return URL
-    assert "copy.js" in body
-
-
-def test_a_finished_wizard_shows_the_done_page(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    body = ui.get("/setup/wizard").data.decode()
-    assert "Setup complete" in body
-    # The done page is a hub, not a dead end.
-    for link in ("/setup/alias", "/setup/stations", "/setup/endpoint", "/setup"):
-        assert link in body, link
-
-
-def test_a_finished_wizard_stops_hijacking_the_landing_page(ui, monkeypatch):
-    _all_steps_done(monkeypatch)
-    assert ui.get("/setup").status_code == 200
-
-
-def test_an_unknown_step_goes_back_to_the_wizard(ui):
-    resp = ui.get("/setup/wizard/nonsense")
-    assert resp.status_code == 302
-
-
-def test_completion_is_derived_not_stored(ui, monkeypatch):
-    """A stored flag would still claim done after the skill was deleted."""
-    _all_steps_done(monkeypatch)
-    assert ui.get("/setup").status_code == 200
-    store.update(skill_id="")
-    assert ui.get("/setup").status_code == 302
-
-
 # --- completing a step reloads the page, failing keeps the error inline -----
-
-
-def test_a_completed_step_asks_the_browser_to_refresh(ui, monkeypatch):
-    """A fragment swap cannot update the rail or unlock Continue."""
-    monkeypatch.setattr(validate, "subsonic_ping",
-                        lambda url, user, password, timeout=8.0: {"ok": True,
-                                                                  "detail": "ok"})
-    resp = ui.post("/setup/wizard/subsonic",
-                   data={"url": "http://nav.test", "user": "x", "password": "y"},
-                   headers={"HX-Request": "true"})
-    assert resp.status_code == 204
-    assert resp.headers.get("HX-Refresh") == "true"
-
-
-def test_a_failed_step_keeps_the_error_next_to_the_form(ui, monkeypatch):
-    monkeypatch.setattr(validate, "subsonic_ping",
-                        lambda url, user, password, timeout=8.0: {
-                            "ok": False, "detail": "Wrong username"})
-    resp = ui.post("/setup/wizard/subsonic",
-                   data={"url": "http://nav.test", "user": "x", "password": "y"},
-                   headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert "Wrong username" in resp.data.decode()
-    assert "HX-Refresh" not in resp.headers
-
-
-def test_without_htmx_a_completed_step_still_renders(ui, monkeypatch):
-    """The no-JavaScript path gets a page, not an empty 204."""
-    monkeypatch.setattr(validate, "subsonic_ping",
-                        lambda url, user, password, timeout=8.0: {"ok": True,
-                                                                  "detail": "ok"})
-    resp = ui.post("/setup/wizard/subsonic",
-                   data={"url": "http://nav.test", "user": "x", "password": "y"})
-    assert resp.status_code == 200
-    assert b"connected" in resp.data
 
 
 # --- the endpoint step accepts live traffic as proof ------------------------

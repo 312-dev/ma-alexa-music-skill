@@ -32,6 +32,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
+from . import binding
 from . import setup_ops
 from . import setup_state as store
 
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 # same library. MA returns the existing task when one with this id is active.
 UPLOAD_TASK_ID = "ampere_catalog_upload"
 SYNC_TASK_ID = "ampere_catalog_sync"
+BINDING_TASK_ID = "ampere_binding_keepalive"
 
 # The floor under the schedule interval. Amazon rate-limits music catalog
 # uploads per catalog per day; four runs a day stays under that ceiling, so
@@ -145,15 +147,49 @@ class AmpereTasks:
             allow_retry=False,
         )
 
+    def register_binding_keepalive(self) -> None:
+        """The keep-alive and the reactive detector, on MA's scheduler.
+
+        Hourly, and not configurable in the UI. The interval is not a
+        preference: it has to be well under BINDING_KEEPALIVE_HOURS or the
+        keep-alive it drives cannot fire before the decay it exists to
+        prevent, and a user who set it to daily would silently get a skill
+        that stops answering every afternoon.
+
+        Cheap to run. The ordinary tick reads capture filenames, makes no
+        network call, and returns "nothing".
+        """
+        from music_assistant_models.background_task import TaskSchedule
+        from music_assistant_models.enums import TaskScheduleType
+
+        self.mass.tasks.register_scheduled_task(
+            task_id=BINDING_TASK_ID,
+            name="Ampere: keep the Alexa skill bound",
+            handler=self._binding_tick,
+            schedule=TaskSchedule(type=TaskScheduleType.HOURLY, every=1,
+                                  enabled=True),
+            allow_cancel=True,
+            allow_retry=False,
+        )
+
+    async def _binding_tick(self) -> None:
+        loop = asyncio.get_running_loop()
+        outcome = await loop.run_in_executor(self.executor, binding.tick)
+        # Logged only when it acted. An hourly task that says "nothing" every
+        # hour is an hourly task nobody reads.
+        if outcome != "nothing":
+            self.logger.info("binding keep-alive: %s", outcome)
+
     def unregister_sync(self) -> None:
         """Take the scheduled task away when the provider goes.
 
         Its handler is a bound method of this instance, so leaving it
         registered would keep a dead provider's upload running on a timer.
         """
-        try:
-            self.mass.tasks.remove_task(SYNC_TASK_ID)
-        except Exception:
-            # Already gone, or currently running and therefore not removable.
-            # Neither is worth failing an unload over.
-            self.logger.debug("scheduled sync was not removed", exc_info=True)
+        for task_id in (SYNC_TASK_ID, BINDING_TASK_ID):
+            try:
+                self.mass.tasks.remove_task(task_id)
+            except Exception:
+                # Already gone, or currently running and therefore not
+                # removable. Neither is worth failing an unload over.
+                self.logger.debug("%s was not removed", task_id, exc_info=True)

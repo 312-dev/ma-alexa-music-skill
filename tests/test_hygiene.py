@@ -193,35 +193,21 @@ def test_writing_queue_state_still_works_when_prune_fails(tmp_path, monkeypatch)
 def test_the_image_copies_the_package_whole_rather_than_module_by_module():
     """A named-module COPY list silently omits whatever was added last.
 
-    Caught the hard way: `handoff.py` was added, the build succeeded, the image
-    passed a push, and it only failed when it ran. The old form of this test
-    compared the list against the directory and had to be kept in step by hand.
+    A loose module at the repository root is one the provider cannot import:
+    Music Assistant loads `providers/ampere` and a provider may only import
+    from inside itself, so anything outside the package is unreachable from
+    the code that runs.
 
-    Copying the package as a directory removes the failure mode instead of
-    detecting it, so what is worth pinning now is that nobody goes back to
-    enumerating files. Every module lives in `ma_provider`, so one COPY of that
-    directory is both necessary and sufficient.
+    This used to also pin the shape of the image's COPY lines, because naming
+    modules individually meant adding one and forgetting to list it built a
+    green image that died on import at start. There is no image any more: the
+    package is the deliverable and it is synced whole.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    dockerfile = (root / "Dockerfile").read_text()
-
-    assert re.search(r"^COPY\s+ma_provider/\s+ma_provider/\s*$", dockerfile, re.M), (
-        "the image must COPY the ma_provider package as a directory"
-    )
-    named = {
-        m for m in re.findall(r"ma_provider/[\w.-]+\.py", dockerfile)
-    }
-    assert not named, (
-        "modules are named individually again, which is how one gets missed: "
-        + ", ".join(sorted(named))
-    )
-
-    # Nothing but the Flask adapter should be left loose at the root, since a
-    # loose module is one the provider inside Music Assistant cannot import.
     loose = {
         path.name
         for path in root.glob("*.py")
-        if path.name not in {"conftest.py", "setup.py", "app.py"}
+        if path.name not in {"conftest.py", "setup.py"}
     }
     assert not loose, (
         "these belong in ma_provider, or the provider cannot import them: "
@@ -230,13 +216,16 @@ def test_the_image_copies_the_package_whole_rather_than_module_by_module():
 
 
 def test_the_core_does_not_depend_on_a_web_framework():
-    """The property the whole split exists to create.
+    """The property the whole split existed to create, now the whole story.
 
-    `core` and everything it imports must load with Flask unavailable, because
-    the same code has to run under aiohttp inside Music Assistant. Nothing
-    stops someone adding `from flask import jsonify` to a module the core
-    reaches; the import would work locally, the tests would pass, and the
-    failure would surface only when Music Assistant tried to load the provider.
+    `core` and everything it imports must load with Flask unavailable. That
+    began as a constraint on one module while a Flask deployable still existed
+    beside it; the deployable is retired and the constraint is now simply
+    true, which makes this the test that keeps it true. Nothing else stops
+    someone adding `from flask import jsonify` to a module the core reaches:
+    the import would work on a laptop that happens to have it, the tests would
+    pass, and the failure would surface only when Music Assistant tried to
+    load the provider.
 
     Checked by import under a blocked meta-path rather than by grepping for the
     word, so a transitive dependency several modules deep is caught too. That

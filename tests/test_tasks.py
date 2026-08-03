@@ -107,12 +107,16 @@ def test_a_sensible_interval_is_kept(adapter):
     assert adapter.mass.tasks.scheduled[0]["schedule"].every == 24
 
 
-def test_unloading_takes_the_schedule_away(adapter):
-    """Its handler is bound to this provider instance, so a schedule left
-    behind would keep firing into a provider that is gone."""
+def test_unloading_takes_every_schedule_away(adapter):
+    """Their handlers are bound to this provider instance, so a schedule left
+    behind would keep firing into a provider that is gone. Both of them: the
+    binding keep-alive is the one that would go on cycling a skill nobody is
+    serving."""
     adapter.register_sync()
+    adapter.register_binding_keepalive()
     adapter.unregister_sync()
-    assert adapter.mass.tasks.removed == [ampere_tasks.SYNC_TASK_ID]
+    assert set(adapter.mass.tasks.removed) == {ampere_tasks.SYNC_TASK_ID,
+                                               ampere_tasks.BINDING_TASK_ID}
 
 
 def test_a_schedule_that_will_not_go_does_not_fail_the_unload(adapter):

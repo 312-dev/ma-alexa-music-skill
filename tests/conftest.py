@@ -6,6 +6,7 @@ icon directories at import time and would otherwise try to write to /data.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -44,12 +45,11 @@ os.environ.setdefault("PREWARM", "0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # The behaviour under test lives in `core`, which imports no web framework.
-# `app` is only the Flask adapter over it, and is imported separately so that
-# the one fixture that needs a test client can reach it. Everything else in
-# this file patches the core, because that is where the caches and the
-# Navidrome calls actually are.
+# There used to be a Flask adapter over it and a fixture handing out its test
+# client; the aiohttp adapter that replaced it is exercised by
+# tests/test_webserver.py against a real socket, so nothing here needs a
+# framework at all.
 from ma_provider import core as app_module  # noqa: E402
-import app as flask_module  # noqa: E402
 
 
 # --- fake library -----------------------------------------------------------
@@ -197,12 +197,6 @@ def fake_subsonic(monkeypatch):
 
 
 @pytest.fixture
-def client():
-    flask_module.app.config.update(TESTING=True)
-    return flask_module.app.test_client()
-
-
-@pytest.fixture
 def app():
     return app_module
 
@@ -217,3 +211,107 @@ def directive(namespace: str, name: str, payload: dict, version: str = "1.0") ->
         },
         "payload": payload,
     }
+
+
+# --- a synchronous client over the real adapter ------------------------------
+
+
+class _Response:
+    """Enough of a Flask response for the tests that were written against one.
+
+    Only the four things they actually read. Deliberately not a general
+    compatibility layer: the point is that the assertions did not have to
+    change when the framework underneath them did, not that the old framework
+    is still emulated somewhere.
+    """
+
+    def __init__(self, status: int, body: bytes, headers) -> None:
+        self.status_code = status
+        self.data = body
+        self.headers = headers
+
+    def get_json(self):
+        return json.loads(self.data)
+
+    @property
+    def text(self) -> str:
+        return self.data.decode()
+
+
+class _Client:
+    """The aiohttp adapter, driven from synchronous test code.
+
+    These tests used to post at a Flask app. That app is gone and its aiohttp
+    replacement is what serves Alexa in production, so pointing them here is
+    not a compatibility shim: it moves a large body of directive tests onto the
+    adapter that is actually running.
+
+    One loop and one server for the whole test, because a server per request
+    would rebind a port per assertion.
+    """
+
+    def __init__(self, loop, client) -> None:
+        self._loop = loop
+        self._client = client
+
+    def _call(self, method, path, **kwargs):
+        if (payload := kwargs.pop("json", None)) is not None:
+            kwargs["json"] = payload
+        if "content_type" in kwargs:
+            kwargs.setdefault("headers", {})
+            kwargs["headers"]["Content-Type"] = kwargs.pop("content_type")
+        # Flask spelled the query string one way and aiohttp spells it
+        # another. Translated here rather than in thirty call sites, because
+        # the assertions in those tests are about the endpoint's answers and
+        # never were about the client.
+        if "query_string" in kwargs:
+            kwargs["params"] = kwargs.pop("query_string")
+        # Flask's test client does not follow redirects and aiohttp's does.
+        # Defaulted back, because several tests here assert on the 302 itself:
+        # the account-linking redirect carries the authorization code, and
+        # following it would send that code to Amazon and assert on Amazon's
+        # answer instead of ours.
+        kwargs.setdefault("allow_redirects",
+                          bool(kwargs.pop("follow_redirects", False)))
+
+        async def run():
+            response = await getattr(self._client, method)(path, **kwargs)
+            return _Response(response.status, await response.read(),
+                             response.headers)
+
+        return self._loop.run_until_complete(run())
+
+    def get(self, path, **kwargs):
+        return self._call("get", path, **kwargs)
+
+    def post(self, path, **kwargs):
+        return self._call("post", path, **kwargs)
+
+
+@pytest.fixture
+def client(fake_subsonic):
+    import asyncio
+    import logging
+    from concurrent.futures import ThreadPoolExecutor
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from ma_provider import webserver
+
+    server = webserver.AmpereWebServer(logging.getLogger("test-ampere"))
+    application = web.Application()
+    application.add_routes(server._routes())
+    # The pool the handlers hop through is normally created by start(), which
+    # also binds a port and starts mDNS. Neither belongs in a unit test.
+    server._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-web")
+
+    loop = asyncio.new_event_loop()
+    inner = TestClient(TestServer(application), loop=loop)
+    loop.run_until_complete(inner.start_server())
+    try:
+        yield _Client(loop, inner)
+    finally:
+        loop.run_until_complete(inner.close())
+        server._pool.shutdown(wait=False)
+        loop.close()

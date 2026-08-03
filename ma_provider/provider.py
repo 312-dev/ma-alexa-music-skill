@@ -785,6 +785,7 @@ class AmpereAlexaProvider(PlayerProvider):
             self.mass, self.logger,
             executor=self.webserver._pool if self.webserver is not None else None)
         self.tasks.register_sync()
+        self.tasks.register_binding_keepalive()
 
     async def unload(self, is_removed: bool = False) -> None:
         """Take the audio route and the endpoint down with the provider.

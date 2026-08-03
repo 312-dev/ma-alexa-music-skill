@@ -34,6 +34,7 @@ from . import smapi_rest
 # Action keys. Prefixed so they cannot collide with a setting key: Music
 # Assistant puts both in the same namespace, and an action that shadowed a
 # stored value would overwrite it with the action's own name.
+ACTION_CHECK_SERVER = "action_check_server"
 ACTION_CHECK_ENDPOINT = "action_check_endpoint"
 ACTION_CONNECT_AMAZON = "action_connect_amazon"
 ACTION_DISCONNECT_AMAZON = "action_disconnect_amazon"
@@ -42,11 +43,14 @@ ACTION_FORGET_SKILL = "action_forget_skill"
 ACTION_CREATE_CATALOGS = "action_create_catalogs"
 ACTION_UPLOAD = "action_upload"
 ACTION_ENABLE = "action_enable"
+ACTION_DISABLE = "action_disable"
+ACTION_TEARDOWN = "action_teardown"
 
 # Settings the wizard steps need that are not part of ordinary operation.
 CONF_LWA_CLIENT_ID = "lwa_client_id"
 CONF_LWA_CLIENT_SECRET = "lwa_client_secret"
 CONF_VENDOR_ID = "vendor_id"
+CONF_TEARDOWN_CONFIRM = "teardown_confirm"
 
 # Where the last action's result is kept between renders. Music Assistant
 # rebuilds the whole form after running an action and hands back only the
@@ -140,11 +144,19 @@ def _step_entries(key: str, state: dict, done: dict[str, bool],
     put two editors on one value.
     """
     if key == "server":
-        return [_status(
+        built = [_status(
             "Configured. Ampere streams every track from this server."
             if done["server"] else
             "Fill in the music server URL, username and password above.",
             key, category, hidden)]
+        # Configured is not the same as reachable, and the difference does not
+        # surface until Alexa is asked for something and gets silence.
+        built.append(_action(ACTION_CHECK_SERVER, "Test the connection",
+                             "Runs one search against the library.",
+                             category, hidden))
+        if text := _result_label(ACTION_CHECK_SERVER):
+            built.append(_status(text, "server_result", category, hidden))
+        return built
 
     if key == "endpoint":
         return _endpoint_entries(done, category, hidden)
@@ -282,6 +294,19 @@ def _skill_entries(state: dict, done: dict[str, bool], category: str,
                              "after creation and a rejected skill is deleted "
                              "again rather than left behind.",
                              category, hidden))
+        # Alexa routes an invocation across every enabled music skill, so a
+        # leftover from an earlier install fights the new one for the same
+        # words. The symptom is intermittent, which makes it very hard to
+        # recognise later and very easy to point at here.
+        if competing := setup_ops.existing_music_skills():
+            named = ", ".join(f"{s['name'] or s['id']} ({s['stage']})"
+                              for s in competing)
+            built.append(_status(
+                "Already on this account and competing for the invocation "
+                f"name: {named}. Alexa routes across every enabled music "
+                "skill, so remove these in the Amazon developer console or "
+                "expect the wrong one to answer some of the time.",
+                "skill_competing", category, hidden))
 
     if text := _result_label(ACTION_CREATE_SKILL) or _result_label(
         ACTION_FORGET_SKILL
@@ -338,8 +363,34 @@ def _enable_entries(done: dict[str, bool], category: str,
         "resolves searches but never starts playback. Run this again after "
         "every catalog upload: an upload unbinds the provider slot without "
         "reporting it.", category, hidden))
-    if text := _result_label(ACTION_ENABLE):
+    if done["enable"]:
+        built.append(_action(
+            ACTION_DISABLE, "Disable the skill",
+            "Alexa stops routing to it and answers from your default music "
+            "provider instead. The skill and catalogs are left alone.",
+            category, hidden))
+    if text := _result_label(ACTION_ENABLE) or _result_label(ACTION_DISABLE):
         built.append(_status(text, "enable_result", category, hidden))
+
+    # Starting over lives at the end of the last step rather than in a
+    # category of its own, because it is not a ninth thing to do. It is the
+    # way back to the first.
+    recorded = setup_ops.skill_id()
+    if recorded:
+        built.append(ConfigEntry(
+            key=CONF_TEARDOWN_CONFIRM,
+            type=ConfigEntryType.STRING,
+            label="Remove the skill: type the skill id to confirm",
+            description=(
+                f"Deletes {recorded} and its five catalogs. Not recoverable: "
+                "the replacement has to be uploaded and ingested from nothing, "
+                "which on a real library is an hour of Amazon's time."),
+            required=False, category=category, hidden=hidden,
+        ))
+        built.append(_action(ACTION_TEARDOWN, "Remove the skill and catalogs",
+                             "", category, hidden))
+        if text := _result_label(ACTION_TEARDOWN):
+            built.append(_status(text, "teardown_result", category, hidden))
     return built
 
 
@@ -360,7 +411,10 @@ def run(action: str, values: dict, public_base: str = "") -> setup_ops.Outcome:
     unrecognized one would turn a stale browser tab into a broken settings
     page.
     """
-    if action == ACTION_CHECK_ENDPOINT:
+    if action == ACTION_CHECK_SERVER:
+        outcome = setup_ops.probe_music_server()
+
+    elif action == ACTION_CHECK_ENDPOINT:
         outcome = setup_ops.check_endpoint(public_base)
 
     elif action == ACTION_CONNECT_AMAZON:
@@ -393,6 +447,12 @@ def run(action: str, values: dict, public_base: str = "") -> setup_ops.Outcome:
     elif action == ACTION_ENABLE:
         outcome = setup_ops.cycle_enablement(setup_ops.skill_id())
 
+    elif action == ACTION_DISABLE:
+        outcome = setup_ops.disable_skill(setup_ops.skill_id())
+
+    elif action == ACTION_TEARDOWN:
+        outcome = setup_ops.teardown(str(values.get(CONF_TEARDOWN_CONFIRM) or ""))
+
     else:
         return setup_ops.Outcome(False, "")
 
@@ -401,6 +461,7 @@ def run(action: str, values: dict, public_base: str = "") -> setup_ops.Outcome:
 
 
 ACTIONS = (
-    ACTION_CHECK_ENDPOINT, ACTION_CONNECT_AMAZON, ACTION_DISCONNECT_AMAZON, ACTION_CREATE_SKILL,
+    ACTION_CHECK_SERVER, ACTION_CHECK_ENDPOINT, ACTION_CONNECT_AMAZON, ACTION_DISCONNECT_AMAZON, ACTION_CREATE_SKILL,
     ACTION_FORGET_SKILL, ACTION_CREATE_CATALOGS, ACTION_UPLOAD, ACTION_ENABLE,
+    ACTION_DISABLE, ACTION_TEARDOWN,
 )

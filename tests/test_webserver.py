@@ -260,50 +260,6 @@ async def test_a_published_queue_comes_back_by_token(aio, tmp_path, monkeypatch)
 # --- the two adapters must not drift ----------------------------------------
 
 
-async def test_both_adapters_answer_the_same_way(aio, client):
-    """One core, two front doors, and Amazon cannot tell them apart.
-
-    Compared on the routes whose answers are deterministic. Anything carrying a
-    messageId or a signed URL differs by construction, so this pins status,
-    content type and body for the ones that do not.
-    """
-    for path in ("/healthz", "/privacy", "/terms", "/"):
-        flask_resp = client.get(path)
-        aio_resp = await aio.get(path)
-
-        assert aio_resp.status == flask_resp.status_code, path
-        content_type = aio_resp.headers["Content-Type"].split(";")[0]
-        assert content_type == flask_resp.headers["Content-Type"].split(";")[0], path
-
-        if content_type == "application/json":
-            # Compared as values, not as bytes. The two libraries disagree
-            # about spacing after a colon and about a trailing newline, and
-            # Amazon parses these rather than diffing them.
-            assert await aio_resp.json() == json.loads(flask_resp.data), path
-        else:
-            assert await aio_resp.read() == flask_resp.data, path
-
-
-async def test_both_adapters_refuse_the_admin_plane_alike(aio, client):
-    for path in ("/captures", "/diag"):
-        assert (await aio.get(path)).status == client.get(path).status_code == 401
-
-
-async def test_both_adapters_shape_a_directive_alike(aio, client):
-    body = directive("Alexa.Media.PlayQueue", "SetShuffle",
-                     {"queueId": "q1", "shuffle": True}, "1.0")
-
-    flask_body = json.loads(client.post("/music", json=body).data)
-    aio_body = await (await aio.post("/music", json=body)).json()
-
-    # messageId is a fresh uuid per response, so it is the one field that must
-    # differ rather than match.
-    assert flask_body["header"]["messageId"] != aio_body["header"]["messageId"]
-    for part in ("namespace", "name", "payloadVersion"):
-        assert flask_body["header"][part] == aio_body["header"][part]
-    assert flask_body["payload"] == aio_body["payload"]
-
-
 # --- a busy port ------------------------------------------------------------
 
 

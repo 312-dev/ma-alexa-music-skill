@@ -301,6 +301,14 @@ def disconnect_amazon() -> Outcome:
 def create_skill(*, alias: str, public_base: str, vendor: str = "") -> Outcome:
     """Register the music skill against the Amazon developer account."""
     current = store.load()
+    if not current.get("endpoint_ok"):
+        # The gate the whole endpoint step exists for. A manifest pointing at
+        # an address Amazon cannot reach is accepted without complaint, and the
+        # failure surfaces much later as a skill that answers nothing, so this
+        # refuses to create one until the endpoint has been shown to work.
+        return Outcome(False, "Check the public endpoint first. A skill "
+                              "pointing at an address Amazon cannot reach is "
+                              "created without complaint and then never called.")
     if not smapi_rest.connected():
         return Outcome(False, "Connect to Amazon first.")
     if not public_base.startswith("https://"):
@@ -543,3 +551,62 @@ def disable_skill(skill: str) -> Outcome:
     store.update(enabled=False)
     return Outcome(True, "Disabled. Alexa will not route to this skill until "
                          "it is enabled again.")
+
+
+def teardown(confirm: str) -> Outcome:
+    """Delete the skill and its catalogs, for a genuine clean slate.
+
+    Guarded by typing the skill id back, because this is not recoverable. The
+    catalogs go with the skill, and the replacement has to be re-uploaded and
+    re-ingested from nothing, which on a real library is an hour of Amazon's
+    time rather than a button press.
+
+    The record is cleared last and unconditionally. Leaving a skill id behind
+    for a skill that is gone is the state the wizard has to detect and offer to
+    repair, and there is no reason to create it deliberately here.
+    """
+    current = store.load()
+    skill = skill_id(current)
+    if not skill or (confirm or "").strip() != skill:
+        return Outcome(False, "Type the skill id exactly to confirm.")
+
+    rows = []
+    for kind, catalog_id in catalog_ids(current).items():
+        if not catalog_id:
+            continue
+        try:
+            smapi_rest.delete_catalog(catalog_id)
+            rows.append({"kind": f"catalog {kind}", "ok": True,
+                         "detail": catalog_id})
+        except Exception as exc:
+            rows.append({"kind": f"catalog {kind}", "ok": False,
+                         "detail": error_text(exc)})
+    try:
+        smapi_rest.delete_skill(skill)
+        rows.append({"kind": "skill", "ok": True, "detail": skill})
+    except Exception as exc:
+        rows.append({"kind": "skill", "ok": False, "detail": error_text(exc)})
+
+    store.update(skill_id="", catalogs={}, uploads={}, catalog_hashes={},
+                 enabled=False)
+    setup_steps._SKILL_CHECK.update(at=0.0, id="", exists=True)
+    ok = all(row["ok"] for row in rows)
+    return Outcome(ok, "Removed. Setup starts again from the skill step."
+                   if ok else "Partly removed; see below.", rows)
+
+
+def remove_competing_skill(skill: str, confirm: str) -> Outcome:
+    """Delete a leftover music skill that would compete for the invocation.
+
+    Alexa routes an invocation across every enabled music skill, so a skill
+    from an earlier install fights the current one for the same words, and the
+    symptom is intermittent: sometimes the right skill answers and sometimes
+    the wrong one does.
+    """
+    if not skill or confirm != "yes":
+        return Outcome(False, "Deletion needs the confirmation.")
+    try:
+        smapi_rest.delete_skill(skill)
+    except Exception as exc:
+        return Outcome(False, error_text(exc))
+    return Outcome(True, f"Deleted {skill}.")
