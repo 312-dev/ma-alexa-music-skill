@@ -86,6 +86,7 @@ CONF_SUBSONIC_USER = "subsonic_user"
 CONF_SUBSONIC_PASSWORD = "subsonic_password"
 CONF_SIGNING_KEY = "signing_key"
 CONF_ADMIN_SECRET = "admin_secret"
+CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
 CONF_LINK_SECRET = "link_secret"
 
@@ -861,7 +862,8 @@ class AmpereAlexaProvider(PlayerProvider):
     login: AlexaLogin
     bridge: BridgeClient
 
-    def _minted(self, key: str, what: str, length: int = 32) -> str:
+    def _minted(self, key: str, what: str, length: int = 32,
+                factory: Any = None) -> str:
         """A secret this instance generates for itself, once, and keeps.
 
         Standalone Ampere takes these from environment variables. Music
@@ -878,13 +880,21 @@ class AmpereAlexaProvider(PlayerProvider):
 
         Deliberately not visible settings. A field inviting someone to change
         one is a field inviting them to break every URL currently in flight.
+
+        `factory` is for the values that are generated but not random. The
+        account linking client id is one Amazon was told once, in the skill
+        manifest, so a deployment migrating from the standalone service has to
+        be able to keep the id it registered. Storing it rather than deriving
+        it every time is what makes that possible: derived, it would silently
+        become a different id and account linking would start refusing the
+        credentials Amazon holds.
         """
         stored = self.mass.config.get_raw_provider_config_value(
             self.instance_id, key
         )
         if stored:
             return str(stored)
-        minted = secrets.token_hex(length)
+        minted = factory() if factory is not None else secrets.token_hex(length)
         self.mass.config.set_raw_provider_config_value(
             self.instance_id, key, minted, encrypted=True
         )
@@ -932,7 +942,9 @@ class AmpereAlexaProvider(PlayerProvider):
             subsonic_password=str(self.config.get_value(CONF_SUBSONIC_PASSWORD) or ""),
             signing_key=self._minted(CONF_SIGNING_KEY, "a signing key"),
             admin_token=self._minted(CONF_ADMIN_SECRET, "an admin token"),
-            oauth_client_id=f"ampere-{self.instance_id[:8]}",
+            oauth_client_id=self._minted(
+                CONF_CLIENT_ID, "an account linking client id",
+                factory=lambda: f"ampere-{self.instance_id[:8]}"),
             oauth_client_secret=self._minted(CONF_CLIENT_SECRET,
                                              "an account linking client secret"),
             oauth_link_secret=self._link_passphrase(),
