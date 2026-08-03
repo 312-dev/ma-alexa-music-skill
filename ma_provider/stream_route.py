@@ -143,12 +143,18 @@ class MediaStreamRoute:
             self.logger.warning("no streamdetails for %s: %s", uri, err)
             raise web.HTTPNotFound(reason="no stream for this item") from err
 
+        # A live stream often reports nothing useful about its own format
+        # until ffmpeg has looked at it, and a zero sample rate or bit depth
+        # would produce an ffmpeg command line that cannot run. CD quality is
+        # the right guess for the intermediate PCM: it is only what the decode
+        # is asked to produce, not a claim about the source.
         source = streamdetails.audio_format
+        bit_depth = source.bit_depth or 16
         pcm_format = AudioFormat(
-            content_type=ContentType.from_bit_depth(source.bit_depth),
-            sample_rate=source.sample_rate,
-            bit_depth=source.bit_depth,
-            channels=source.channels,
+            content_type=ContentType.from_bit_depth(bit_depth),
+            sample_rate=source.sample_rate or 44100,
+            bit_depth=bit_depth,
+            channels=source.channels or 2,
         )
 
         response = web.StreamResponse(

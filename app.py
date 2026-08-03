@@ -487,6 +487,12 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
     # Subsonic id and is fetched back out of MA; everything else comes from the
     # music server as it always has.
     ma_ref = song.get("ma_ref") or ""
+    # A station, as opposed to a track: endless, so no length, nothing to seek
+    # into, and nothing to buffer. Read off the reference rather than carried
+    # beside it, because the media type is already part of a Music Assistant
+    # uri and reading it there means a published queue cannot misdescribe
+    # itself.
+    live = bool(ma_ref) and stream_ref.is_live(ma_ref)
     if ma_ref:
         uri, expires = signed_url("mastream", ma_ref)
     else:
@@ -516,8 +522,9 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
             # lands on a complete file and is answered exactly, so the control
             # is offered; with it off it is greyed out, because a control that
             # is offered and then misbehaves is worse than one that is not.
+            # Never on a station: there is no position in an endless stream.
             {"type": "ADJUST", "name": "SEEK_POSITION",
-             "enabled": bool(song.get("duration"))
+             "enabled": bool(song.get("duration")) and not live
              and (not ma_ref or mastream_cache.ENABLED)},
         ],
         "rules": {"feedbackEnabled": False},
@@ -528,7 +535,9 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
             "validUntil": iso(expires),
         },
     }
-    if song.get("duration"):
+    # A station has no length, and claiming one would put a progress bar on
+    # something that never reaches its end.
+    if song.get("duration") and not live:
         item["durationInMilliseconds"] = int(song["duration"]) * 1000
     if song.get("album"):
         item["metadata"]["album"] = {"name": name_prop(song["album"])}

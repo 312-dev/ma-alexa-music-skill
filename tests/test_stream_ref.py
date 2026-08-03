@@ -81,3 +81,36 @@ def test_a_path_that_is_not_ours_yields_nothing():
     """The catch-all hands every unmatched request to some handler."""
     assert stream_ref.ref_from_path("/single/abc/def") == ""
     assert stream_ref.ref_from_path("/") == ""
+
+
+# --- live streams -----------------------------------------------------------
+#
+# A Music Assistant uri is `provider://mediatype/itemid`, so what kind of thing
+# a reference names is already in the reference. Reading it there rather than
+# carrying a flag beside it means a queue published yesterday still decides
+# correctly today, and nothing that publishes a queue can misdescribe what it
+# is publishing.
+
+
+def test_a_station_is_recognised_as_endless():
+    for uri in ("somafm://radio/groovesalad",
+                "tunein://radio/s25111",
+                "radiobrowser://radio/abc-def"):
+        assert stream_ref.is_live(stream_ref.encode_ref(uri)) is True
+
+
+def test_a_track_is_not_a_station():
+    for uri in (SPOTIFY, "deezer://track/3135556",
+                "filesystem_local://track/x.flac"):
+        assert stream_ref.is_live(stream_ref.encode_ref(uri)) is False
+
+
+def test_the_media_type_comes_out_of_the_uri():
+    assert stream_ref.media_type(stream_ref.encode_ref(SPOTIFY)) == "track"
+    assert stream_ref.media_type(
+        stream_ref.encode_ref("somafm://radio/groovesalad")) == "radio"
+
+
+def test_something_that_is_not_a_reference_has_no_media_type():
+    assert stream_ref.media_type("!!!!") == ""
+    assert stream_ref.is_live("!!!!") is False

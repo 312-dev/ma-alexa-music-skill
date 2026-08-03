@@ -300,3 +300,71 @@ def test_a_range_on_an_unbuffered_track_waits_for_the_buffer(
                        headers={"Range": "bytes=1000-"})
 
     ensure.assert_called_once_with(REF)
+
+
+# --- stations ---------------------------------------------------------------
+#
+# Phase 4. A live stream is the one case where Music Assistant's realtime
+# output was always the right shape: endless audio was never seekable and never
+# had a length, so the work is to route around the buffer rather than through
+# it.
+
+
+STATION_REF = stream_ref.encode_ref("somafm://radio/groovesalad")
+
+
+def station_song(**extra):
+    song = {
+        "id": f"{queue_api.MA_ID_PREFIX}{STATION_REF}",
+        "ma_ref": STATION_REF,
+        "title": "SomaFM: Groove Salad",
+        "artist": "SomaFM",
+        # Music Assistant sometimes reports one for a station anyway.
+        "duration": 3600,
+    }
+    song.update(extra)
+    return song
+
+
+def test_a_station_reports_no_length(app):
+    """A progress bar over something with no end is a lie the app renders."""
+    assert "durationInMilliseconds" not in app.build_item(station_song(), 0, 1)
+
+
+def test_a_station_cannot_be_seeked(app):
+    """There is no position in an endless stream to seek to."""
+    assert _seek_enabled(app, station_song()) is False
+
+
+def test_a_station_is_never_buffered():
+    """Buffering an endless stream writes until the disk fills and never
+    produces a file, and there is nothing to gain: it was never seekable."""
+    import mastream_cache
+
+    with mock.patch.object(mastream_cache.urllib.request, "urlopen") as urlopen:
+        assert mastream_cache.ensure(STATION_REF) is None
+        mastream_cache.prefetch([STATION_REF])
+        time.sleep(0.2)
+    urlopen.assert_not_called()
+
+
+def test_a_station_still_streams(client, app, monkeypatch):
+    """Routed around the buffer, not refused."""
+    import mastream_cache
+
+    monkeypatch.setattr(mastream_cache, "ENABLED", True)
+    _url, expires = app.signed_url("mastream", STATION_REF)
+    sig = app.sign("mastream", STATION_REF, expires)
+
+    with mock.patch.object(app_module, "_proxy") as proxy:
+        proxy.return_value = ("", 200)
+        client.get(f"/mastream/{STATION_REF}/{expires}/{sig}")
+
+    (upstream, _ct), _ = proxy.call_args
+    assert upstream.endswith(f"/ampere_stream/{STATION_REF}.mp3")
+
+
+def test_a_track_in_the_same_queue_is_unaffected(app):
+    """One queue can hold both. The decision is per item, off its reference."""
+    assert "durationInMilliseconds" in app.build_item(ma_song(), 0, 2)
+    assert _seek_enabled(app, ma_song()) is True

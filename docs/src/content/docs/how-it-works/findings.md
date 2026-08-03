@@ -429,3 +429,25 @@ real time, and made the duration round to zero. The zero was invisible, because
 the code carries a field forward when a poll omits it, so Music Assistant's own
 duration silently stood in for Alexa's. Two tests asserted the wrong value
 against the wrong input and passed, because both halves were wrong together.
+
+### A live stream needs less, not more
+
+Internet radio looked like the case that would need special handling, and it
+needs the opposite: everything that makes a track work has to be switched off.
+No buffer, because an endless stream has no end to buffer to and trying would
+write until the disk filled. No `durationInMilliseconds`, because a progress
+bar over something with no end is a lie the app will happily render. No
+`SEEK_POSITION`, because there is no position.
+
+What is left is exactly Music Assistant's own realtime output, which was always
+the right shape for endless audio and only ever wrong for tracks.
+
+The kind of thing is read out of the reference rather than carried beside it. A
+Music Assistant uri is `provider://mediatype/itemid`, so `somafm://radio/...`
+already says radio. That is not just tidier: it means a queue published
+yesterday decides correctly today, and nothing that publishes a queue can
+misdescribe what it is publishing.
+
+One thing came for free. Alexa reports the station's **currently playing track**
+rather than the station name, picked up from ICY metadata and surfaced through
+the ordinary state poll, so live now-playing works with no code at all.

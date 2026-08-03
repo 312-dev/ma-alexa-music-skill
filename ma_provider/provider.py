@@ -51,7 +51,7 @@ from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
 from .bridge import BridgeClient, BridgeError
-from .stream_ref import encode_ref
+from .stream_ref import encode_ref, is_live
 from .stream_route import MediaStreamRoute
 from .utterance import custom_command, sanitize
 
@@ -941,18 +941,24 @@ class AmpereAlexaProvider(PlayerProvider):
         album = getattr(media_item, "album", None)
         duration = getattr(item, "duration", None) or getattr(media_item, "duration", 0)
 
+        ref = encode_ref(uri)
         track: dict[str, Any] = {
             "source": "ma",
             # The uri, not a URL. The bridge holds the Music Assistant base
             # address itself, so nothing that arrives in a published queue can
             # redirect it somewhere else.
-            "ref": encode_ref(uri),
+            "ref": ref,
             "title": getattr(media_item, "name", "") or item.name or uri,
             "artist": ", ".join(
                 a.name for a in artists if getattr(a, "name", "")
             ),
             "album": getattr(album, "name", "") or "",
-            "duration": int(duration or 0),
+            # A station is endless, and Music Assistant sometimes reports a
+            # duration for one anyway. Sending it would put a progress bar on
+            # something with no end to progress towards. The bridge checks this
+            # for itself as well, off the reference; this is here so nothing
+            # downstream has to undo a number that should never have been sent.
+            "duration": 0 if is_live(ref) else int(duration or 0),
         }
 
         # Only a URL Amazon can reach from the public internet. Spotify and

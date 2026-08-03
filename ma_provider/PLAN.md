@@ -163,7 +163,7 @@ The grouping is reasoned from how those services deliver audio, not measured.
 | 1. Play one track | Confirms the premise | none | none | **done** 2026-08-02 |
 | 2. MA as source, unbuffered | Group B plays, degraded | 200-400 lines | low | **done** 2026-08-03 |
 | 3. Buffering cache | Group B at parity with Navidrome | 400-800 lines, new subsystem | **high** | **done** 2026-08-03 |
-| 4. Live streams | Group C | 100-200 lines | low | open |
+| 4. Live streams | Group C | 100-200 lines | low | **done** 2026-08-03 |
 | 5. Fold bridge into MA | One deployable | 3,195-line Flask to aiohttp port | medium, broad | open |
 | 6. Upstream merge | Ships to everyone | negotiation | outside our control | open |
 
@@ -234,11 +234,39 @@ seconds later.
 Still open from the original phase 3 list: nothing. Eviction is by size and
 age, prefetch is bounded, and the session question dissolved in phase 2.
 
-### Phase 4: live streams
+### Phase 4: live streams — done 2026-08-03
 
-Detect infinite sources and route them around the cache entirely. Needs a
-station content type distinct from Ampere's existing `rad:`, which today means
-"artist radio built from your library" rather than an external stream.
+The phase that was rightly called the easiest, and it stayed easy.
+
+A Music Assistant uri is `provider://mediatype/itemid`, so **what kind of thing
+a reference names is already inside the reference**. `somafm://radio/...` says
+radio; nothing has to be carried beside it, nothing has to be looked up, and a
+queue published yesterday still decides correctly today. More usefully,
+publishing cannot misdescribe what it is publishing, so the buffer's refusal to
+touch a station does not depend on being told the truth by its caller.
+
+Everything else is subtraction. A station is not buffered, has no
+`durationInMilliseconds`, and does not offer `SEEK_POSITION`. What is left is
+phase 2's unbuffered path, which was always the correct shape for endless
+audio: it was never seekable and never had a length.
+
+The distinct content type the plan called for turned out not to be needed. The
+worry was a collision with Ampere's existing `rad:`, which means "artist radio
+built from your library". But a station arrives inside an `ext:` queue like any
+other MA item and is told apart by its own reference, so the two never meet.
+
+Verified on the box against SomaFM Groove Salad:
+
+```
+Item:   duration key present: False
+        controls: {"NEXT": false, "PREVIOUS": false, "SEEK_POSITION": false}
+cache:  no file written
+player: state playing, title "Bam"
+```
+
+That title is worth noting. It is not the station name, it is the track the
+station happens to be playing, arriving as ICY metadata and reported by Alexa
+through the ordinary polling path. Live now-playing came for free.
 
 ### Phase 5: fold the bridge into MA
 

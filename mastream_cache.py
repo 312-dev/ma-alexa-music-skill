@@ -176,6 +176,12 @@ def ensure(ref: str) -> pathlib.Path | None:
     """
     if not ENABLED or not stream_ref.is_ref(ref):
         return None
+    if stream_ref.is_live(ref):
+        # A station has no end to buffer to. Trying would write until the disk
+        # filled and never produce a file, and there is nothing to gain: a live
+        # stream was never seekable and never had a length, so Music
+        # Assistant's realtime output is already exactly the right shape.
+        return None
 
     target = path_for(ref)
     if target.exists():
@@ -203,7 +209,9 @@ def prefetch(refs: list[str]) -> None:
     if not ENABLED:
         return
     for ref in refs[:PREFETCH_AHEAD] if PREFETCH_AHEAD else []:
-        if not stream_ref.is_ref(ref) or path_for(ref).exists():
+        if not stream_ref.is_ref(ref) or stream_ref.is_live(ref):
+            continue
+        if path_for(ref).exists():
             continue
         with _LOCKS_GUARD:
             if ref in _INFLIGHT:

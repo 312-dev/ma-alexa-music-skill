@@ -47,6 +47,32 @@ def decode_ref(ref: str) -> str:
         return ""
 
 
+# Media types whose audio never ends. Buffering one of these would fill the
+# disk and never finish, and seeking into one means nothing, so they are routed
+# around the cache entirely.
+LIVE_TYPES = frozenset({"radio"})
+
+
+def media_type(ref: str) -> str:
+    """The media type named by a ref, or "" if it does not name one.
+
+    A Music Assistant uri is `provider://mediatype/itemid`, so the type is
+    already in the reference and does not have to be carried alongside it. That
+    matters more than it looks: a queue published yesterday decides correctly
+    today, and nothing that publishes a queue can misdescribe what it is
+    publishing.
+    """
+    uri = decode_ref(ref)
+    if not uri or "://" not in uri:
+        return ""
+    return uri.split("://", 1)[1].split("/", 1)[0].strip().lower()
+
+
+def is_live(ref: str) -> bool:
+    """Whether this reference is an endless stream rather than a track."""
+    return media_type(ref) in LIVE_TYPES
+
+
 def is_ref(value: str) -> bool:
     """Whether a string decodes to something shaped like an MA uri.
 
