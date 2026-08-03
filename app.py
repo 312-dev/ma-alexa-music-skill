@@ -42,6 +42,7 @@ import queuestate
 import setup_ui
 import signature
 import subsonic
+from ma_provider import stream_ref
 from setup_ui import access
 
 LOG_DIR = pathlib.Path(os.environ.get("CAPTURE_DIR", "/data/captures"))
@@ -64,6 +65,21 @@ if not PUBLIC_BASE:
 # How long a stream URL stays valid. Amazon defaults to ~60s when validUntil is
 # omitted, which is far too short; we set it explicitly and generously.
 STREAM_TTL = int(os.environ.get("STREAM_TTL", str(12 * 3600)))
+
+# Where Music Assistant answers, for tracks that have no Subsonic id and are
+# streamed back out of MA instead. Held here rather than sent with the queue on
+# purpose: the publish endpoint would otherwise be a way to hand the bridge an
+# arbitrary URL to fetch, and a proxy that will fetch anything it is told to is
+# a much larger thing than a music bridge. Default assumes MA is on the same
+# host, which is how it is deployed here (both containers are host-network).
+#
+# Port 8097, not 8095. Music Assistant runs two webservers: the API and
+# frontend on 8095, and a separate streams server on 8097, which is the one
+# `mass.streams.register_dynamic_route` registers against. A route registered
+# there is not reachable on 8095 at all, and asking 8095 for it returns a bare
+# 404 with an empty body, which reads exactly like a route that was never
+# registered. Measured 2026-08-03, after believing the latter for a while.
+MA_STREAM_BASE = os.environ.get("MA_STREAM_BASE", "http://127.0.0.1:8097").rstrip("/")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logring.attach()  # after basicConfig: a prior root handler would no-op it
@@ -432,7 +448,22 @@ FALLBACK_ART = [
 ]
 
 
-def art_block(cover_id: str | None) -> dict:
+def art_block(cover_id: str | None, art_url: str = "") -> dict:
+    """Where Alexa should fetch this track's cover from.
+
+    `art_url` short-circuits the proxy. A Music Assistant track from Spotify or
+    Tidal already has its artwork on a public CDN, so Amazon fetches it from
+    there directly: one less hop, and none of that image ever crosses this
+    service. Navidrome's art is on the tailnet and has to be proxied, which is
+    what cover_id is for.
+    """
+    if art_url:
+        return {
+            "sources": [
+                {"url": art_url, "size": "X_LARGE",
+                 "widthPixels": 600, "heightPixels": 600}
+            ]
+        }
     if not cover_id:
         return {"sources": list(FALLBACK_ART)}
     url, _ = signed_url("art", cover_id)
@@ -451,14 +482,21 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
     not offer, and a station whose skip button grays out on track twelve is
     not a station.
     """
-    uri, expires = signed_url("stream", song["id"])
+    # Two kinds of track can be in one queue. A Music Assistant track has no
+    # Subsonic id and is fetched back out of MA; everything else comes from the
+    # music server as it always has.
+    ma_ref = song.get("ma_ref") or ""
+    if ma_ref:
+        uri, expires = signed_url("mastream", ma_ref)
+    else:
+        uri, expires = signed_url("stream", song["id"])
     item = {
         "id": f"{index}",
         "playbackInfo": {"type": "DEFAULT"},
         "metadata": {
             "type": "TRACK",
             "name": name_prop(song.get("title", "Unknown")),
-            "art": art_block(song.get("coverArt")),
+            "art": art_block(song.get("coverArt"), song.get("art_url", "")),
             "authors": [{"name": name_prop(song.get("artist", ""))}],
         },
         "controls": [
@@ -471,8 +509,13 @@ def build_item(song: dict, index: int, total: int, endless: bool = False) -> dic
             # length is known, because seeking an unknown duration is
             # meaningless. Navidrome serves the transcode with Accept-Ranges,
             # so the ranged GET that follows is satisfied by the proxy.
+            # Never for a Music Assistant track: MA serves realtime audio with
+            # no Content-Length and no Accept-Ranges, so the ranged GET that
+            # follows a scrub cannot be satisfied and the track would restart
+            # from the top instead of moving. A control that is offered and
+            # then misbehaves is worse than one that is greyed out.
             {"type": "ADJUST", "name": "SEEK_POSITION",
-             "enabled": bool(song.get("duration"))},
+             "enabled": bool(song.get("duration")) and not ma_ref},
         ],
         "rules": {"feedbackEnabled": False},
         "stream": {
@@ -1594,6 +1637,32 @@ def stream(song_id: str, expires: int, sig: str):
     if not verify("stream", song_id, expires, sig):
         return jsonify({"error": "bad or expired signature"}), 403
     return _proxy(subsonic.stream_url(song_id), "audio/mpeg")
+
+
+@app.get("/mastream/<ref>/<int:expires>/<sig>")
+def mastream(ref: str, expires: int, sig: str):
+    """Audio for a track that lives in Music Assistant rather than Subsonic.
+
+    The ref is the item's MA uri, base64url encoded. It is turned into a URL
+    only here, against a base this service holds in its own config, so a
+    published queue can name an item but can never name a host.
+
+    What Music Assistant returns is a realtime stream: `200`, no
+    `Content-Length`, no `Accept-Ranges`. That is the whole known weakness of
+    this path, and how Alexa reacts to it is the question phase 2 exists to
+    answer, so a range request that arrives here is logged rather than quietly
+    forwarded and forgotten.
+    """
+    if not verify("mastream", ref, expires, sig):
+        return jsonify({"error": "bad or expired signature"}), 403
+    if not stream_ref.is_ref(ref):
+        return jsonify({"error": "not a Music Assistant reference"}), 400
+    if rng := request.headers.get("Range"):
+        logger.warning(
+            "Alexa sent %s for a Music Assistant track; that source cannot "
+            "answer a range and will serve from the beginning", rng,
+        )
+    return _proxy(f"{MA_STREAM_BASE}{stream_ref.stream_path(ref)}", "audio/mpeg")
 
 
 @app.get("/art/<cover_id>/<int:expires>/<sig>")

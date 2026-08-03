@@ -42,13 +42,20 @@ class BridgeClient:
     def headers(self) -> dict[str, str]:
         return {"X-Admin-Token": self.admin_token, "Content-Type": "application/json"}
 
-    def publish_request(self, track_ids: list[str], name: str = "",
+    def publish_request(self, tracks: list, name: str = "",
                         start_offset_ms: int = 0) -> tuple[str, dict]:
-        """URL and body for a queue publish."""
+        """URL and body for a queue publish.
+
+        A track is either a Subsonic song id as a plain string, or a dict
+        describing a track the bridge should fetch back out of Music Assistant.
+        Strings are coerced so a caller holding ids as something else still
+        publishes; dicts are passed through untouched, because the bridge
+        validates their shape and should see exactly what was sent.
+        """
         return (
             f"{self.base_url}/queue",
             {
-                "tracks": [str(t) for t in track_ids],
+                "tracks": [t if isinstance(t, dict) else str(t) for t in tracks],
                 "name": name or "",
                 "start_offset_ms": max(0, int(start_offset_ms or 0)),
             },
@@ -56,7 +63,7 @@ class BridgeClient:
 
     # -- calls ---------------------------------------------------------------
 
-    async def publish_queue(self, track_ids: list[str], name: str = "",
+    async def publish_queue(self, tracks: list, name: str = "",
                             start_offset_ms: int = 0) -> str:
         """Publish a track list, returning its contentId.
 
@@ -65,10 +72,10 @@ class BridgeClient:
         it cannot find anything, which is much harder to trace back than a
         stack trace at the point of failure.
         """
-        if not track_ids:
+        if not tracks:
             raise BridgeError("refusing to publish an empty queue")
 
-        url, body = self.publish_request(track_ids, name, start_offset_ms)
+        url, body = self.publish_request(tracks, name, start_offset_ms)
         async with self.session.post(
             url, json=body, headers=self.headers, timeout=self.timeout
         ) as resp:
@@ -85,7 +92,7 @@ class BridgeClient:
         # rather than failing the publish, so the count is worth surfacing:
         # a queue that plays four of its twelve tracks otherwise looks like an
         # Alexa bug.
-        requested = payload.get("requested", len(track_ids))
+        requested = payload.get("requested", len(tracks))
         count = payload.get("count", requested)
         if count < requested:
             logger.warning(

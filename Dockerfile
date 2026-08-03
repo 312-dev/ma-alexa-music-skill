@@ -9,6 +9,13 @@ COPY app.py subsonic.py oauth.py queuestate.py signature.py queue_api.py \
      handoff.py mdns.py smapi_rest.py catalog_sync.py logring.py ./
 COPY setup_ui/ setup_ui/
 
+# The bridge and the Music Assistant provider both have to know how an MA item
+# is named on the wire, and only one of them can import Music Assistant. So the
+# naming lives in a stdlib-only module inside the provider package, and the
+# bridge takes a copy rather than restating it. `__init__.py` comes along
+# because it makes the package importable and defers everything that needs MA.
+COPY ma_provider/__init__.py ma_provider/stream_ref.py ma_provider/
+
 # Baked into the image rather than left on a volume. Amazon refetches these on
 # every manifest update, and a skill whose icons 404 fails the update with
 # RESOURCE_NOT_FOUND, so "did you remember to put the files on the volume" is

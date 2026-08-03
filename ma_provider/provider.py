@@ -51,6 +51,8 @@ from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
 from .bridge import BridgeClient, BridgeError
+from .stream_ref import encode_ref
+from .stream_route import MediaStreamRoute
 from .utterance import custom_command, sanitize
 
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ CONF_ADMIN_TOKEN = "admin_token"
 CONF_ALIAS = "alias"
 CONF_HANDOFF_PHRASE = "handoff_phrase"
 CONF_EXPOSE_GROUPS = "expose_groups"
+CONF_MA_SOURCE = "ma_source"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -203,6 +206,22 @@ async def get_config_entries(
             description=(
                 "Multi-room works by naming the group in the utterance, so "
                 "each Alexa speaker group can be its own MA player."
+            ),
+            required=False,
+        ),
+        ConfigEntry(
+            key=CONF_MA_SOURCE,
+            type=ConfigEntryType.BOOLEAN,
+            label="Play tracks that are not on the Subsonic server",
+            default_value=True,
+            description=(
+                "Stream anything with no Subsonic id, such as a Spotify or "
+                "Tidal track, from Music Assistant itself. Tracks that do have "
+                "a Subsonic id keep using it, because that source is seekable "
+                "and this one is not: Music Assistant serves realtime audio "
+                "with no length and no byte ranges, so seeking is unavailable "
+                "on these tracks and moving them between rooms may restart "
+                "them. Turn this off to go back to skipping such tracks."
             ),
             required=False,
         ),
@@ -392,12 +411,13 @@ class AmperePlayer(Player):
         """Publish MA's queue to the bridge, then tell Alexa to play it."""
         provider = self.provider_instance
         items = provider.queue_items(media)
-        track_ids, self._titles_to_items = provider.subsonic_ids(items)
+        tracks, self._titles_to_items = provider.publish_tracks(items)
 
-        if not track_ids:
+        if not tracks:
             raise BridgeError(
-                "nothing in this queue exists on the Subsonic server the "
-                "bridge streams from"
+                "nothing in this queue can be streamed: no track is on the "
+                "Subsonic server, and none could be served from Music "
+                "Assistant either"
             )
 
         # The setting is a comma separated list so a phrase that collides with
@@ -411,7 +431,7 @@ class AmperePlayer(Player):
         name = media.title or (items[0].name if items else "") or label
 
         offset_ms = self._seek_offset_ms(media)
-        await provider.bridge.publish_queue(track_ids, name, offset_ms)
+        await provider.bridge.publish_queue(tracks, name, offset_ms)
 
         # The published queue is claimed by phrase, not by id. There is no
         # utterance that names an arbitrary track list, so the bridge maps one
@@ -614,12 +634,23 @@ class AmperePlayer(Player):
         title = text.get("title") or ""
         previously_playing = self._attr_current_media is not None
 
-        # mediaProgress and mediaLength come back in milliseconds, which is not
-        # what the field names suggest and is why the Alexa Media Player
-        # integration divides both by 1000 as well.
+        # mediaProgress and mediaLength are both in SECONDS. Measured
+        # 2026-08-03 against a live Echo:
+        #
+        #   {'mediaLength': 226, 'mediaProgress': 11, 'allowScrubbing': False}
+        #   {'mediaLength': 226, 'mediaProgress': 21, ...}   # 10s later
+        #
+        # They were divided by 1000 here, on the belief that they were
+        # milliseconds. That made the position advance at a thousandth of real
+        # time, which is what "the scrubber never moves" was; and it made
+        # Alexa's duration round to zero, which was then hidden because the
+        # carry-forward below quietly kept Music Assistant's own duration
+        # instead. A wrong value that is never displayed is the hardest kind to
+        # notice.
+        self.logger.debug("progress on %s: %r", self.name, progress)
         elapsed = progress.get("mediaProgress")
         if isinstance(elapsed, (int, float)):
-            self._attr_elapsed_time = elapsed / 1000
+            self._attr_elapsed_time = float(elapsed)
             self._attr_elapsed_time_last_updated = time.time()
 
         if not title:
@@ -665,8 +696,9 @@ class AmperePlayer(Player):
                 return value
             return getattr(previous, attribute, None) if same_track else None
 
+        # Seconds already; see the note on mediaProgress above.
         duration = progress.get("mediaLength")
-        seconds = (int(duration / 1000)
+        seconds = (int(duration)
                    if isinstance(duration, (int, float)) and duration > 0
                    else None)
 
@@ -706,6 +738,12 @@ class AmpereAlexaProvider(PlayerProvider):
             admin_token=str(self.config.get_value(CONF_ADMIN_TOKEN) or ""),
             session=self.mass.http_session,
         )
+        self.stream_route = MediaStreamRoute(self.mass, self.logger)
+        self.stream_route.register()
+
+    async def unload(self, is_removed: bool = False) -> None:
+        """Take the audio route back down with the provider that serves it."""
+        self.stream_route.unregister()
 
     async def loaded_in_mass(self) -> None:
         await self._login()
@@ -828,36 +866,105 @@ class AmpereAlexaProvider(PlayerProvider):
         start = queue.current_index or 0
         return items[start:]
 
-    def subsonic_ids(
+    def publish_tracks(
         self, items: list[QueueItem]
-    ) -> tuple[list[str], dict[str, str]]:
-        """Map queue items to Subsonic song ids, keeping a title index.
+    ) -> tuple[list[str | dict[str, Any]], dict[str, str]]:
+        """Map queue items to things the bridge can stream, with a title index.
+
+        Two kinds come out, and the bridge accepts both in one list:
+
+          - a plain string, which is a Subsonic song id and is what every
+            queue published before phase 2 consisted of
+          - a dict, which is a track the bridge fetches back out of Music
+            Assistant through the route in `stream_route.py`
+
+        **Subsonic wins whenever it is available**, and that is a deliberate
+        preference rather than an ordering accident. Navidrome serves a finite
+        file with `Accept-Ranges`, so those tracks seek, and survive being moved
+        between rooms, and report a duration. Music Assistant serves realtime
+        audio that does none of that. Routing a track through MA when Subsonic
+        already has it would trade working features for nothing.
 
         The second return value is title -> queue_item_id, used later to guess
         which MA item a polled Alexa title corresponds to. Alexa reports what
         is playing by name and never by anything we handed it, so a name is all
         there is to match on.
         """
-        track_ids: list[str] = []
+        allow_ma = bool(self.config.get_value(CONF_MA_SOURCE, True))
+        tracks: list[str | dict[str, Any]] = []
         titles: dict[str, str] = {}
+        from_ma = 0
         skipped = 0
 
         for item in items:
-            song_id = _subsonic_id(item)
-            if song_id is None:
+            entry: str | dict[str, Any] | None = _subsonic_id(item)
+            if entry is None and allow_ma:
+                entry = self._ma_track(item)
+                if entry is not None:
+                    from_ma += 1
+            if entry is None:
                 skipped += 1
                 continue
-            track_ids.append(song_id)
+            tracks.append(entry)
             if item.name:
                 titles.setdefault(item.name.lower(), item.queue_item_id)
 
+        if from_ma:
+            self.logger.info(
+                "%s of %s tracks are not on the Subsonic server and will stream "
+                "from Music Assistant (no seeking on those)",
+                from_ma, len(items),
+            )
         if skipped:
             self.logger.warning(
-                "%s of %s queue items are not on the Subsonic server the bridge "
-                "streams from and were left out",
+                "%s of %s queue items cannot be streamed by the bridge at all "
+                "and were left out",
                 skipped, len(items),
             )
-        return track_ids, titles
+        return tracks, titles
+
+    def _ma_track(self, item: QueueItem) -> dict[str, Any] | None:
+        """A queue item described well enough for the bridge to serve it.
+
+        Everything Alexa renders is carried here rather than looked up later,
+        because the bridge has no way to ask Music Assistant what a track is
+        called. Only the audio is deferred, and only because it has to be: a
+        stream resolved at publish time would be stale by track twelve.
+        """
+        uri = getattr(item, "uri", "") or ""
+        if not uri or "://" not in uri:
+            return None
+
+        media_item = getattr(item, "media_item", None)
+        artists = getattr(media_item, "artists", None) or ()
+        album = getattr(media_item, "album", None)
+        duration = getattr(item, "duration", None) or getattr(media_item, "duration", 0)
+
+        track: dict[str, Any] = {
+            "source": "ma",
+            # The uri, not a URL. The bridge holds the Music Assistant base
+            # address itself, so nothing that arrives in a published queue can
+            # redirect it somewhere else.
+            "ref": encode_ref(uri),
+            "title": getattr(media_item, "name", "") or item.name or uri,
+            "artist": ", ".join(
+                a.name for a in artists if getattr(a, "name", "")
+            ),
+            "album": getattr(album, "name", "") or "",
+            "duration": int(duration or 0),
+        }
+
+        # Only a URL Amazon can reach from the public internet. Spotify and
+        # Tidal art is on their own CDNs and is exactly that, so it is handed
+        # over as-is and never travels through the bridge. A local file's
+        # artwork is not reachable and is simply left out; MA's image proxy is
+        # on the tailnet and Amazon cannot fetch from there.
+        image = getattr(item, "image", None) or getattr(media_item, "image", None)
+        if image is not None and getattr(image, "remotely_accessible", False):
+            if path := getattr(image, "path", ""):
+                track["art_url"] = path
+
+        return track
 
     # -- auth ----------------------------------------------------------------
 

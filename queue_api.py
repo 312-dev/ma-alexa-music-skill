@@ -45,6 +45,7 @@ from flask import Blueprint, jsonify, request
 
 import handoff
 import subsonic
+from ma_provider import stream_ref
 
 logger = logging.getLogger("ma-music-skill.queue-api")
 
@@ -264,9 +265,61 @@ def _fetch(song_id: str) -> dict | None:
         return None
 
 
-def publish(track_ids: list[str], name: str = "",
-            start_offset_ms: int = 0) -> dict:
+# The `id` prefix an MA-sourced track gets. It has to be an id at all because
+# the token hashes ids and resolve() drops anything without one, and it has to
+# be distinguishable from a Subsonic id because the two are streamed from
+# entirely different places.
+MA_ID_PREFIX = "ma:"
+
+
+def _ma_song(track: dict) -> dict | None:
+    """A Music Assistant track, shaped like the Subsonic records around it.
+
+    Everything Alexa renders is already in the publish body, because the bridge
+    has no way to ask Music Assistant what a track is called. The one thing not
+    resolved here is the audio: `ma_ref` is the item's MA uri, and it is turned
+    into a URL only when Alexa actually asks for the bytes.
+    """
+    ref = str(track.get("ref") or "")
+    if not stream_ref.is_ref(ref):
+        # Refused rather than stored. A ref that does not decode to an MA uri
+        # is either a bug or an attempt to point the bridge's proxy at
+        # something else, and both should fail where they happen.
+        logger.warning("refusing a published track whose ref is not an MA uri")
+        return None
+
+    title = str(track.get("title") or "").strip()
+    if not title:
+        return None
+
+    song = {
+        "id": f"{MA_ID_PREFIX}{ref}",
+        "ma_ref": ref,
+        "title": title,
+        "artist": str(track.get("artist") or ""),
+        "album": str(track.get("album") or ""),
+    }
+    try:
+        duration = int(track.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    if duration > 0:
+        song["duration"] = duration
+    # Only ever an absolute URL Amazon can reach on its own. The provider only
+    # sends one when Music Assistant says the image is remotely accessible.
+    art = str(track.get("art_url") or "")
+    if art.startswith(("http://", "https://")):
+        song["art_url"] = art
+    return song
+
+
+def publish(tracks: list, name: str = "", start_offset_ms: int = 0) -> dict:
     """Store an ordered track list and return its record.
+
+    A track is either a Subsonic song id as a string, or a dict describing a
+    track that lives in Music Assistant and has no Subsonic identity. Both end
+    up as the same kind of record, so nothing downstream has to care which it
+    was beyond choosing where to fetch the audio from.
 
     Whole song records are stored, not ids, for the reason resolve_tracks
     caches whole records: re-fetching each song per Item put Initiate seconds
@@ -277,15 +330,36 @@ def publish(track_ids: list[str], name: str = "",
     play_media on the current item, so the only way a seek can survive the trip
     to Alexa is to travel with the queue that trip publishes.
     """
-    ids = [str(i) for i in track_ids if str(i or "").strip()]
-    token = token_for(ids)
+    # Kept in order and in one list, because the token is derived from it and
+    # the queue must hash the same whichever kinds it mixes.
+    keys: list[str] = []
+    subsonic_ids: list[str] = []
+    ma_songs: dict[int, dict] = {}
+    for track in tracks:
+        if isinstance(track, dict):
+            song = _ma_song(track)
+            if song is None:
+                continue
+            ma_songs[len(keys)] = song
+            keys.append(song["id"])
+        elif str(track or "").strip():
+            subsonic_ids.append(str(track))
+            keys.append(str(track))
 
-    songs = [s for s in _FETCH_POOL.map(_fetch, ids) if s and s.get("id")]
+    token = token_for(keys)
+
+    # Only the Subsonic ids need a round trip; an MA track arrived complete.
+    fetched = dict(zip(subsonic_ids, _FETCH_POOL.map(_fetch, subsonic_ids)))
+    songs = []
+    for position, key in enumerate(keys):
+        song = ma_songs.get(position) or fetched.get(key)
+        if song and song.get("id"):
+            songs.append(song)
     record = {
         "token": token,
         "name": (name or "").strip(),
         "tracks": songs,
-        "requested": len(ids),
+        "requested": len(keys),
         "published": time.time(),
         # The token is derived from the track ids, so re-publishing the same
         # queue lands on the same record and this overwrites. That is what
@@ -354,10 +428,13 @@ def publish_queue():
 
     body = request.get_json(silent=True) or {}
     tracks = body.get("tracks")
+    bad = "tracks must be a non-empty list of song ids or Music Assistant tracks"
     if not isinstance(tracks, list) or not tracks:
-        return jsonify({"error": "tracks must be a non-empty list of song ids"}), 400
-    if not all(isinstance(t, str) for t in tracks):
-        return jsonify({"error": "tracks must be a non-empty list of song ids"}), 400
+        return jsonify({"error": bad}), 400
+    if not all(isinstance(t, (str, dict)) for t in tracks):
+        return jsonify({"error": bad}), 400
+    if any(isinstance(t, dict) and t.get("source") != "ma" for t in tracks):
+        return jsonify({"error": "a track object must set source to 'ma'"}), 400
 
     try:
         offset = int(body.get("start_offset_ms") or 0)

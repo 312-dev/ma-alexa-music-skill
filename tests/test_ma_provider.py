@@ -771,16 +771,19 @@ def test_a_poll_without_a_duration_keeps_the_one_we_had():
     provider = _provider_module()
     player = _polled(provider, _media(provider, duration=240))
 
-    player._apply_state(_info(mediaProgress=5000))
+    player._apply_state(_info(mediaProgress=5))
 
     assert player._attr_current_media.duration == 240
 
 
 def test_a_poll_that_does_report_a_duration_is_believed():
+    """mediaLength is seconds. This test asserted 300 against a payload of
+    300000, which only passed while the code divided by 1000, so the two wrong
+    halves agreed with each other and the pair looked correct."""
     provider = _provider_module()
     player = _polled(provider, _media(provider, duration=240))
 
-    player._apply_state(_info(mediaProgress=5000, mediaLength=300000))
+    player._apply_state(_info(mediaProgress=5, mediaLength=300))
 
     assert player._attr_current_media.duration == 300
 
@@ -790,7 +793,7 @@ def test_a_zero_duration_is_not_a_duration():
     provider = _provider_module()
     player = _polled(provider, _media(provider, duration=240))
 
-    player._apply_state(_info(mediaProgress=5000, mediaLength=0))
+    player._apply_state(_info(mediaProgress=5, mediaLength=0))
 
     assert player._attr_current_media.duration == 240
 
@@ -816,7 +819,7 @@ def test_artist_and_art_survive_a_thin_poll_too():
         provider, artist="Someone", album="A Record",
         image_url="https://art.test/1.jpg"))
 
-    player._apply_state(_info(mediaProgress=5000))
+    player._apply_state(_info(mediaProgress=5))
 
     media = player._attr_current_media
     assert media.artist == "Someone"
@@ -936,7 +939,7 @@ def test_the_polled_media_names_the_queue_it_belongs_to():
 
     player._apply_state({"state": "PLAYING",
                          "infoText": {"title": "My Way"},
-                         "progress": {"mediaProgress": 1000}})
+                         "progress": {"mediaProgress": 1}})
 
     media = player._attr_current_media
     assert media.source_id == "p1", "must equal the player id, which keys the queue"
@@ -999,3 +1002,222 @@ def test_a_title_containing_a_hyphen_survives():
                          "Robyn - Dancing On My Own - Radio Edit")
 
     assert player._queue_item_for("Radio Edit") == "id-0"
+
+
+# --- tracks that are not on the Subsonic server -----------------------------
+#
+# Phase 2 of PLAN.md. A queue Music Assistant composes can hold a Spotify or
+# Tidal track, which has no Subsonic id at all and used to be dropped from the
+# published list without playing. It now travels as an object the bridge
+# fetches back out of MA.
+
+
+def _bare_provider(provider, *, allow_ma=True):
+    """A provider with no __init__ run, for the queue-mapping methods only.
+
+    Standing up a real one logs into Amazon. These methods read config, a
+    logger and the stream route, and nothing else.
+    """
+    instance = provider.AmpereAlexaProvider.__new__(provider.AmpereAlexaProvider)
+    instance.logger = SimpleNamespace(
+        warning=lambda *a, **k: None, info=lambda *a, **k: None,
+        debug=lambda *a, **k: None)
+    instance.config = SimpleNamespace(
+        get_value=lambda key, default=None: (
+            allow_ma if key == provider.CONF_MA_SOURCE else default
+        )
+    )
+    return instance
+
+
+def _mapping(domain, item_id, available=True):
+    return SimpleNamespace(
+        provider_domain=domain, item_id=item_id, available=available)
+
+
+def _item(name, uri="", mappings=(), artists=(), album="", duration=0, image=None):
+    media_item = SimpleNamespace(
+        name=name, uri=uri, provider_mappings=list(mappings),
+        artists=[SimpleNamespace(name=a) for a in artists],
+        album=SimpleNamespace(name=album) if album else None,
+        duration=duration, image=image,
+    )
+    return SimpleNamespace(
+        name=name, uri=uri, media_item=media_item, queue_item_id=f"q-{name}",
+        duration=duration, image=image,
+    )
+
+
+def test_a_subsonic_track_is_published_as_a_bare_id():
+    """Unchanged from before phase 2, and that is the point."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks(
+        [_item("Light Year", mappings=[_mapping("opensubsonic", "t1")])]
+    )
+    assert tracks == ["t1"]
+
+
+def test_a_track_with_no_subsonic_id_is_published_as_a_music_assistant_track():
+    """It used to be dropped and silently not play."""
+    provider = _provider_module()
+    from ma_provider import stream_ref
+
+    instance = _bare_provider(provider)
+    tracks, _titles = instance.publish_tracks([
+        _item("Dancing On My Own", uri="spotify://track/abc",
+              artists=("Robyn",), album="Body Talk", duration=293),
+    ])
+
+    (track,) = tracks
+    assert track["source"] == "ma"
+    assert stream_ref.decode_ref(track["ref"]) == "spotify://track/abc"
+    assert track["title"] == "Dancing On My Own"
+    assert track["artist"] == "Robyn"
+    assert track["album"] == "Body Talk"
+    assert track["duration"] == 293
+
+
+def test_subsonic_wins_when_a_track_is_on_both():
+    """Deliberate, not incidental.
+
+    Navidrome serves a finite file with Accept-Ranges, so those tracks seek and
+    survive being moved between rooms. Music Assistant's audio is realtime and
+    does neither. Routing a track through MA that Subsonic already has would
+    trade working features for nothing.
+    """
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("Light Year", uri="spotify://track/abc",
+              mappings=[_mapping("opensubsonic", "t1")]),
+    ])
+    assert tracks == ["t1"]
+
+
+def test_an_unavailable_subsonic_mapping_falls_through_to_music_assistant():
+    """A mapping that exists but is marked unavailable cannot be streamed."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("Light Year", uri="spotify://track/abc",
+              mappings=[_mapping("opensubsonic", "t1", available=False)]),
+    ])
+    assert isinstance(tracks[0], dict)
+
+
+def test_the_two_kinds_keep_their_order_in_one_queue():
+    """MA does not group its queue by source, so the publish must not either."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+        _item("C", mappings=[_mapping("opensubsonic", "t2")]),
+    ])
+    assert [type(t) for t in tracks] == [str, dict, str]
+    assert tracks[0] == "t1" and tracks[2] == "t2"
+
+
+def test_turning_the_setting_off_goes_back_to_dropping_them():
+    """The escape hatch, for a source that turns out to misbehave."""
+    provider = _provider_module()
+    instance = _bare_provider(provider, allow_ma=False)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+    ])
+    assert tracks == ["t1"]
+
+
+def test_an_item_with_no_uri_cannot_be_published_either_way():
+    """There is nothing to name it by, so it is still dropped."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([_item("Mystery")])
+    assert tracks == []
+
+
+def test_only_art_amazon_can_reach_is_carried():
+    """Amazon fetches art itself, and MA's image proxy is on the tailnet.
+
+    A Spotify or Tidal cover is on a public CDN and is handed over as-is; a
+    local file's artwork is left out rather than pointed at a host Amazon
+    cannot resolve.
+    """
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    public = SimpleNamespace(remotely_accessible=True,
+                             path="https://i.scdn.co/image/abc")
+    private = SimpleNamespace(remotely_accessible=False, path="/local/cover.jpg")
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", uri="spotify://track/a", image=public),
+        _item("B", uri="filesystem_local://track/b", image=private),
+    ])
+    assert tracks[0]["art_url"] == "https://i.scdn.co/image/abc"
+    assert "art_url" not in tracks[1]
+
+
+def test_the_title_index_still_covers_both_kinds():
+    """MA follows Alexa by name, and that has to work for every track played."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    _tracks, titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+    ])
+    assert titles == {"a": "q-A", "b": "q-B"}
+
+
+# --- what Alexa reports about position --------------------------------------
+
+
+def _progress_player(provider, payload):
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get=lambda _q: None, get_item=lambda _q, _i: None))
+    player._attr_current_media = None
+    player._attr_playback_state = None
+    player._attr_name = "Kitchen Echo"
+    player.update_state = lambda *a, **k: None
+    player._apply_state(payload)
+    return player
+
+
+def test_position_and_length_are_read_as_seconds():
+    """Both are seconds, whatever the millisecond-shaped names suggest.
+
+    Measured 2026-08-03 against a live Echo: mediaLength stayed 226 for a
+    3:46 track while mediaProgress climbed 11 -> 21 -> 32 -> 42 across four
+    ten-second polls. Dividing by 1000 made the position advance at a
+    thousandth of real time, which is what "the scrubber never moves" was.
+    """
+    provider = _provider_module()
+    player = _progress_player(provider, {
+        "playerInfo": {"state": "PLAYING"},
+        "infoText": {"title": "Harder, Better, Faster, Stronger"},
+        "progress": {"mediaLength": 226, "mediaProgress": 42,
+                     "allowScrubbing": False},
+    })
+
+    assert player._attr_elapsed_time == 42
+    assert player._attr_current_media.duration == 226
+
+
+def test_a_length_of_zero_is_no_length_rather_than_a_zero_length():
+    provider = _provider_module()
+    player = _progress_player(provider, {
+        "playerInfo": {"state": "PLAYING"},
+        "infoText": {"title": "Something"},
+        "progress": {"mediaLength": 0, "mediaProgress": 0},
+    })
+    assert player._attr_current_media.duration is None
