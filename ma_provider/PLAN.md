@@ -164,7 +164,7 @@ The grouping is reasoned from how those services deliver audio, not measured.
 | 2. MA as source, unbuffered | Group B plays, degraded | 200-400 lines | low | **done** 2026-08-03 |
 | 3. Buffering cache | Group B at parity with Navidrome | 400-800 lines, new subsystem | **high** | **done** 2026-08-03 |
 | 4. Live streams | Group C | 100-200 lines | low | **done** 2026-08-03 |
-| 5. Fold bridge into MA | One deployable | 3,195-line Flask to aiohttp port | medium, broad | open |
+| 5. Fold bridge into MA | One deployable | ~2,000 lines moved, ~5,300 deleted | medium, broad | **done** 2026-08-03 |
 | 6. Upstream merge | Ships to everyone | negotiation | outside our control | open |
 
 ### Phase 1: play one track
@@ -268,15 +268,37 @@ That title is worth noting. It is not the station name, it is the track the
 station happens to be playing, arriving as ICY metadata and reported by Alexa
 through the ordinary polling path. Live now-playing came for free.
 
-### Phase 5: fold the bridge into MA
+### Phase 5: fold the bridge into MA — done 2026-08-03
 
-The bridge is 3,195 lines of Flask across 15 route handlers. MA is aiohttp, so
-this is a framework port rather than a move. The 3,668-line setup wizard would
-not be ported; MA's own config flow replaces it.
+Estimated as a framework port and it was not one. Flask turned out to be 64
+lines of the 1,948 in the request path, so taking it out was an extraction
+rather than a rewrite: the behaviour moved to `core`, the framework became a
+small adapter, and the aiohttp one was written from scratch beside it.
 
-Worth doing only after 2 to 4 have proven the design. It buys one deployable
-instead of two and direct file access for local providers, at the cost of a
-broad mechanical rewrite.
+The endpoint is `AmpereWebServer` on **its own port**, not a route on MA's web
+server. MA's `helpers/webserver.py` registers a catch-all with no middleware
+and its authentication is on the WebSocket API only, so sharing the port would
+publish `/command/{queue_id}/next.mp3` and `/announcement/{player_id}` to the
+internet.
+
+The wizard was not ported either. `setup_steps` already derived each step's
+completion from the thing itself rather than from a stored flag, so the model
+survived and only the rendering changed: eight numbered `ConfigEntry`
+categories, each hidden until the previous completes, with `ACTION` buttons.
+That is the shape upstream's `yandex_smarthome` provider uses for the same job.
+The 1,610 lines of template, the vendored CSS, the session cookie, the login
+form and the lockout counter were deleted rather than moved.
+
+What it cost, all of it the same shape: **values that were read from the
+environment**. MA hands providers none, so each one was empty and nothing
+raised. `raise SystemExit` at import took MA down with its stream server never
+opened. `required=True` on an unconfigured setting removed every Echo player.
+Three modules each minted their own signing key. `SUBSONIC_URL` left step one
+unfinished and the whole form unreachable. And `config/providers/save` silently
+drops values with no declared entry, which discarded the signing key mid-cutover
+and broke the linked account while every other signal stayed green.
+
+Each is now pinned by a test that was verified to fail without the fix.
 
 ### Phase 6: upstream merge
 
