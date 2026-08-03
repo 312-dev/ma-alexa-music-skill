@@ -274,3 +274,42 @@ def test_the_core_does_not_depend_on_a_web_framework():
     assert done.returncode == 0, (
         "core no longer imports without Flask:\n" + done.stderr
     )
+
+
+def test_importing_the_core_never_kills_the_host_process():
+    """It did, on 2026-08-03, and it took Music Assistant down with it.
+
+    `core` used to `raise SystemExit` at import when PUBLIC_BASE was unset.
+    That was defensible while Ampere was a process of its own: refusing to
+    start beats serving stream URLs Amazon cannot fetch. Inside Music Assistant
+    the same import happens during MA's startup, so an unset Ampere setting
+    left MA running with its stream server never started. A music system
+    stopped playing because of an Alexa variable.
+
+    The requirement did not go away, it moved: `require_public_base` is called
+    by whatever is about to serve. What this pins is that importing alone,
+    with nothing configured, is inert.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    probe = textwrap.dedent(
+        """
+        from ma_provider import core
+        assert core.PUBLIC_BASE == "", "expected no origin to be configured"
+        try:
+            core.require_public_base()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("serving without a public base must be refused")
+        """
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PUBLIC_BASE"}
+    env.update(PREWARM="0", SUBSONIC_USER="tester",
+               SUBSONIC_PASSWORD="not-a-real-password")
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=root, env=env, capture_output=True, text=True,
+    )
+    assert done.returncode == 0, (
+        "importing core without PUBLIC_BASE must not fail:\n" + done.stderr
+    )

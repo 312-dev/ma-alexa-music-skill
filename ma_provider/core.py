@@ -85,13 +85,45 @@ SIGNING_KEY = os.environ.get("SIGNING_KEY", "").encode() or os.urandom(32)
 # The public HTTPS origin Amazon reaches this service on. No default: every
 # stream and art URL Amazon fetches is built from it, so a wrong value does not
 # fail here, it fails later as audio that will not play, with nothing in any log
-# to say why. Better to refuse to start.
+# to say why. So it is still required, but it is checked when something is
+# about to serve rather than when this module is imported.
+#
+# Importing used to `raise SystemExit`. That was right while this was a
+# process of its own and is actively dangerous now that it is not: inside Music
+# Assistant the import happens during MA's startup, so an unset variable took
+# down MA itself. Measured on 2026-08-03, when it left MA running with its
+# stream server never started, which is a music system that has stopped playing
+# because of an Alexa setting.
+#
+# The environment is the standalone deployment's way of supplying this. Inside
+# Music Assistant it comes from the provider's config instead, through
+# `configure()` below, which is why this can be empty at import and correct by
+# the time anything asks.
 PUBLIC_BASE = os.environ.get("PUBLIC_BASE", "").rstrip("/")
-if not PUBLIC_BASE:
-    raise SystemExit(
-        "PUBLIC_BASE is not set. It must be the https:// origin Amazon can "
-        "reach this service on, for example https://music.example.com"
-    )
+
+PUBLIC_BASE_HELP = (
+    "PUBLIC_BASE is not set. It must be the https:// origin Amazon can "
+    "reach this service on, for example https://music.example.com"
+)
+
+
+def configure(public_base: str = "") -> None:
+    """Supply settings that do not come from the environment.
+
+    Music Assistant holds its own configuration and does not hand providers an
+    environment, so the values the standalone deployment reads from env vars
+    have to be injectable. Called before anything starts serving.
+    """
+    global PUBLIC_BASE, FALLBACK_ART
+    if public_base:
+        PUBLIC_BASE = public_base.rstrip("/")
+        FALLBACK_ART = _fallback_art()
+
+
+def require_public_base() -> None:
+    """Refuse to serve without somewhere for Amazon to fetch assets from."""
+    if not PUBLIC_BASE:
+        raise RuntimeError(PUBLIC_BASE_HELP)
 
 # How long a stream URL stays valid. Amazon defaults to ~60s when validUntil is
 # omitted, which is far too short; we set it explicitly and generously.
@@ -458,12 +490,22 @@ def name_prop(text: str) -> dict:
 # HTTPS url, so an empty source list is not a valid answer for content that
 # happens to have no cover (a genre, or the whole library). Fall back to the
 # skill icon rather than returning nothing.
-FALLBACK_ART = [
-    {"url": f"{PUBLIC_BASE}/icons/ampere-512.png",
-     "size": "X_LARGE", "widthPixels": 512, "heightPixels": 512},
-    {"url": f"{PUBLIC_BASE}/icons/ampere-108.png",
-     "size": "SMALL", "widthPixels": 108, "heightPixels": 108},
-]
+#
+# Built by a function rather than written once, because the origin it embeds
+# may arrive after import when Music Assistant supplies it from provider
+# config. `configure()` rebuilds this; baking the empty value in at import
+# would put relative URLs in front of Amazon, which is the failure this
+# fallback exists to prevent.
+def _fallback_art() -> list[dict]:
+    return [
+        {"url": f"{PUBLIC_BASE}/icons/ampere-512.png",
+         "size": "X_LARGE", "widthPixels": 512, "heightPixels": 512},
+        {"url": f"{PUBLIC_BASE}/icons/ampere-108.png",
+         "size": "SMALL", "widthPixels": 108, "heightPixels": 108},
+    ]
+
+
+FALLBACK_ART = _fallback_art()
 
 
 def art_block(cover_id: str | None, art_url: str = "") -> dict:

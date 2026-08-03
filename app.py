@@ -26,6 +26,13 @@ from ma_provider import core
 from ma_provider import queue_api
 import setup_ui
 
+# Standalone still refuses to start without somewhere for Amazon to fetch
+# assets from. The check moved out of core's import, because inside Music
+# Assistant that import happens during MA's own startup and a SystemExit there
+# took MA down with it. Here, in a process that exists only to serve this,
+# failing immediately is still the right answer.
+core.require_public_base()
+
 # The wizard's catalog sync runs on a thread of its own, started here because
 # it belongs to the process that is serving the wizard rather than to the core.
 setup_ui.views.start_auto_sync()

@@ -50,6 +50,7 @@ from music_assistant.constants import CONF_PASSWORD, CONF_USERNAME
 from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
+from . import core
 from .bridge import BridgeClient, BridgeError, LocalBridge
 from .stream_ref import encode_ref, is_live
 from .stream_route import MediaStreamRoute
@@ -74,6 +75,7 @@ CONF_EXPOSE_GROUPS = "expose_groups"
 CONF_MA_SOURCE = "ma_source"
 CONF_SERVE_ENDPOINT = "serve_endpoint"
 CONF_ENDPOINT_PORT = "endpoint_port"
+CONF_PUBLIC_BASE = "public_base"
 
 # Music providers whose item_id is a Subsonic song id. The bridge streams from
 # one Subsonic server, so a queue can only carry tracks that server holds; a
@@ -169,6 +171,22 @@ async def get_config_entries(
             ),
             # The listener is raised at init, so it cannot be moved under a
             # running provider.
+            requires_reload=True,
+        ),
+        ConfigEntry(
+            key=CONF_PUBLIC_BASE,
+            type=ConfigEntryType.STRING,
+            label="Public base URL",
+            description=(
+                "The https:// origin Amazon reaches this service on, for "
+                "example https://music.example.com. Every stream and cover "
+                "art URL Amazon fetches is built from it, so a wrong value "
+                "does not fail here: it fails later as audio that will not "
+                "play, with nothing in any log to say why."
+            ),
+            required=True,
+            depends_on=CONF_SERVE_ENDPOINT,
+            depends_on_value=True,
             requires_reload=True,
         ),
         ConfigEntry(
@@ -777,6 +795,14 @@ class AmpereAlexaProvider(PlayerProvider):
         # Ampere works for anyone with a Subsonic server whether or not they
         # run Music Assistant, and pointing at one is what turning this off
         # means.
+        # Music Assistant does not hand providers an environment, so the
+        # settings the standalone deployment reads from env vars are injected
+        # here instead. Before anything starts serving, because every stream
+        # and art URL Amazon fetches is built from the public base.
+        core.configure(
+            public_base=str(self.config.get_value(CONF_PUBLIC_BASE) or "")
+        )
+
         self.webserver: AmpereWebServer | None = None
         serving = False
         if self.config.get_value(CONF_SERVE_ENDPOINT, True):

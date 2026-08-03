@@ -96,6 +96,16 @@ class AmpereWebServer:
         whether a socket is free. So the bind failure is loud and specific, the
         provider keeps its players, and the log says exactly what to do.
         """
+        try:
+            core.require_public_base()
+        except RuntimeError as err:
+            self.logger.error(
+                "Ampere will not serve the Alexa endpoint: %s. Set the public "
+                "base URL in this provider's settings. Echo players keep "
+                "working.", err,
+            )
+            return False
+
         self._pool = ThreadPoolExecutor(
             max_workers=POOL_SIZE, thread_name_prefix="ampere-web"
         )
