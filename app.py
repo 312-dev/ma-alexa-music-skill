@@ -499,10 +499,27 @@ def continuation_mode(content_id: str) -> str:
     """What follows this content once it runs out.
 
     A station is endless by definition, so `rad:` continues with more of itself
-    whatever AFTER_CONTENT says. Everything else obeys the setting, which is
-    off unless it has been turned on.
+    whatever AFTER_CONTENT says.
+
+    An `ext:` queue stops, whatever the setting says, because it is Music
+    Assistant's queue and MA decides what follows it. Continuing one here means
+    Alexa plays tracks MA never queued, which it cannot recognise as its own:
+    MA follows Alexa by matching the reported title against its queue items, so
+    the moment playback leaves that list MA's idea of the current track freezes
+    on the last one it knew. Measured 2026-08-02 with AFTER_CONTENT=radio, a
+    one track MA queue, and a display stuck on that track while the speakers
+    played station fill. MA has its own endless-play feature for anyone who
+    wants one.
+
+    Everything else obeys the setting, which is off unless it has been turned
+    on.
     """
-    return "radio" if content_id.partition(":")[0] == "rad" else effective_after_content()
+    kind = content_id.partition(":")[0]
+    if kind == "rad":
+        return "radio"
+    if kind == queue_api.CONTENT_PREFIX:
+        return "stop"
+    return effective_after_content()
 
 
 def seed_song(content_id: str) -> dict | None:

@@ -576,3 +576,21 @@ def test_content_that_did_not_come_from_ma_has_no_offset(client):
 
     assert app_module.start_offset("al:al1") == 0
     assert app_module.start_offset("") == 0
+
+
+def test_a_music_assistant_queue_is_not_extended_by_the_bridge(monkeypatch):
+    """MA owns its queue, so the bridge must not append to it.
+
+    MA follows Alexa by matching the reported title against its own queue
+    items. Continuing past the end plays tracks MA never queued, which it
+    cannot recognise, so its idea of the current track freezes on the last one
+    it knew while the speakers play on. Measured 2026-08-02 with
+    AFTER_CONTENT=radio and a one track queue.
+    """
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "effective_after_content", lambda: "radio")
+
+    assert app_module.continuation_mode("ext:abc123") == "stop"
+    assert app_module.continuation_mode("rad:a1") == "radio", "a station is endless"
+    assert app_module.continuation_mode("al:al1") == "radio", "others obey the setting"
