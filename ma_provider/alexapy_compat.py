@@ -191,6 +191,60 @@ def push_client_kwargs(stale_after: float) -> dict[str, Any]:
     return {"read_timeout": stale_after} if supports_read_timeout() else {}
 
 
+ALL_VOLUMES_URI = "/api/devices/deviceType/dsn/audio/v1/allDeviceVolumes"
+
+
+async def device_volumes(login: AlexaLogin) -> dict[str, tuple[int, bool]]:
+    """Every device's current volume, keyed by serial, in one request.
+
+    Amazon reports volume inside `playerInfo`, which is empty on a device that
+    is not playing. So a speaker that has been idle since startup has no known
+    volume at all, and `poll` cannot invent one: `_apply_state` returns early
+    on an empty payload precisely because a group answers that way while its
+    members are audibly playing.
+
+    The consequence was not obvious until it was measured. Music Assistant
+    computes a group's volume from its members and scales each member's
+    individual volume to match a new group level, so a member whose volume is
+    None cannot be scaled: measured 2026-08-03, a group change asked three
+    speakers for a fallback 33 and only the one player with a known volume got
+    a correctly interpolated value.
+
+    alexapy has no getter for this -- `set_volume` with no `get_volume` -- and
+    neither Home Assistant's integration nor Music Assistant's own alexa
+    provider reads it. The endpoint exists all the same, returns every device
+    including speaker groups, and costs one request for the whole account
+    rather than one per speaker.
+
+    Returns an empty dict on any failure. Volume seeding is an improvement on
+    knowing nothing, never a reason for discovery to fail.
+    """
+    session = getattr(login, "_session", None)
+    if session is None:
+        return {}
+    url = f"https://alexa.{login.url}{ALL_VOLUMES_URI}"
+    try:
+        async with session.get(
+            url, headers=getattr(login, "_headers", {}), ssl=getattr(login, "_ssl", None)
+        ) as response:
+            if response.status != 200:
+                return {}
+            payload = await response.json(content_type=None)
+    except Exception:  # noqa: BLE001 - a missing seed is not a failure
+        return {}
+
+    found: dict[str, tuple[int, bool]] = {}
+    for entry in (payload or {}).get("volumes") or ():
+        if not isinstance(entry, dict) or entry.get("error"):
+            continue
+        serial = entry.get("dsn")
+        volume = entry.get("speakerVolume")
+        if not serial or not isinstance(volume, (int, float)):
+            continue
+        found[str(serial)] = (int(volume), bool(entry.get("speakerMuted")))
+    return found
+
+
 def oauth_snapshot(login: AlexaLogin) -> dict[str, Any]:
     """The registration, in the exact shape AlexaLogin's constructor takes back.
 

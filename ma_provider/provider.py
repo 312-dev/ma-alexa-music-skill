@@ -162,6 +162,10 @@ PUSH_POLL_INTERVAL_UNSUPERVISED = 30
 # cannot help here either way: this delay happens before anything is sent.
 VOLUME_QUEUE_DELAY = 1.5
 
+# How long an account-wide volume reading is reused. Only has to span one
+# burst of confirms, which all fire together after a group volume change.
+VOLUME_READ_TTL = 1.0
+
 # How many consecutive failed state polls before a player is hidden. One is too
 # few: an Echo that is asleep or briefly unreachable still plays when something
 # is sent to it, and hiding it takes a working speaker off the list. Three
@@ -739,6 +743,12 @@ class AmperePlayer(Player):
         """
         wanted = max(0, min(100, volume_level))
         # alexapy takes 0..1 and multiplies by 100 on the way out.
+        # The requested value, not just the timing. A group volume change fans
+        # out to every member and only one of them was landing; without the
+        # numbers there is no way to tell a command that was never sent from
+        # one that asked for the value the speaker already had.
+        self.logger.info("volume_set on %s -> %s (was %s)",
+                         self.name, wanted, self._attr_volume_level)
         await self._timed(
             "volume_set",
             self.state_api.set_volume(wanted / 100, queue_delay=VOLUME_QUEUE_DELAY))
@@ -765,12 +775,21 @@ class AmperePlayer(Player):
             if self._volume_wanted != wanted:
                 return  # superseded by a newer request
 
-            try:
-                raw = await self.state_api.get_state()
-                reported = ((raw or {}).get("volume") or {}).get("volume")
-            except Exception as err:
-                self.logger.debug("volume confirm could not read state: %s", err)
-                reported = None
+            # Not from get_state. Two reasons, and the first was a plain bug:
+            # this read `raw["volume"]` where the payload nests it under
+            # `playerInfo`, as `poll` correctly does, so `reported` was always
+            # None and the check never passed. Every volume change resent
+            # itself two seconds later, doubling the traffic to an API that
+            # rate limits.
+            #
+            # Fixing the path alone would not have been enough. Amazon only
+            # reports volume inside `playerInfo`, which is empty on an idle
+            # speaker, so a confirm for anything not currently playing could
+            # never have succeeded either. The account-wide volume endpoint
+            # answers for idle devices, and is cached for a moment so several
+            # players confirming at once share one request.
+            reported = await self.provider_instance.current_volume(
+                self.device.device_serial_number)
 
             if reported == wanted:
                 self._volume_wanted = None
@@ -1278,6 +1297,10 @@ class AmpereAlexaProvider(PlayerProvider):
         # Live updates. Built here and started in loaded_in_mass, so a stream
         # that cannot connect delays nothing: the provider is fully functional
         # without it and merely slower to notice things.
+        self._volume_read: dict[str, tuple[int, bool]] = {}
+        self._volume_read_at = 0.0
+        self._volume_read_lock = asyncio.Lock()
+
         self.router = push_router.PushRouter()
         self.push_auth = push_auth.PushAuth(
             store_path=str(
@@ -1439,6 +1462,60 @@ class AmpereAlexaProvider(PlayerProvider):
                 member_ids=[f"{self.instance_id}:{m}" for m in members],
             )
             self.logger.debug("group %s speaks through %s", name, spoken_to)
+
+        await self._seed_volumes()
+
+    async def current_volume(self, serial: str) -> int | None:
+        """This device's volume right now, from a briefly shared reading.
+
+        A group volume change makes every member confirm at the same instant,
+        and the reading is account-wide, so without the cache four players
+        would make four identical requests to an API that rate limits. The
+        window only has to cover one burst of confirms, not to be a cache in
+        any useful sense.
+        """
+        async with self._volume_read_lock:
+            now = time.monotonic()
+            if now - self._volume_read_at > VOLUME_READ_TTL:
+                self._volume_read = await alexapy_compat.device_volumes(self.login)
+                self._volume_read_at = now
+        entry = self._volume_read.get(serial)
+        return entry[0] if entry else None
+
+    async def _seed_volumes(self) -> None:
+        """Give every player a volume before anything has played.
+
+        Without this a speaker that has been idle since startup reports None,
+        because Amazon only puts volume inside `playerInfo` and an idle device
+        has none. Music Assistant then cannot scale that member when the group
+        volume changes, which is what made a group change move one speaker and
+        leave the rest alone.
+
+        One request for the whole account, so this is cheap enough to do on
+        every discovery pass rather than only at startup.
+        """
+        volumes = await alexapy_compat.device_volumes(self.login)
+        if not volumes:
+            return
+        seeded = 0
+        for player in self.players:
+            if not isinstance(player, AmperePlayer):
+                continue
+            entry = volumes.get(player.device.device_serial_number)
+            if entry is None:
+                continue
+            volume, muted = entry
+            # Only a seed. A value this process asked for and is still
+            # defending must win over a reading that may predate it, which is
+            # the same rule the poll follows.
+            if player._attr_volume_level is None:
+                player._attr_volume_level = volume
+                seeded += 1
+            if player._attr_volume_muted is None:
+                player._attr_volume_muted = muted
+            player.update_state()
+        if seeded:
+            self.logger.info("read a starting volume for %s players", seeded)
 
     async def _publish(
         self,
