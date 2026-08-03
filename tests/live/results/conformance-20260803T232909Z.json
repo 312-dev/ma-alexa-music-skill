@@ -1,0 +1,941 @@
+{
+  "generated": "20260803T232909Z",
+  "ma_version": "2.9.9",
+  "schema_version": 31,
+  "targets": {
+    "single": {
+      "player_id": "ampere--3wyAVB8M:G2A1A603050507A4",
+      "name": "Bedroom Echo",
+      "members": []
+    },
+    "group": {
+      "player_id": "ampere--3wyAVB8M:3b2beb3357bb4e79853dc6619be0dfd7",
+      "name": "Whole Apartment",
+      "members": [
+        "ampere--3wyAVB8M:G2A0XL12229302V4",
+        "ampere--3wyAVB8M:G6G22M0625320M40",
+        "ampere--3wyAVB8M:G2A1A603050507A4",
+        "ampere--3wyAVB8M:G2A1A6031026028E"
+      ]
+    }
+  },
+  "matrix": [
+    {
+      "feature": "play",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "streaming",
+      "target": "single",
+      "status": "unsupported",
+      "reason": "Ampere does not declare PlayerFeature.VOLUME_MUTE, so mute_control is \"none\" and cmd_volume_mute matches no branch and returns silently. Exercised once per target to prove the silence, not the mute",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "streaming",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "radio",
+      "target": "single",
+      "status": "expect_error",
+      "reason": "the current item has no duration, so player_queues/seek raises InvalidCommand (12) by design; asserted as a refusal rather than skipped",
+      "error_code": 12
+    },
+    {
+      "feature": "rewind",
+      "source": "radio",
+      "target": "single",
+      "status": "expect_error",
+      "reason": "player_queues/skip is seek(elapsed + seconds); with no duration it raises InvalidCommand (12) the same way, so rewind is the same refusal",
+      "error_code": 12
+    },
+    {
+      "feature": "shuffle",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "streaming",
+      "target": "group",
+      "status": "unsupported",
+      "reason": "Ampere does not declare PlayerFeature.VOLUME_MUTE, so mute_control is \"none\" and cmd_volume_mute matches no branch and returns silently. Exercised once per target to prove the silence, not the mute",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "radio",
+      "target": "group",
+      "status": "expect_error",
+      "reason": "the current item has no duration, so player_queues/seek raises InvalidCommand (12) by design; asserted as a refusal rather than skipped",
+      "error_code": 12
+    },
+    {
+      "feature": "rewind",
+      "source": "radio",
+      "target": "group",
+      "status": "expect_error",
+      "reason": "player_queues/skip is seek(elapsed + seconds); with no duration it raises InvalidCommand (12) the same way, so rewind is the same refusal",
+      "error_code": 12
+    },
+    {
+      "feature": "shuffle",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    }
+  ],
+  "observations": [
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 825.0162010008353,
+      "event_ms": 113.89554500055965,
+      "effect_ms": 4112.752077002369,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1590.7624440005748,
+      "event_ms": 115.62127299839631,
+      "effect_ms": 4113.177715000347,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2185.5637620028574,
+      "event_ms": 112.69156300113536,
+      "effect_ms": 4108.868308998353,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 109.18858500372153,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 740.6277219997719,
+      "event_ms": 112.86349999863887,
+      "effect_ms": 4112.149587999738,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "27.4 - 20 = 7.4; MA reports 8.5 after 6.2s; MA/Ampere raw 8.3/1.3 (offset +7.0, expected 7.4)",
+      "ack_ms": 390.074781003932,
+      "event_ms": 388.4594390037819,
+      "effect_ms": 6171.614372004115,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 1.3,
+        "queue_elapsed": 8.3,
+        "asked": 7.4,
+        "offset": 7.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1658.0831470055273,
+      "event_ms": 111.84643700107699,
+      "effect_ms": 4115.462819005188,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": false,
+      "detail": "31.0 - 20 = 11.0; MA reports 21.3 after 25.2s; MA/Ampere raw 21.3/0.6 (offset +20.7, expected 11.0)",
+      "ack_ms": 497.56105299456976,
+      "event_ms": 390.168891994108,
+      "effect_ms": null,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.6,
+        "queue_elapsed": 21.3,
+        "asked": 11.0,
+        "offset": 20.7
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2160.489324996888,
+      "event_ms": 111.89178399945376,
+      "effect_ms": 8724.000723996141,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 110.69940499874065,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    }
+  ],
+  "latency": {
+    "play": {
+      "n": 6,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 1624.4,
+      "ack_ms_max": 2185.6,
+      "event_ms_p50": 112.8,
+      "event_ms_max": 115.6,
+      "effect_ms_p50": 4113.0,
+      "effect_ms_max": 8724.0
+    },
+    "rewind": {
+      "n": 4,
+      "budget_s": 5.0,
+      "over_budget": 0,
+      "ack_ms_p50": 250.4,
+      "ack_ms_max": 497.6,
+      "event_ms_p50": 389.3,
+      "event_ms_max": 390.2,
+      "effect_ms_p50": 6171.6,
+      "effect_ms_max": 6171.6
+    }
+  },
+  "notes": []
+}

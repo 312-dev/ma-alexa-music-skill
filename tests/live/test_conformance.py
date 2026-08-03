@@ -481,9 +481,20 @@ def test_rewind(ampere, cell):
     # Far enough in that a 20 second rewind lands somewhere, and settled, so the
     # position `skip` adds to is a real one.
     time.sleep(max(0.0, abs(REWIND_BY) + 8.0))
-    before = ampere.s.elapsed(target.queue_id)
+    # The raw stored value, not the extrapolated one, because that is what MA
+    # subtracts from:
+    #
+    #     async def skip(self, queue_id, seconds=10):
+    #         await self.seek(queue_id, int(self._queues[queue_id].elapsed_time + seconds))
+    #
+    # Predicting from `elapsed()` made this wrong by however long it had been
+    # since the player last published, which for Ampere is a ten second poll:
+    # measured a prediction of 11.0s against a rewind that actually landed at
+    # 20.7s, and the cell then failed for a reason that had nothing to do with
+    # the speaker. The same trap `raw_elapsed` was written for.
+    before = ampere.s.raw_elapsed(target.queue_id)
     assert before > abs(REWIND_BY), f"only {before:.1f}s in; nothing to rewind"
-    expected = before + REWIND_BY
+    expected = int(before) + REWIND_BY
 
     _, issued, ack = ampere.s.call_timed(
         "player_queues/skip", queue_id=target.queue_id, seconds=REWIND_BY)
