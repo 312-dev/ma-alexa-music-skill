@@ -1555,3 +1555,53 @@ def test_a_group_declares_itself_natively_playing():
     assert "set_active_output_protocol" in source, (
         "a group must declare native playback or MA converts its pause to stop")
     assert "self.is_group" in source, "only a group needs it; MA sets it for the rest"
+
+
+# --- the two layers, each in its own units -----------------------------------
+
+
+def _positioned_player(provider, offset_s=0.0):
+    player = _bare_player(provider)
+    player._stream_offset_s = offset_s
+    return player
+
+
+def test_a_position_is_reported_relative_to_where_the_stream_starts():
+    """MA adds the seek offset back on for a player that is not in flow mode:
+
+        elapsed_time = player_elapsed * speed
+        if seek_pos := queue.current_item.streamdetails.seek_position:
+            elapsed_time += seek_pos
+
+    Alexa reports absolute media time, because a seek here republishes the
+    whole track with `stream.offsetInMilliseconds`. Reporting that straight
+    through made every seek land twice.
+    """
+    provider = _provider_module()
+    player = _positioned_player(provider, offset_s=60.0)
+
+    player._report_position(75.0)          # Alexa: 75s into the track
+
+    assert player._attr_elapsed_time == 15.0, (
+        "MA adds the 60s offset back, so 15 + 60 = the 75 Alexa is really at")
+
+
+def test_a_plain_play_reports_the_position_unchanged():
+    """Nothing to subtract when nothing was sought."""
+    provider = _provider_module()
+    player = _positioned_player(provider)
+
+    player._report_position(42.0)
+
+    assert player._attr_elapsed_time == 42.0
+
+
+def test_a_position_never_goes_negative():
+    """Alexa can report a position below the offset for a moment around the
+    handover, and a negative elapsed time is not a thing MA can display."""
+    provider = _provider_module()
+    player = _positioned_player(provider, offset_s=60.0)
+
+    player._report_position(2.0)
+
+    assert player._attr_elapsed_time == 0.0

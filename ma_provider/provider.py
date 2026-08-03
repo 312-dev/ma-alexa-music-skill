@@ -461,6 +461,15 @@ class AmperePlayer(Player):
     # A one-off catch-up poll after a control, so the correction to an
     # optimistic answer does not wait for the ten second cycle.
     _resync: asyncio.Task | None = None
+    # How far into the track the stream Alexa is playing was published to
+    # start. Kept because Music Assistant adds it back on and this is the only
+    # place that knows Alexa never took it off. See `_report_position`.
+    _stream_offset_s = 0.0
+    # The last track title Alexa itself reported, which is the only reliable
+    # way to notice Alexa moving to the next track on its own. Alexa's names
+    # and MA's names for the same track differ, so this is kept apart from
+    # `_attr_current_media`.
+    _polled_title = ""
 
     def __init__(
         self,
@@ -616,6 +625,37 @@ class AmperePlayer(Player):
 
         self._resync = asyncio.create_task(run())
 
+    def _report_position(self, seconds: float) -> None:
+        """Record where Alexa is, in the units Music Assistant expects.
+
+        Not the same units. Alexa reports absolute media time -- how far into
+        the track it is -- because a seek here republishes the whole track with
+        `stream.offsetInMilliseconds` and lets Alexa start partway in. MA
+        assumes the opposite of a player that is not in flow mode: that it was
+        handed a stream which *begins* at the seek point, so the player's own
+        position is relative to that point and the offset has to be added back
+        to get media time. From `PlayerQueues._update_queue_from_player`:
+
+            elapsed_time = player_elapsed * speed
+            if seek_pos := queue.current_item.streamdetails.seek_position:
+                elapsed_time += seek_pos
+
+        Reporting absolute time into that made every seek land twice: seek to
+        60s in a 226s track and the queue read 120s, the scrubber jumped past
+        where the audio was, and a second seek compounded it. Measured by the
+        live suite as four cells failing deterministically, and it is the same
+        defect behind a resume that asked Alexa to start "at 256000ms" in a
+        256 second track.
+
+        Subtracting here rather than not sending the offset at all, because the
+        offset is how seek works on this player: Alexa has no seek command we
+        can reach, so the track is republished from the new position. The two
+        layers agree once each is speaking its own units.
+        """
+        self._attr_elapsed_time = max(0.0, seconds - self._stream_offset_s)
+        # Local time, not Amazon's; see the note in `_push_now_playing`.
+        self._attr_elapsed_time_last_updated = time.time()
+
     async def _timed(self, what: str, coro):
         """Time an Amazon call and say how long it took.
 
@@ -687,6 +727,14 @@ class AmperePlayer(Player):
         name = media.title or (items[0].name if items else "") or label
 
         offset_ms = self._seek_offset_ms(media)
+        # Remembered for as long as Alexa is playing this stream, because every
+        # position it reports back will be measured from the start of the track
+        # and MA will add this on again. See `_report_position`.
+        self._stream_offset_s = offset_ms / 1000.0
+        # Whatever Alexa reports next belongs to this publish, so the next poll
+        # must not read it as Alexa having moved on by itself and throw the
+        # offset away.
+        self._polled_title = ""
         content_id = await self._timed("publish", provider.bridge.publish_queue(
             tracks, name, offset_ms))
 
@@ -1323,7 +1371,6 @@ class AmperePlayer(Player):
         if self._attr_playback_state != PlaybackState.PLAYING:
             return
 
-        self._attr_elapsed_time = float(elapsed) / 1000.0
         # Local time, not Amazon's.
         #
         # This was `event.at` on the reasoning that it avoids adding delivery
@@ -1333,7 +1380,10 @@ class AmperePlayer(Player):
         # forward from this timestamp, so any skew becomes a scrubber that is
         # permanently wrong by the size of the skew, and a clock that is ahead
         # makes it run into the future.
-        self._attr_elapsed_time_last_updated = time.time()
+        #
+        # Milliseconds on the push stream and seconds on the polled endpoint,
+        # which is the one thing the two paths genuinely disagree about.
+        self._report_position(float(elapsed) / 1000.0)
 
     def use_push_poll_interval(self, slow: bool) -> None:
         """Slow the poll while push is delivering, restore it when it is not.
@@ -1477,6 +1527,27 @@ class AmperePlayer(Player):
         title = text.get("title") or ""
         previously_playing = self._attr_current_media is not None
 
+        # Before the position is read, not after it. A track Alexa moved to on
+        # its own started at its beginning, so the offset the previous one was
+        # published with no longer applies; left standing for even one poll it
+        # would be subtracted from a position it was never part of, and the
+        # scrubber would sit at zero for a cycle at the top of every track that
+        # followed a seek.
+        #
+        # Against the last title *Alexa* reported, not against
+        # `_attr_current_media`. That holds whatever Music Assistant passed to
+        # play_media until the first poll replaces it, and the two name the
+        # same track differently -- MA has "Eminem - Without Me" where Alexa
+        # says "Without Me". Comparing across them made every seek look like a
+        # track change on the very next poll, which cleared the offset a second
+        # after it was set and put the whole of it back into the position.
+        # Measured: the speaker read 23.0s and MA 30.5s where they should have
+        # read 15.5 and 23.0.
+        if title and self._polled_title and self._polled_title != title:
+            self._stream_offset_s = 0.0
+        if title:
+            self._polled_title = title
+
         # mediaProgress and mediaLength are both in SECONDS. Measured
         # 2026-08-03 against a live Echo:
         #
@@ -1493,8 +1564,7 @@ class AmperePlayer(Player):
         self.logger.debug("progress on %s: %r", self.name, progress)
         elapsed = progress.get("mediaProgress")
         if isinstance(elapsed, (int, float)):
-            self._attr_elapsed_time = float(elapsed)
-            self._attr_elapsed_time_last_updated = time.time()
+            self._report_position(float(elapsed))
 
         if not title:
             # A poll with no title leaves current_media pointing at whatever

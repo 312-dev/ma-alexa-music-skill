@@ -349,12 +349,13 @@ REWIND_BY = -20
 # How far the speaker may land from where it was sent. Generous, because the
 # measurement spans a play_media round trip through Amazon and a poll interval.
 SEEK_LANDING_TOLERANCE = 12.0
-# How far Music Assistant's reported position may sit from the speaker's own.
-# Tight, because these are two readings of the same quantity taken from the same
-# snapshot - `queue.elapsed_time` is *derived* from `player.elapsed_time` - and
-# the only thing that can separate them is a term one of them added and the
-# other did not.
-LAYER_AGREEMENT_TOLERANCE = 3.0
+# The difference between Music Assistant's reported position and Ampere's own
+# is recorded by `seek` and `rewind` but no longer asserted on. The two are not
+# taken from one snapshot: each layer stores its value when it last updated, so
+# the difference carries however long has passed between them as well as the
+# seek offset that genuinely separates them. Whether the seek landed where it
+# was asked to is the property worth holding, and both cells assert that
+# directly.
 
 
 def _seek_error_case(ampere, cell, command: str, args: dict) -> None:
@@ -389,10 +390,16 @@ def test_seek(ampere, cell):
     """Two questions, deliberately asserted apart.
 
     Did the speaker move, and does Music Assistant report where it moved to.
-    Ampere is the only thing that can answer the first (`player.elapsed_time` is
-    what it read back off Alexa) and it is the only source for the second
-    (`queue.elapsed_time` is what every UI shows). They can disagree, and when
-    they do, which one is wrong is the whole finding.
+    `queue.elapsed_time` is what every UI shows and is the media time this
+    asserts on; `player.elapsed_time` is Ampere's own layer underneath it.
+
+    The two are *supposed* to differ, by exactly the offset the track was
+    republished at. MA adds `streamdetails.seek_position` back on for a player
+    that is not in flow mode, so Ampere reports its position relative to where
+    the stream starts and MA restores the media time. An earlier version of
+    this asserted the two layers agreed, which was true while they were both
+    absolute -- and the seek landed twice. Agreement was never the property
+    worth having; the media time being the one asked for is.
     """
     _gate(cell)
     if cell.status == matrix.EXPECT_ERROR:
@@ -410,41 +417,53 @@ def test_seek(ampere, cell):
         "player_queues/seek", queue_id=target.queue_id, position=SEEK_TO)
     event_ms = ampere.s.wait_for_event(issued, target.queue_id, {"queue_time_updated"}, 6.0)
 
-    def speaker_moved() -> bool:
-        _, corrected = ampere.s.player_elapsed(target.player_id)
-        if not corrected:
+    def landed() -> bool:
+        # The media time, which is the number a person sees and the one the
+        # seek was expressed in.
+        where = ampere.s.elapsed(target.queue_id)
+        if not where:
             return False
-        return abs(corrected - (SEEK_TO + (time.monotonic() - issued))) <= SEEK_LANDING_TOLERANCE
+        return abs(where - (SEEK_TO + (time.monotonic() - issued))) <= SEEK_LANDING_TOLERANCE
 
-    ok, effect_ms = observe(ampere.s, speaker_moved, floor=PLAY_CONFIRM_SECONDS,
+    ok, effect_ms = observe(ampere.s, landed, floor=PLAY_CONFIRM_SECONDS,
                             budget=SEEK_BUDGET, issued=issued)
 
     drift = time.monotonic() - issued
-    raw_player, corrected_player = ampere.s.player_elapsed(target.player_id)
+    raw_player, _corrected_player = ampere.s.player_elapsed(target.player_id)
     raw_queue = ampere.s.raw_elapsed(target.queue_id)
+    where = ampere.s.elapsed(target.queue_id)
     # Both raw, so this is two readings of one quantity rather than two clocks.
-    inflation = raw_queue - raw_player
-    agrees = abs(inflation) <= LAYER_AGREEMENT_TOLERANCE
-
-    record("seek", target, cell.source, ok=ok and agrees, ack_ms=ack,
+    # Expected to be the seek offset, because that is precisely what MA adds
+    # back: zero here means Ampere has stopped taking it off and the seek is
+    # landing twice again, and twice the offset means it is coming off twice.
+    offset = raw_queue - raw_player
+    # Recorded, not asserted. The two are stored at whatever instant each layer
+    # last updated and there is no read that takes them together, so the
+    # difference carries however long has passed between them: measured at
+    # +103.2 against a 100s seek purely because the queue had advanced 3.2s
+    # since Ampere's snapshot. It is evidence about which layer holds what, not
+    # a property this can hold to a tolerance.
+    #
+    # Nothing is lost by dropping it. `ok` above catches the double count
+    # outright and more directly: an offset applied twice puts the queue at
+    # 200s for a 100s seek, which is nowhere near where it was asked to be.
+    record("seek", target, cell.source, ok=ok, ack_ms=ack,
            event_ms=event_ms, effect_ms=effect_ms, floor=PLAY_CONFIRM_SECONDS,
            budget=SEEK_BUDGET, player_elapsed=round(raw_player, 1),
            queue_elapsed=round(raw_queue, 1), asked=SEEK_TO,
-           inflation=round(inflation, 1),
-           detail=f"asked {SEEK_TO}; Alexa reports {corrected_player:.1f} after "
-                  f"{drift:.1f}s; MA/Alexa raw {raw_queue:.1f}/{raw_player:.1f} "
-                  f"(inflation {inflation:+.1f})")
+           offset=round(offset, 1),
+           detail=f"asked {SEEK_TO}; MA reports {where:.1f} after {drift:.1f}s; "
+                  f"MA/Ampere raw {raw_queue:.1f}/{raw_player:.1f} "
+                  f"(offset {offset:+.1f}, expected {SEEK_TO})")
 
-    assert ok, (f"the speaker did not move to {SEEK_TO}s: Ampere read "
-                f"{corrected_player:.1f} back off Alexa {drift:.1f}s later")
-    assert agrees, (
-        f"the speaker reports {raw_player:.1f}s and Music Assistant reports "
-        f"{raw_queue:.1f}s for the same instant - inflated by {inflation:+.1f}s. "
-        f"MA adds `streamdetails.seek_position` to a non-flow player's position, "
-        f"because its own stream server starts the audio *at* the seek point and "
-        f"the player's clock therefore starts from zero. Ampere hands Alexa the "
-        f"whole track with `stream.offsetInMilliseconds`, so Alexa's position is "
-        f"already absolute, and the offset is counted twice."
+    assert ok, (
+        f"the queue did not move to {SEEK_TO}s: MA reads {where:.1f} "
+        f"{drift:.1f}s later, with Ampere holding {raw_player:.1f}. Landing at "
+        f"roughly twice {SEEK_TO} means the offset is being counted twice: MA "
+        f"adds `streamdetails.seek_position` to a non-flow player's position, "
+        f"because its own stream server starts the audio *at* the seek point, "
+        f"and Ampere must therefore report its position relative to the offset "
+        f"it published the track with rather than as absolute media time."
     )
 
 
@@ -471,30 +490,33 @@ def test_rewind(ampere, cell):
     event_ms = ampere.s.wait_for_event(issued, target.queue_id, {"queue_time_updated"}, 6.0)
 
     def moved_back() -> bool:
-        _, corrected = ampere.s.player_elapsed(target.player_id)
-        return abs(corrected - (expected + (time.monotonic() - issued))) <= SEEK_LANDING_TOLERANCE
+        # The media time, for the same reason as `seek`: it is the number a
+        # person reads, and the number the rewind was expressed in.
+        where = ampere.s.elapsed(target.queue_id)
+        return abs(where - (expected + (time.monotonic() - issued))) <= SEEK_LANDING_TOLERANCE
 
     ok, effect_ms = observe(ampere.s, moved_back, floor=PLAY_CONFIRM_SECONDS,
                             budget=SEEK_BUDGET, issued=issued)
     drift = time.monotonic() - issued
-    raw_player, corrected_player = ampere.s.player_elapsed(target.player_id)
+    raw_player, _corrected_player = ampere.s.player_elapsed(target.player_id)
     raw_queue = ampere.s.raw_elapsed(target.queue_id)
-    inflation = raw_queue - raw_player
-    agrees = abs(inflation) <= LAYER_AGREEMENT_TOLERANCE
+    where = ampere.s.elapsed(target.queue_id)
+    # As in `seek`: the two layers differ by the offset the track was
+    # republished at, which for a rewind is wherever `skip` landed.
+    # Recorded, not asserted; see the note in `seek`.
+    offset = raw_queue - raw_player
 
-    record("rewind", target, cell.source, ok=ok and agrees, ack_ms=ack,
+    record("rewind", target, cell.source, ok=ok, ack_ms=ack,
            event_ms=event_ms, effect_ms=effect_ms, floor=PLAY_CONFIRM_SECONDS,
            budget=SEEK_BUDGET, player_elapsed=round(raw_player, 1),
            queue_elapsed=round(raw_queue, 1), asked=round(expected, 1),
-           inflation=round(inflation, 1),
-           detail=f"{before:.1f} - {abs(REWIND_BY)} = {expected:.1f}; Alexa reports "
-                  f"{corrected_player:.1f} after {drift:.1f}s; MA/Alexa raw "
-                  f"{raw_queue:.1f}/{raw_player:.1f} (inflation {inflation:+.1f})")
-    assert ok, (f"rewind should have landed near {expected:.1f}s; Ampere read "
-                f"{corrected_player:.1f} back off Alexa")
-    assert agrees, (f"the speaker reports {raw_player:.1f}s and Music Assistant "
-                    f"reports {raw_queue:.1f}s for the same instant - inflated by "
-                    f"{inflation:+.1f}s, the position `skip` seeked to")
+           offset=round(offset, 1),
+           detail=f"{before:.1f} - {abs(REWIND_BY)} = {expected:.1f}; MA reports "
+                  f"{where:.1f} after {drift:.1f}s; MA/Ampere raw "
+                  f"{raw_queue:.1f}/{raw_player:.1f} (offset {offset:+.1f}, "
+                  f"expected {expected:.1f})")
+    assert ok, (f"rewind should have landed near {expected:.1f}s; MA reads "
+                f"{where:.1f}, with Ampere holding {raw_player:.1f}")
 
 
 # --- shuffle / repeat --------------------------------------------------------
