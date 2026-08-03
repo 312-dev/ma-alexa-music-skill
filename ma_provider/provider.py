@@ -46,6 +46,7 @@ from music_assistant_models.enums import (
     PlayerType,
     ProviderFeature,
 )
+from music_assistant_models.constants import SECURE_STRING_SUBSTITUTE
 from music_assistant_models.errors import LoginFailed
 from music_assistant_models.player import DeviceInfo, PlayerMedia
 
@@ -258,26 +259,35 @@ async def _run_push_sign_in(
             "connect.")
         return
 
-    # The values handed to an action are the raw form values, and a
-    # SECURE_STRING that was saved earlier arrives still encrypted. Music
-    # Assistant's own alexa provider does not hit this because its
-    # authenticate button is pressed during first setup, when the fields hold
-    # what the operator just typed. Ampere's is pressed on a provider that is
-    # already configured, so the stored ciphertext is what turns up.
+    # Reading a secret out of a config action is not one lookup, it is three
+    # cases, and two of them look like a value while being useless.
     #
-    # Passing that through produced "Non-base32 digit found" from pyotp, which
-    # names the symptom and nothing else. decrypt_string is safe either way:
-    # it returns anything without the encryption marker untouched, so this
-    # handles the freshly-typed case and the stored case with one call.
-    def _plain(key: str) -> str:
-        raw = str(values.get(key) or "")
-        if not raw:
+    # Music Assistant never sends a stored SECURE_STRING back to the browser.
+    # The form receives the literal `this_value_is_encrypted`, and that is what
+    # an action gets handed back. It is not encrypted and not empty, so it
+    # survives every obvious guard, and it is 23 characters of plausible
+    # nonsense: it reached pyotp as a TOTP seed and reached Amazon as the
+    # account password. Its own providers guard on this constant by name, which
+    # is the giveaway that there is no cleverer way to detect it.
+    #
+    # So: use what is in the form only when it is a real value someone just
+    # typed, and otherwise go to the stored config, where ProviderConfig
+    # decrypts on the way out.
+    async def _credential(key: str) -> str:
+        typed = str(values.get(key) or "")
+        if typed and typed != SECURE_STRING_SUBSTITUTE:
+            try:
+                return mass.config.decrypt_string(typed)
+            except Exception:  # noqa: BLE001 - a bad value, not a crash
+                return typed
+        if instance_id is None:
             return ""
         try:
-            return mass.config.decrypt_string(raw)
-        except Exception as err:  # noqa: BLE001 - a bad value, not a crash
-            logger.debug("could not decrypt %s: %s", key, type(err).__name__)
-            return raw
+            stored = await mass.config.get_provider_config(instance_id)
+            return str(stored.get_value(key) or "")
+        except Exception as err:  # noqa: BLE001
+            logger.debug("could not read stored %s: %s", key, type(err).__name__)
+            return ""
 
     auth = push_auth.PushAuth(
         store_path=str(storage / "ampere" / "push-auth.json"),
@@ -285,13 +295,24 @@ async def _run_push_sign_in(
         email=email,
         logger=logger,
     )
+    password = await _credential(CONF_PASSWORD)
+    otp_secret = await _credential(CONF_OTP_SECRET)
+    if not password:
+        # Better to refuse than to hand Amazon an empty password and let the
+        # failure surface three pages later as a mobile number that cannot be
+        # verified, which is what the placeholder did.
+        settings.set_push_status(
+            "Could not read the saved Amazon password. Re-enter it in the "
+            "fields above, save, then connect.")
+        return
+
     state = await push_signin.sign_in(
         mass, auth,
         session_id=str(values.get("session_id") or ""),
         url=str(values.get(CONF_AMAZON_URL) or "amazon.com"),
         email=email,
-        password=_plain(CONF_PASSWORD),
-        otp_secret=_plain(CONF_OTP_SECRET),
+        password=password,
+        otp_secret=otp_secret,
         cookie_path=alexapy_compat.cookie_path(str(storage), email),
         logger=logger,
     )
