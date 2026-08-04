@@ -163,10 +163,18 @@ def test_resume(ampere, cell):
     # `resume_pos = 0` for a live radio item on purpose (there is nowhere to
     # resume to in a stream), and comparing to the pre-pause position would call
     # that correct behaviour a failure.
+    #
+    # Over eight seconds and asking for a real advance, not any advance at all.
+    # `elapsed()` extrapolates forward from the last publish, so a poll landing
+    # inside the window replaces an extrapolated value with a measured one and
+    # the reading can step *down* a fraction. Measured twice on a streaming
+    # group: 5.0 then 4.6 four seconds later, recorded as "the position is not
+    # moving" on a player that had plainly resumed from 0.7. A stalled player
+    # advances by nothing across eight seconds and still fails this.
     first = ampere.s.elapsed(target.queue_id)
-    time.sleep(4.0)
+    time.sleep(8.0)
     second = ampere.s.elapsed(target.queue_id)
-    advancing = second > first
+    advancing = second - first >= 2.0
     record("resume", target, cell.source, ok=ok and advancing, ack_ms=ack,
            event_ms=event_ms, effect_ms=effect_ms, floor=RESYNC_SECONDS,
            budget=PLAY_BUDGET, paused_at=round(before, 1),
@@ -478,9 +486,18 @@ def test_rewind(ampere, cell):
     target = ampere.target(cell.target)
     media, played = ampere.arrange_playing(target, cell.source, tracks=1)
     assert played.ok, f"precondition: {played.detail}"
-    # Far enough in that a 20 second rewind lands somewhere, and settled, so the
-    # position `skip` adds to is a real one.
-    time.sleep(max(0.0, abs(REWIND_BY) + 8.0))
+    # Far enough in that a 20 second rewind lands somewhere. Waited for rather
+    # than slept through: `skip` reads the raw stored position, which only
+    # moves when the player publishes, and Ampere publishes on a poll that
+    # slows to a minute while the push stream is healthy. A fixed 28 second
+    # sleep left MA holding 2.2s of a track that had been playing for half a
+    # minute, and the cell failed on a precondition that was really MA's
+    # position being stale.
+    deadline = time.monotonic() + 90.0
+    while time.monotonic() < deadline:
+        if ampere.s.raw_elapsed(target.queue_id) > abs(REWIND_BY) + 5.0:
+            break
+        time.sleep(1.0)
     # The raw stored value, not the extrapolated one, because that is what MA
     # subtracts from:
     #

@@ -1,0 +1,3738 @@
+{
+  "generated": "20260803T235933Z",
+  "ma_version": "2.9.9",
+  "schema_version": 31,
+  "targets": {
+    "single": {
+      "player_id": "ampere--3wyAVB8M:G2A1A603050507A4",
+      "name": "Bedroom Echo",
+      "members": []
+    },
+    "group": {
+      "player_id": "ampere--3wyAVB8M:3b2beb3357bb4e79853dc6619be0dfd7",
+      "name": "Whole Apartment",
+      "members": [
+        "ampere--3wyAVB8M:G2A0XL12229302V4",
+        "ampere--3wyAVB8M:G6G22M0625320M40",
+        "ampere--3wyAVB8M:G2A1A603050507A4",
+        "ampere--3wyAVB8M:G2A1A6031026028E"
+      ]
+    }
+  },
+  "matrix": [
+    {
+      "feature": "play",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "streaming",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "streaming",
+      "target": "single",
+      "status": "unsupported",
+      "reason": "Ampere does not declare PlayerFeature.VOLUME_MUTE, so mute_control is \"none\" and cmd_volume_mute matches no branch and returns silently. Exercised once per target to prove the silence, not the mute",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "streaming",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "subsonic",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "subsonic",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "radio",
+      "target": "single",
+      "status": "expect_error",
+      "reason": "the current item has no duration, so player_queues/seek raises InvalidCommand (12) by design; asserted as a refusal rather than skipped",
+      "error_code": 12
+    },
+    {
+      "feature": "rewind",
+      "source": "radio",
+      "target": "single",
+      "status": "expect_error",
+      "reason": "player_queues/skip is seek(elapsed + seconds); with no duration it raises InvalidCommand (12) the same way, so rewind is the same refusal",
+      "error_code": 12
+    },
+    {
+      "feature": "shuffle",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "radio",
+      "target": "single",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "radio",
+      "target": "single",
+      "status": "skip",
+      "reason": "players/cmd/group_volume aimed at an ungrouped player falls through to cmd_volume_set, so this cell would silently re-run the per-player volume case while claiming to test group volume",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "streaming",
+      "target": "group",
+      "status": "unsupported",
+      "reason": "Ampere does not declare PlayerFeature.VOLUME_MUTE, so mute_control is \"none\" and cmd_volume_mute matches no branch and returns silently. Exercised once per target to prove the silence, not the mute",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "streaming",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "rewind",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "shuffle",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "subsonic",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "subsonic",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "play",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "pause",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "resume",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "stop",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "next",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "previous",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "a radio queue holds one live item; player_queues/next finds no next index and returns silently, so there is no transition to observe",
+      "error_code": null
+    },
+    {
+      "feature": "seek",
+      "source": "radio",
+      "target": "group",
+      "status": "expect_error",
+      "reason": "the current item has no duration, so player_queues/seek raises InvalidCommand (12) by design; asserted as a refusal rather than skipped",
+      "error_code": 12
+    },
+    {
+      "feature": "rewind",
+      "source": "radio",
+      "target": "group",
+      "status": "expect_error",
+      "reason": "player_queues/skip is seek(elapsed + seconds); with no duration it raises InvalidCommand (12) the same way, so rewind is the same refusal",
+      "error_code": 12
+    },
+    {
+      "feature": "shuffle",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "repeat",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "enqueue",
+      "source": "radio",
+      "target": "group",
+      "status": "run",
+      "reason": "",
+      "error_code": null
+    },
+    {
+      "feature": "volume",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    },
+    {
+      "feature": "mute",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "mute is not source-dependent; proven once per target",
+      "error_code": null
+    },
+    {
+      "feature": "group_volume",
+      "source": "radio",
+      "target": "group",
+      "status": "skip",
+      "reason": "volume does not pass through the queue or the media source - it is players/cmd/volume_set on the Echo either way. Exercised once, under streaming, rather than three times identically",
+      "error_code": null
+    }
+  ],
+  "observations": [
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 846.7157080012839,
+      "event_ms": 113.8868369962438,
+      "effect_ms": 4111.200866995205,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1736.933930995292,
+      "event_ms": 114.62608799774898,
+      "effect_ms": 4109.316896996461,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2180.9016349943704,
+      "event_ms": 116.72038200049428,
+      "effect_ms": 4107.940776993928,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1348.3027080001193,
+      "event_ms": 109.74615499435458,
+      "effect_ms": 4119.0415259989095,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1557.017008002731,
+      "event_ms": 113.62772199936444,
+      "effect_ms": 4112.133609000011,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2165.0838919958915,
+      "event_ms": 108.983502999763,
+      "effect_ms": 4107.11196900229,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 782.8176170005463,
+      "event_ms": 115.25747399718966,
+      "effect_ms": 4112.747049999598,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 397.633502005192,
+      "event_ms": 397.3982860043179,
+      "effect_ms": 2119.633557005727,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1795.4444049973972,
+      "event_ms": 112.1817499952158,
+      "effect_ms": 4108.2573989988305,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 395.5366040027002,
+      "event_ms": 394.9755090070539,
+      "effect_ms": 1712.9124410057557,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2168.8113959971815,
+      "event_ms": 110.10873800114496,
+      "effect_ms": 4109.628997997788,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 404.76345299975947,
+      "event_ms": 404.3474319987581,
+      "effect_ms": 1609.6086730030947,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1728.4413930028677,
+      "event_ms": 118.22633099654922,
+      "effect_ms": 4111.447513998428,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 519.0480160017614,
+      "event_ms": 518.8214209993021,
+      "effect_ms": 2121.3911340018967,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1526.2963280038093,
+      "event_ms": 113.88896500284318,
+      "effect_ms": 4109.605002005992,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 509.03507000475656,
+      "event_ms": 1523.89483400475,
+      "effect_ms": 4727.277755999239,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2144.9029490031535,
+      "event_ms": 110.69822999706957,
+      "effect_ms": 4108.293949000654,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "pause",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "state=paused",
+      "ack_ms": 547.0321040047565,
+      "event_ms": 546.826575002342,
+      "effect_ms": 1608.5851969983196,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 794.5815860002767,
+      "event_ms": 110.7533100002911,
+      "effect_ms": 4109.806136999396,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "paused at 1.0; after resume 5.4 -> 9.5",
+      "ack_ms": 513.3556670043617,
+      "event_ms": 405.81754199956777,
+      "effect_ms": 1610.1448940025875,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 1.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1571.6025660003652,
+      "event_ms": 114.24561199964955,
+      "effect_ms": 4108.349435999116,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "paused at 0.0; after resume 0.7 -> 4.8",
+      "ack_ms": 493.8817270012805,
+      "event_ms": 383.62755800335435,
+      "effect_ms": 1611.8186530002276,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 0.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2197.1912379958667,
+      "event_ms": 113.69593299605185,
+      "effect_ms": 4110.98393699649,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "paused at 0.0; after resume 0.0 -> 4.5",
+      "ack_ms": 404.0258820023155,
+      "event_ms": 403.74760499980766,
+      "effect_ms": 6208.294809002837,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 0.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 718.1622569987667,
+      "event_ms": 108.73304599954281,
+      "effect_ms": 4112.243424999178,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": false,
+      "detail": "paused at 0.6; after resume 4.2 -> 3.6",
+      "ack_ms": 568.3724900009111,
+      "event_ms": 458.79115300340345,
+      "effect_ms": 1609.9052080026013,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 0.6
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1967.4318990000756,
+      "event_ms": 117.33058499521576,
+      "effect_ms": 4113.035113994556,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "paused at 5.1; after resume 5.0 -> 9.5",
+      "ack_ms": 388.9495320036076,
+      "event_ms": null,
+      "effect_ms": 6641.3773730018875,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 5.1
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2228.865089993633,
+      "event_ms": 114.16937799367588,
+      "effect_ms": 4112.046110996744,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "resume",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "paused at 4.0; after resume 1.0 -> 4.4",
+      "ack_ms": 376.7314910001005,
+      "event_ms": 13.220913999248296,
+      "effect_ms": 1610.3730289978557,
+      "floor_s": 1.5,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "paused_at": 4.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 810.2865640030359,
+      "event_ms": 113.7393829994835,
+      "effect_ms": 4110.984767001355,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1530.9772120017442,
+      "event_ms": 1529.9199970031623,
+      "effect_ms": 1638.9701959997183,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1587.339402998623,
+      "event_ms": 113.5628589981934,
+      "effect_ms": 4113.589237000269,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1738.6591989998124,
+      "event_ms": 1736.557399002777,
+      "effect_ms": 1974.2122829993605,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2179.8201679994236,
+      "event_ms": 116.85457499697804,
+      "effect_ms": 4111.844412997016,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1725.7288940018043,
+      "event_ms": 1725.4380849990412,
+      "effect_ms": 1833.2720830003382,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 939.6092599999974,
+      "event_ms": 114.58386400045129,
+      "effect_ms": 4113.418419998197,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1769.352647002961,
+      "event_ms": 1767.9538390002563,
+      "effect_ms": 1880.875171002117,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2445.14638200053,
+      "event_ms": 112.3092620036914,
+      "effect_ms": 4123.641680002038,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1856.9170170012512,
+      "event_ms": 1748.7906879978254,
+      "effect_ms": 1970.4496740014292,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2193.5790220013587,
+      "event_ms": 111.59295799734537,
+      "effect_ms": 4108.977341995342,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "stop",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "reached idle=True; state 5.5s later =idle",
+      "ack_ms": 1548.2190840048133,
+      "event_ms": 1547.2875340055907,
+      "effect_ms": 1659.0701189998072,
+      "floor_s": 1.5,
+      "budget_s": 15.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 1508.7153670028783,
+      "event_ms": 114.09799299872248,
+      "effect_ms": 4114.304349001031,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "next",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "index 0 -> 1, speaker on 'Dreamweaver (Acoustic)'",
+      "ack_ms": 228.53944999951636,
+      "event_ms": 120.51116799557349,
+      "effect_ms": 5113.252096998622,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "index_ms": 340.03880499949446,
+        "player_title": "Dreamweaver (Acoustic)",
+        "moved_then_reverted": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 1909.3373459982104,
+      "event_ms": 113.33358599949861,
+      "effect_ms": 4106.818234002276,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "next",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "index 0 -> 1, speaker on 'The Zephyr Song (Deluxe Edition)'",
+      "ack_ms": 123.05854399892269,
+      "event_ms": 119.93061300017871,
+      "effect_ms": 5109.434343998146,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "index_ms": 233.21451399533544,
+        "player_title": "The Zephyr Song (Deluxe Edition)",
+        "moved_then_reverted": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 758.4651829965878,
+      "event_ms": 112.41137499746401,
+      "effect_ms": 4114.388201996917,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "next",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "index 0 -> 1, speaker on 'Dreamweaver (Acoustic)'",
+      "ack_ms": 225.40286400180776,
+      "event_ms": 116.94752300536493,
+      "effect_ms": 5121.641158002603,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "index_ms": 334.70351500000106,
+        "player_title": "Dreamweaver (Acoustic)",
+        "moved_then_reverted": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 1596.7645679993439,
+      "event_ms": 118.86690399842337,
+      "effect_ms": 4105.628758996318,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "next",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "index 0 -> 1, speaker on 'The Zephyr Song (Deluxe Edition)'",
+      "ack_ms": 122.73320100212004,
+      "event_ms": 122.40381199808326,
+      "effect_ms": 5123.8166769981035,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "index_ms": 225.65752600348787,
+        "player_title": "The Zephyr Song (Deluxe Edition)",
+        "moved_then_reverted": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 706.6112539978349,
+      "event_ms": 113.0551780006499,
+      "effect_ms": 4112.386004002474,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "previous",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "elapsed 1.2 at issue, index 1 -> 0, speaker on 'Without Me', step back expected",
+      "ack_ms": 227.9684780005482,
+      "event_ms": 119.91985799977556,
+      "effect_ms": 5115.194329002406,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "restart_expected": false,
+        "elapsed_at_issue": 1.2,
+        "player_title": "Without Me"
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 1439.5251649984857,
+      "event_ms": 118.18290000519482,
+      "effect_ms": 6155.70423600002,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "previous",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "elapsed 27.0 at issue, index 1 -> 1, speaker on 'The Zephyr Song (Deluxe Edition)', restart expected",
+      "ack_ms": 226.07336200599093,
+      "event_ms": 118.22352700255578,
+      "effect_ms": 5239.351160002116,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "restart_expected": true,
+        "elapsed_at_issue": 27.0,
+        "player_title": "The Zephyr Song (Deluxe Edition)"
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 725.9285790059948,
+      "event_ms": 110.99944000307005,
+      "effect_ms": 4111.3190240066615,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "previous",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "elapsed 2.7 at issue, index 1 -> 0, speaker on 'Without Me', step back expected",
+      "ack_ms": 229.08740200364264,
+      "event_ms": 122.43111499992665,
+      "effect_ms": 5114.780340001744,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "restart_expected": false,
+        "elapsed_at_issue": 2.7,
+        "player_title": "Without Me"
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=3 state=playing expected=3",
+      "ack_ms": 1716.0205140025937,
+      "event_ms": 185.5897269997513,
+      "effect_ms": 4127.530514000682,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "previous",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "elapsed 2.2 at issue, index 1 -> 0, speaker on 'Love Is Alive', step back expected",
+      "ack_ms": 232.52371000126004,
+      "event_ms": 125.50319900037721,
+      "effect_ms": 5218.798981004511,
+      "floor_s": 5.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "restart_expected": false,
+        "elapsed_at_issue": 2.2,
+        "player_title": "Love Is Alive"
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 726.6079010005342,
+      "event_ms": 166.6112789971521,
+      "effect_ms": 4118.8857090019155,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "asked 100; MA reports 100.0 after 4.1s; MA/Ampere raw 100.0/0.0 (offset +100.0, expected 100)",
+      "ack_ms": 533.4066699942923,
+      "event_ms": 532.8817400004482,
+      "effect_ms": 4104.87411399663,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.0,
+        "queue_elapsed": 100.0,
+        "asked": 100,
+        "offset": 100.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1545.394775996101,
+      "event_ms": 109.0207620000001,
+      "effect_ms": 4110.2668559979065,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "asked 100; MA reports 102.0 after 4.1s; MA/Ampere raw 102.0/0.0 (offset +102.0, expected 100)",
+      "ack_ms": 2157.762889000878,
+      "event_ms": 2157.5344020020566,
+      "effect_ms": 4111.7848659996525,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.0,
+        "queue_elapsed": 102.0,
+        "asked": 100,
+        "offset": 102.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2161.967934000131,
+      "event_ms": 115.29909799719462,
+      "effect_ms": 8157.497698994121,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 103.33792500023264,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 718.3702120019007,
+      "event_ms": 115.17788700439269,
+      "effect_ms": 4110.1932500023395,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "asked 100; MA reports 102.8 after 4.1s; MA/Ampere raw 102.8/0.0 (offset +102.8, expected 100)",
+      "ack_ms": 645.8140390022891,
+      "event_ms": 644.6016240006429,
+      "effect_ms": 4110.635899000044,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.0,
+        "queue_elapsed": 102.8,
+        "asked": 100,
+        "offset": 102.8
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1699.1170510009397,
+      "event_ms": 116.05931600206532,
+      "effect_ms": 4112.151848006761,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "asked 100; MA reports 102.1 after 4.1s; MA/Ampere raw 102.1/0.0 (offset +102.1, expected 100)",
+      "ack_ms": 2010.6066769949393,
+      "event_ms": 1905.7422679979936,
+      "effect_ms": 4112.023848996614,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.0,
+        "queue_elapsed": 102.1,
+        "asked": 100,
+        "offset": 102.1
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2182.4843089998467,
+      "event_ms": 110.87613600102486,
+      "effect_ms": 4117.540736995579,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 110.78431899659336,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 759.5522470001015,
+      "event_ms": 114.25566000252729,
+      "effect_ms": 6162.477033001778,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1636.424285999965,
+      "event_ms": 113.73502299829852,
+      "effect_ms": 4111.140737993992,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "27.4 - 20 = 7.0; MA reports 7.0 after 4.1s; MA/Ampere raw 7.0/0.0 (offset +7.0, expected 7.0)",
+      "ack_ms": 509.1213900013827,
+      "event_ms": 399.02544600045076,
+      "effect_ms": 4115.536971003166,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.0,
+        "queue_elapsed": 7.0,
+        "asked": 7,
+        "offset": 7.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2026.2850129947765,
+      "event_ms": 105.18981399945915,
+      "effect_ms": 4109.876270995301,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 108.23128799529513,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 686.7324159975396,
+      "event_ms": 112.06449099699967,
+      "effect_ms": 4109.238354998524,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "29.2 - 20 = 9.0; MA reports 10.0 after 6.1s; MA/Ampere raw 10.0/0.6 (offset +9.4, expected 9.0)",
+      "ack_ms": 735.825042000215,
+      "event_ms": 735.3686269998434,
+      "effect_ms": 6145.34457300033,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 0.6,
+        "queue_elapsed": 10.0,
+        "asked": 9,
+        "offset": 9.4
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1657.040523001342,
+      "event_ms": 113.12456000450766,
+      "effect_ms": 4114.068830000178,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "26.1 - 20 = 6.0; MA reports 8.0 after 7.4s; MA/Ampere raw 7.4/1.4 (offset +6.0, expected 6.0)",
+      "ack_ms": 503.7274329952197,
+      "event_ms": 395.8463369999663,
+      "effect_ms": 7351.659952997579,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "player_elapsed": 1.4,
+        "queue_elapsed": 7.4,
+        "asked": 6,
+        "offset": 6.0
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2207.867090997752,
+      "event_ms": 111.58124299981864,
+      "effect_ms": 4109.574595000595,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "rewind",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "raised 12",
+      "ack_ms": 109.60725900076795,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 5.0,
+      "over_budget": false,
+      "error_code": 12,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=4 state=playing expected=4",
+      "ack_ms": 766.7551689955872,
+      "event_ms": 112.03069800103549,
+      "effect_ms": 4109.726859998773,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby",
+          "Justin Bieber - What Do You Mean?"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby",
+          "What Do You Mean?"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "4 items; on=True off=True reordered=True restored=True",
+      "ack_ms": 115.78085499786539,
+      "event_ms": 115.633153996896,
+      "effect_ms": 226.63815199484816,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 4,
+        "reordered": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=4 state=playing expected=4",
+      "ack_ms": 2681.7048320008325,
+      "event_ms": 114.51730800035875,
+      "effect_ms": 4113.753120000183,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!",
+          "Parcels - Gamesofluck"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!",
+          "Gamesofluck"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "4 items; on=True off=True reordered=True restored=True",
+      "ack_ms": 222.30525300255977,
+      "event_ms": 115.52723400382092,
+      "effect_ms": 333.8704360066913,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 4,
+        "reordered": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2222.618325999065,
+      "event_ms": 113.02582200005418,
+      "effect_ms": 4112.631792006141,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "1 items; on=True off=True reordered=False restored=True",
+      "ack_ms": 112.54789599479409,
+      "event_ms": 112.3661940000602,
+      "effect_ms": 222.16382599435747,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 1,
+        "reordered": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=4 state=playing expected=4",
+      "ack_ms": 709.4631799991475,
+      "event_ms": 112.69053899741266,
+      "effect_ms": 4112.213159998646,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)",
+          "Justin Bieber - Baby",
+          "Justin Bieber - What Do You Mean?"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver",
+          "Baby",
+          "What Do You Mean?"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "4 items; on=True off=True reordered=True restored=True",
+      "ack_ms": 116.69511700165458,
+      "event_ms": 116.55530700227246,
+      "effect_ms": 232.89321800257312,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 4,
+        "reordered": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=4 state=playing expected=4",
+      "ack_ms": 1495.4770100011956,
+      "event_ms": 113.83780399773968,
+      "effect_ms": 4112.187796999933,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)",
+          "System of A Down - Chop Suey!",
+          "Parcels - Gamesofluck"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song",
+          "Chop Suey!",
+          "Gamesofluck"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "4 items; on=True off=True reordered=True restored=True",
+      "ack_ms": 116.22704999899724,
+      "event_ms": 116.06289500195999,
+      "effect_ms": 225.83298300014576,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 4,
+        "reordered": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2320.0278250005795,
+      "event_ms": 127.13760399492458,
+      "effect_ms": 4110.0631750014145,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "shuffle",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "1 items; on=True off=True reordered=False restored=True",
+      "ack_ms": 113.61254400253529,
+      "event_ms": 113.40939100045944,
+      "effect_ms": 223.99952600244433,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "items": 1,
+        "reordered": false
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=2 state=playing expected=2",
+      "ack_ms": 826.404431994888,
+      "event_ms": 113.68533899803879,
+      "effect_ms": 4109.637986999587,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 112.65884000022197,
+      "event_ms": 112.41210599837359,
+      "effect_ms": 223.01307100133272,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=2 state=playing expected=2",
+      "ack_ms": 1571.4753180000116,
+      "event_ms": 113.76317900430877,
+      "effect_ms": 4112.985265004681,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 113.12283499864861,
+      "event_ms": 112.78747699543601,
+      "effect_ms": 228.08619099669158,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2223.71792299964,
+      "event_ms": 126.30380000337027,
+      "effect_ms": 4108.913133000897,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 111.20454099727795,
+      "event_ms": 110.78509399521863,
+      "effect_ms": 220.44247499434277,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=2 state=playing expected=2",
+      "ack_ms": 680.498127003375,
+      "event_ms": 113.01299899787409,
+      "effect_ms": 5646.893288001593,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me",
+          "Daedric - Dreamweaver (Acoustic)"
+        ],
+        "asked": [
+          "Without Me",
+          "Dreamweaver"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 111.6719909987296,
+      "event_ms": 111.0646800007089,
+      "effect_ms": 223.0812479974702,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=2 state=playing expected=2",
+      "ack_ms": 4556.86314599734,
+      "event_ms": 113.59663799521513,
+      "effect_ms": 9910.214327996073,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive",
+          "Red Hot Chili Peppers - The Zephyr Song (Deluxe Edition)"
+        ],
+        "asked": [
+          "Love Is Alive",
+          "The Zephyr Song"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 115.65332600002876,
+      "event_ms": 115.46244700002717,
+      "effect_ms": 226.26309800398303,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2277.650223004457,
+      "event_ms": 115.05353900429327,
+      "effect_ms": 4110.311340999033,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "repeat",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "all->all, one->one, off->off",
+      "ack_ms": 110.61397199955536,
+      "event_ms": 110.47143600444542,
+      "effect_ms": 224.19208000064828,
+      "floor_s": 0.0,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 834.0616099958424,
+      "event_ms": 112.19896599504864,
+      "effect_ms": 4109.022427997843,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 217.90515699831303,
+      "event_ms": 109.52224200445926,
+      "effect_ms": 327.313674002653,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1680.589884002984,
+      "event_ms": 117.76447800366441,
+      "effect_ms": 4135.418019002827,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "subsonic",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 222.51183899788884,
+      "event_ms": 113.74064200208522,
+      "effect_ms": 335.24563199898694,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2251.976272003958,
+      "event_ms": 111.22860699833836,
+      "effect_ms": 4109.693839003739,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "radio",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 217.2496860002866,
+      "event_ms": 110.45972899592016,
+      "effect_ms": 326.8881279946072,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 953.298927997821,
+      "event_ms": 114.6960339974612,
+      "effect_ms": 4111.109207995469,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 219.33249400171917,
+      "event_ms": 111.73388400493423,
+      "effect_ms": 328.40107299853116,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 1651.5170190032222,
+      "event_ms": 114.84858699986944,
+      "effect_ms": 4112.376312004926,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Gary Wright - Love Is Alive"
+        ],
+        "asked": [
+          "Love Is Alive"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "subsonic",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 222.93938499933574,
+      "event_ms": 114.5432150005945,
+      "effect_ms": 333.2287630037172,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 2251.174124998215,
+      "event_ms": 116.16423300438328,
+      "effect_ms": 4115.844660998846,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "SomaFM: Groove Salad"
+        ],
+        "asked": [
+          "SomaFM: Groove Salad"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enqueue",
+      "source": "radio",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items 1 -> 2, index 0 -> 0, state=playing",
+      "ack_ms": 218.2345949986484,
+      "event_ms": 111.5900610020617,
+      "effect_ms": 327.741123001033,
+      "floor_s": 0.0,
+      "budget_s": 10.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 810.1969109993661,
+      "event_ms": 111.72881400125334,
+      "effect_ms": 4112.717693999002,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "volume",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "asked 20, reports 20",
+      "ack_ms": 1550.9675099965534,
+      "event_ms": 1550.7993509963853,
+      "effect_ms": 1661.0720419994323,
+      "floor_s": 1.5,
+      "budget_s": 11.5,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "asked": 20,
+        "reported": 20
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 814.7840590027045,
+      "event_ms": 113.43223500443855,
+      "effect_ms": 5133.301386005769,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "volume",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": false,
+      "detail": "asked 20, reports 0",
+      "ack_ms": 1720.7293519968516,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 1.5,
+      "budget_s": 11.5,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "asked": 20,
+        "reported": 0
+      }
+    },
+    {
+      "action": "group_volume",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "asked 20, group reports 20; members [8, 11, 14, 17] -> [11, 14, 17, 20]",
+      "ack_ms": 1724.8990129955928,
+      "event_ms": 1965.5683159944601,
+      "effect_ms": 2089.12615099689,
+      "floor_s": 1.5,
+      "budget_s": 14.5,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "asked": 20,
+        "reported": 20,
+        "members_before": {
+          "ampere--3wyAVB8M:G2A0XL12229302V4": 8,
+          "ampere--3wyAVB8M:G6G22M0625320M40": 11,
+          "ampere--3wyAVB8M:G2A1A603050507A4": 14,
+          "ampere--3wyAVB8M:G2A1A6031026028E": 17
+        },
+        "members_after": {
+          "ampere--3wyAVB8M:G2A0XL12229302V4": 11,
+          "ampere--3wyAVB8M:G6G22M0625320M40": 14,
+          "ampere--3wyAVB8M:G2A1A603050507A4": 17,
+          "ampere--3wyAVB8M:G2A1A6031026028E": 20
+        },
+        "ordering_kept": true
+      }
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 832.6017529980163,
+      "event_ms": 116.07388399716001,
+      "effect_ms": 4114.709027999197,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "mute",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "unsupported; muted None -> None, volume 17 -> 17",
+      "ack_ms": 109.44136400212301,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 1.5,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 625.0621200015303,
+      "event_ms": 114.909957999771,
+      "effect_ms": 4114.427306005382,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "mute",
+      "source": "streaming",
+      "target": "group",
+      "player": "Whole Apartment",
+      "ok": true,
+      "detail": "unsupported; muted None -> None, volume 0 -> 0",
+      "ack_ms": 108.85947700444376,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 1.5,
+      "budget_s": 6.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 713.5501890006708,
+      "event_ms": 110.7025210003485,
+      "effect_ms": 4111.872173001757,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "enum-coercion",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "repeat_mode=backwards-and-sideways stored as 'unknown'",
+      "ack_ms": null,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 0.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "resume-empty",
+      "source": "n/a",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "returned success and the queue now holds 1 item(s), state=playing",
+      "ack_ms": null,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 0.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    },
+    {
+      "action": "grouping-refused",
+      "source": "n/a",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "refused with 11: Player Living Room Echo Studio does not support group commands",
+      "ack_ms": null,
+      "event_ms": null,
+      "effect_ms": null,
+      "floor_s": 0.0,
+      "budget_s": 0.0,
+      "over_budget": false,
+      "error_code": 11,
+      "extra": {}
+    },
+    {
+      "action": "play",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "items=1 state=playing expected=1",
+      "ack_ms": 643.3782289968804,
+      "event_ms": 113.38158400030807,
+      "effect_ms": 4114.805188000901,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {
+        "queued": [
+          "Eminem - Without Me"
+        ],
+        "asked": [
+          "Without Me"
+        ],
+        "order_preserved": true
+      }
+    },
+    {
+      "action": "seek-end-clamp",
+      "source": "streaming",
+      "target": "single",
+      "player": "Bedroom Echo",
+      "ok": true,
+      "detail": "sought to 289/290; Alexa reports 0.0",
+      "ack_ms": null,
+      "event_ms": null,
+      "effect_ms": 4116.99475000205,
+      "floor_s": 4.0,
+      "budget_s": 25.0,
+      "over_budget": false,
+      "error_code": null,
+      "extra": {}
+    }
+  ],
+  "latency": {
+    "enqueue": {
+      "n": 6,
+      "budget_s": 10.0,
+      "over_budget": 0,
+      "ack_ms_p50": 218.8,
+      "ack_ms_max": 222.9,
+      "event_ms_p50": 111.7,
+      "event_ms_max": 114.5,
+      "effect_ms_p50": 328.1,
+      "effect_ms_max": 335.2
+    },
+    "enum-coercion": {
+      "n": 1,
+      "budget_s": 0.0,
+      "over_budget": 0,
+      "ack_ms_p50": null,
+      "ack_ms_max": null,
+      "event_ms_p50": null,
+      "event_ms_max": null,
+      "effect_ms_p50": null,
+      "effect_ms_max": null
+    },
+    "group_volume": {
+      "n": 1,
+      "budget_s": 14.5,
+      "over_budget": 0,
+      "ack_ms_p50": 1724.9,
+      "ack_ms_max": 1724.9,
+      "event_ms_p50": 1965.6,
+      "event_ms_max": 1965.6,
+      "effect_ms_p50": 2089.1,
+      "effect_ms_max": 2089.1
+    },
+    "grouping-refused": {
+      "n": 1,
+      "budget_s": 0.0,
+      "over_budget": 0,
+      "ack_ms_p50": null,
+      "ack_ms_max": null,
+      "event_ms_p50": null,
+      "event_ms_max": null,
+      "effect_ms_p50": null,
+      "effect_ms_max": null
+    },
+    "mute": {
+      "n": 2,
+      "budget_s": 6.0,
+      "over_budget": 0,
+      "ack_ms_p50": 109.2,
+      "ack_ms_max": 109.4,
+      "event_ms_p50": null,
+      "event_ms_max": null,
+      "effect_ms_p50": null,
+      "effect_ms_max": null
+    },
+    "next": {
+      "n": 4,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 174.2,
+      "ack_ms_max": 228.5,
+      "event_ms_p50": 120.2,
+      "event_ms_max": 122.4,
+      "effect_ms_p50": 5117.4,
+      "effect_ms_max": 5123.8
+    },
+    "pause": {
+      "n": 6,
+      "budget_s": 15.0,
+      "over_budget": 0,
+      "ack_ms_p50": 456.9,
+      "ack_ms_max": 547.0,
+      "event_ms_p50": 461.6,
+      "event_ms_max": 1523.9,
+      "effect_ms_p50": 1916.3,
+      "effect_ms_max": 4727.3
+    },
+    "play": {
+      "n": 68,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 1579.5,
+      "ack_ms_max": 4556.9,
+      "event_ms_p50": 113.7,
+      "event_ms_max": 185.6,
+      "effect_ms_p50": 4112.1,
+      "effect_ms_max": 9910.2
+    },
+    "previous": {
+      "n": 4,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 228.5,
+      "ack_ms_max": 232.5,
+      "event_ms_p50": 121.2,
+      "event_ms_max": 125.5,
+      "effect_ms_p50": 5167.0,
+      "effect_ms_max": 5239.4
+    },
+    "repeat": {
+      "n": 6,
+      "budget_s": 6.0,
+      "over_budget": 0,
+      "ack_ms_p50": 112.2,
+      "ack_ms_max": 115.7,
+      "event_ms_p50": 111.7,
+      "event_ms_max": 115.5,
+      "effect_ms_p50": 223.6,
+      "effect_ms_max": 228.1
+    },
+    "resume": {
+      "n": 6,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 449.0,
+      "ack_ms_max": 568.4,
+      "event_ms_p50": 403.7,
+      "event_ms_max": 458.8,
+      "effect_ms_p50": 1611.1,
+      "effect_ms_max": 6641.4
+    },
+    "resume-empty": {
+      "n": 1,
+      "budget_s": 0.0,
+      "over_budget": 0,
+      "ack_ms_p50": null,
+      "ack_ms_max": null,
+      "event_ms_p50": null,
+      "event_ms_max": null,
+      "effect_ms_p50": null,
+      "effect_ms_max": null
+    },
+    "rewind": {
+      "n": 5,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 503.7,
+      "ack_ms_max": 735.8,
+      "event_ms_p50": 399.0,
+      "event_ms_max": 735.4,
+      "effect_ms_p50": 6145.3,
+      "effect_ms_max": 7351.7
+    },
+    "seek": {
+      "n": 6,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": 589.6,
+      "ack_ms_max": 2157.8,
+      "event_ms_p50": 1275.2,
+      "event_ms_max": 2157.5,
+      "effect_ms_p50": 4111.2,
+      "effect_ms_max": 4112.0
+    },
+    "seek-end-clamp": {
+      "n": 1,
+      "budget_s": 25.0,
+      "over_budget": 0,
+      "ack_ms_p50": null,
+      "ack_ms_max": null,
+      "event_ms_p50": null,
+      "event_ms_max": null,
+      "effect_ms_p50": 4117.0,
+      "effect_ms_max": 4117.0
+    },
+    "shuffle": {
+      "n": 6,
+      "budget_s": 6.0,
+      "over_budget": 0,
+      "ack_ms_p50": 116.0,
+      "ack_ms_max": 222.3,
+      "event_ms_p50": 115.6,
+      "event_ms_max": 116.6,
+      "effect_ms_p50": 226.2,
+      "effect_ms_max": 333.9
+    },
+    "stop": {
+      "n": 6,
+      "budget_s": 15.0,
+      "over_budget": 0,
+      "ack_ms_p50": 1732.2,
+      "ack_ms_max": 1856.9,
+      "event_ms_p50": 1731.0,
+      "event_ms_max": 1768.0,
+      "effect_ms_p50": 1857.1,
+      "effect_ms_max": 1974.2
+    },
+    "volume": {
+      "n": 2,
+      "budget_s": 11.5,
+      "over_budget": 0,
+      "ack_ms_p50": 1635.8,
+      "ack_ms_max": 1720.7,
+      "event_ms_p50": 1550.8,
+      "event_ms_max": 1550.8,
+      "effect_ms_p50": 1661.1,
+      "effect_ms_max": 1661.1
+    }
+  },
+  "notes": []
+}
