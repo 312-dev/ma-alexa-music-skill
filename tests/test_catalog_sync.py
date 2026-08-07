@@ -564,16 +564,37 @@ def test_collect_from_ma_forwards_the_provider_filter(monkeypatch):
     assert ctrl.calls[0]["summary"] is True
 
 
+def test_collect_from_ma_emits_a_station_per_artist_when_configured(monkeypatch):
+    """A station per artist, keyed station.ma-<id> off the same library artist id
+    the artists catalog uses, so "play <artist> radio" resolves to a rad:ma-<id>
+    the MA similar-tracks resolver builds a real station from (Layer 3)."""
+    monkeypatch.setitem(catalog_sync.CATALOGS, "stations", "cat-stations")
+    mass = _fake_mass(
+        artists=_Controller([_summary(1, "Radiohead"), _summary(2, "Bjork")]),
+        albums=_Controller([]), tracks=_Controller([]),
+        playlists=_Controller([]), genres=_Controller([]),
+    )
+
+    with _Loop() as loop:
+        out = catalog_sync.collect_from_ma(mass, loop)
+
+    ids = [s["id"] for s in out["stations"]]
+    assert ids == ["station.ma-1", "station.ma-2"]
+    # Each station carries both spoken aliases so "radio" or "station" resolves.
+    values = [n["value"] for n in out["stations"][0]["names"]]
+    assert values == ["Radiohead Radio", "Radiohead Station"]
+
+
 def test_station_entity_carries_both_radio_and_station_aliases():
     entity = catalog_sync.station_entity("station.ma-9", "Portishead")
     values = [n["value"] for n in entity["names"]]
     assert values == ["Portishead Radio", "Portishead Station"]
 
 
-def test_collect_from_ma_emits_no_stations_even_with_the_catalog(monkeypatch):
-    """The MA path never emits stations; provider-agnostic radio is parked on a
-    branch, so even a configured stations catalog produces none."""
-    monkeypatch.setitem(catalog_sync.CATALOGS, "stations", "cat-stations")
+def test_collect_from_ma_emits_no_stations_without_the_catalog(monkeypatch):
+    """The stations catalog is optional; without it the MA path emits none, so an
+    operator who never created it pays nothing and advertises nothing."""
+    monkeypatch.setitem(catalog_sync.CATALOGS, "stations", "")
     mass = _fake_mass(
         artists=_Controller([_summary(1, "Radiohead")]),
         albums=_Controller([]), tracks=_Controller([]),

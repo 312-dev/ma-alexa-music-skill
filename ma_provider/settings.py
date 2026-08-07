@@ -36,6 +36,7 @@ CONF_HANDOFF_PHRASE = "handoff_phrase"
 CONF_EXPOSE_GROUPS = "expose_groups"
 CONF_MA_SOURCE = "ma_source"
 CONF_CATALOG_PROVIDERS = "catalog_providers"
+CONF_ENABLE_STATIONS = "enable_stations"
 CONF_SERVE_ENDPOINT = "serve_endpoint"
 CONF_ENDPOINT_PORT = "endpoint_port"
 CONF_PUBLIC_BASE = "public_base"
@@ -178,6 +179,25 @@ def _settings_entries(
             ),
             # Read into the setup-state file at init, like the after-content
             # mode, and the crawl reads it from there.
+            requires_reload=True,
+            required=False,
+        ),
+        ConfigEntry(
+            key=CONF_ENABLE_STATIONS,
+            type=ConfigEntryType.BOOLEAN,
+            label="Answer \"play <artist> radio\"",
+            default_value=False,
+            category=VOICE_CATEGORY,
+            description=(
+                "Adds a station per artist to a sixth Amazon catalog, so "
+                '"play <artist> radio" (or "station") is recognised and plays a '
+                "similar-tracks station seeded from that artist. Off by default: "
+                "it is a separate catalog that has to be created, and the next "
+                "setup or sync creates and fills it. Continuation radio, when a "
+                "queue ends, works without this."
+            ),
+            # Read into the setup-state file at init; create_catalogs and the
+            # crawl both read it from there, so a change has to reload to take.
             requires_reload=True,
             required=False,
         ),

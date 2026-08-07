@@ -157,6 +157,7 @@ def configure(public_base: str = "", storage_path: str = "",
               oauth_client_secret: str = "", oauth_link_secret: str = "",
               after_content: str = "",
               catalog_providers: list[str] | None = None,
+              enable_stations: bool | None = None,
               handoff_phrase: str = "",
               mass: Any = None, loop: Any = None) -> None:
     """Supply settings that do not come from the environment.
@@ -235,6 +236,13 @@ def configure(public_base: str = "", storage_path: str = "",
     if catalog_providers is not None:
         setup_state.update(
             catalog_providers=[str(p) for p in catalog_providers if p])
+
+    # Whether to catalog a station per artist. Read by create_catalogs (to make
+    # the sixth catalog) and by the crawl (to fill it), both of which run without
+    # provider config, so it lands in the same setup-state file. Skipped when
+    # omitted so a partial reconfigure does not clear the choice.
+    if enable_stations is not None:
+        setup_state.update(enable_stations=bool(enable_stations))
 
 
 def require_public_base() -> None:
@@ -596,11 +604,21 @@ def resolve_tracks(content_id: str) -> list[dict]:
                      else artist_tracks(ident))
         elif kind == "rad":
             if ma:
-                # A marked seed resolves to the seed artist's own tracks. Provider-
-                # agnostic similar-tracks radio is parked on a branch; this keeps
-                # after-content 'radio' mode playing something coherent for an MA
-                # track without the lyrics-heavy similar lookup.
-                songs = ma_resolve.resolve("ar", ident, MASS, LOOP)
+                # A marked station. When the artist is backed by the OpenSubsonic
+                # server, build it the fast way: getArtistInfo2 similar-artists
+                # plus library listings, no per-track lyrics, so it resolves
+                # inside Amazon's Initiate budget. similar_tracks has the same
+                # last.fm data but pays a lyrics fetch per track that pushed a
+                # station past a minute. Only fall to MA's provider-agnostic
+                # similar-tracks for a non-Subsonic artist.
+                sub_id = ma_resolve.subsonic_artist_id(ident, MASS, LOOP)
+                artist_ids = similar_artist_ids(sub_id) if sub_id else []
+                if len(artist_ids) > 1:
+                    songs = radio_pool(sub_id, artist_ids)
+                    cacheable = True
+                else:
+                    songs, degraded = ma_resolve.radio(ident, MASS, LOOP)
+                    cacheable = not degraded
             else:
                 # A station that fell back to the seed artist alone is not a
                 # station, and caching one pins the failure permanently, because

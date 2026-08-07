@@ -319,6 +319,23 @@ def test_configure_ignores_an_empty_after_content(app, monkeypatch, tmp_path):
     assert app.effective_after_content() == "library"
 
 
+def test_enable_stations_round_trips_through_configure(app, monkeypatch, tmp_path):
+    """The toggle the provider passes reaches the setup-state file create_catalogs
+    and the crawl both read."""
+    monkeypatch.setattr(app.setup_state, "STATE_DIR", tmp_path)
+    app.configure(enable_stations=True)
+    assert app.setup_state.load().get("enable_stations") is True
+
+
+def test_configure_leaves_enable_stations_alone_when_omitted(app, monkeypatch,
+                                                             tmp_path):
+    """A partial reconfigure (the omitted default) must not clear the choice."""
+    monkeypatch.setattr(app.setup_state, "STATE_DIR", tmp_path)
+    app.setup_state.update(enable_stations=True)
+    app.configure()  # enable_stations omitted -> None -> no write
+    assert app.setup_state.load().get("enable_stations") is True
+
+
 # --- smapi seam -------------------------------------------------------------
 
 

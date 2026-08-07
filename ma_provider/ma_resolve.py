@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 from typing import TYPE_CHECKING, Any
 
 from .stream_ref import MA_ID_PREFIX, encode_ref, is_live
@@ -38,6 +39,17 @@ logger = logging.getLogger(__name__)
 # hears is applied on top, per queue, by `queuestate`.
 LIBRARY_SAMPLE = 200
 FAVORITES_LIMIT = 500
+
+# How a station is built, tuned for Amazon's sub-second Initiate budget.
+# similar_tracks is track-seeded, and MA's OpenSubsonic implementation fetches
+# lyrics for every track it returns, so the cost is roughly one Navidrome round
+# trip per (seed x per-seed) track. A first attempt with three seeds and a
+# limit of 144 took 88 seconds and Alexa gave up. One seed and a small fetch
+# keeps a station to a couple of seconds; it need not be large, because a
+# station is endless and Amazon pulls more through the queue's own continuation.
+RADIO_SEED_TRACKS = 1
+RADIO_SIMILAR_PER_SEED = 15
+RADIO_POOL_CAP = 40
 
 
 def is_ma_native(ident: str) -> bool:
@@ -210,7 +222,118 @@ def library_sample(mass: MusicAssistant,
     return _library(mass, loop, favorite=None, limit=LIBRARY_SAMPLE)
 
 
+def subsonic_artist_id(ident: str, mass: MusicAssistant,
+                       loop: asyncio.AbstractEventLoop) -> str:
+    """
+    The OpenSubsonic provider id for a marked MA library artist, or "".
+
+    The fast station path builds from Subsonic's similar-artists (getArtistInfo2)
+    plus plain library listings, none of which fetch lyrics, so a station stays
+    inside Amazon's Initiate budget. MA's similar_tracks has the same last.fm
+    data but pays a per-track lyrics fetch that pushed a station past a minute.
+    Only an opensubsonic mapping qualifies, because that is the server Music Assistant's
+    own Subsonic client is pointed at, so the id it returns is one that client
+    can resolve. A non-Subsonic artist returns "" and the caller uses the
+    provider-agnostic MA path instead.
+    """
+    db_id = library_id(ident)
+
+    def gather(coro):
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+
+    try:
+        artist = gather(mass.music.artists.get_library_item(db_id))
+    except Exception:
+        logger.exception("MA artist lookup failed for %s", ident)
+        return ""
+    for mapping in getattr(artist, "provider_mappings", None) or ():
+        if (getattr(mapping, "provider_domain", "") == "opensubsonic"
+                and getattr(mapping, "item_id", "")):
+            return mapping.item_id
+    return ""
+
+
+def radio(ident: str, mass: MusicAssistant, loop: asyncio.AbstractEventLoop,
+          *, seed_tracks: int = RADIO_SEED_TRACKS,
+          per_seed: int = RADIO_SIMILAR_PER_SEED,
+          cap: int = RADIO_POOL_CAP) -> tuple[list[dict], bool]:
+    """
+    A provider-agnostic station for a marked artist id.
+
+    Returns ``(songs, degraded)``. `degraded` is True when nothing beyond the
+    seed artist itself could be found, which the caller uses to decline caching:
+    a station that fell back to the seed artist alone is not a station, and
+    caching one would pin the failure for the life of the process, the same way
+    the Subsonic path refuses to cache a station with a single artist.
+
+    :param ident: The marked artist id (``ma-<db_id>``).
+    :param mass: The running Music Assistant instance.
+    :param loop: MA's event loop; controller calls are bounced onto it.
+    :param seed_tracks: How many of the artist's tracks to seed similar from.
+    :param per_seed: How many similar tracks to fetch per seed. Small on purpose:
+        each returned track costs a lyrics fetch inside MA, so this bounds the
+        Initiate latency.
+    :param cap: Cap on the returned pool.
+    """
+    db_id = library_id(ident)
+
+    def gather(coro):
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+
+    try:
+        artist_tracks = gather(mass.music.artists.tracks(db_id, "library"))
+    except Exception:
+        logger.exception("MA radio seed lookup failed for %s", ident)
+        return [], True
+    if not artist_tracks:
+        return [], True
+
+    pool, seen = [], set()
+    for seed in _sample(artist_tracks, seed_tracks, db_id):
+        seed_id = getattr(seed, "item_id", None)
+        if seed_id is None:
+            continue
+        try:
+            # Seeded from the library track; similar_tracks walks its provider
+            # mappings, and allow_lookup lets a provider with no native similar
+            # (a local folder) still get a station from MA's cross-provider
+            # metadata lookup. OpenSubsonic answers natively, so the lookup is
+            # not reached here; the cost is the per-track lyrics fetch, which
+            # per_seed bounds.
+            similar = gather(mass.music.tracks.similar_tracks(
+                seed_id, "library", limit=per_seed, allow_lookup=True))
+        except Exception:
+            logger.exception("MA similar_tracks failed for seed %s", seed_id)
+            continue
+        for track in similar:
+            key = getattr(track, "uri", None) or getattr(track, "item_id", None)
+            if key is not None and key in seen:
+                continue
+            if key is not None:
+                seen.add(key)
+            pool.append(track)
+
+    songs = [s for s in (song_from_track(t, mass) for t in pool if t) if s][:cap]
+    if songs:
+        return songs, False
+
+    # Floor: the seed artist's own tracks, so the request still plays something
+    # coherent. Reported degraded so the caller does not cache a non-station.
+    floor = [s for s in (song_from_track(t, mass) for t in artist_tracks if t)
+             if s][:cap]
+    return floor, True
+
+
 # --- private ----------------------------------------------------------------
+
+
+def _sample(items: list, n: int, seed_key) -> list:
+    """A deterministic sample, so the same station id resolves to the same
+    seeds on every GetNextItem and the pool stays cacheable."""
+    if len(items) <= n:
+        return list(items)
+    picked = random.Random(str(seed_key)).sample(range(len(items)), n)
+    return [items[i] for i in sorted(picked)]
 
 
 def _fetch(kind: str, db_id: str, mass: MusicAssistant, gather) -> list:

@@ -163,10 +163,14 @@ def handoff_entity() -> dict:
 # --- collection -------------------------------------------------------------
 
 
-def collect(progress=None) -> dict[str, list[dict]]:
+def collect(progress=None, *, want_stations: bool | None = None) -> dict[str, list[dict]]:
     """Read the whole library. `progress` gets a short human line at each
     stage; the album-by-album track crawl is minutes long on a real
     collection, and a silent minutes-long job reads as a hung one.
+
+    `want_stations` decides whether a station-per-artist is emitted; None falls
+    back to the env-configured catalog, so a caller that knows the setup-state
+    (run_upload) drives it from there while the standalone path keeps the env.
     """
     tell = progress or (lambda text, fraction=None: None)
     out: dict[str, list[dict]] = {k: [] for k in CATALOGS}
@@ -176,7 +180,8 @@ def collect(progress=None) -> dict[str, list[dict]]:
     # station.<id> off the same Navidrome artist id the rad: resolver
     # understands. Emitted only when the stations catalog exists; the upload
     # loop skips an empty list, so an operator without it pays nothing.
-    want_stations = bool(CATALOGS.get("stations"))
+    if want_stations is None:
+        want_stations = bool(CATALOGS.get("stations"))
     artist_name: dict[str, str] = {}
     for index in subsonic.call("getArtists.view").get("artists", {}).get("index", []):
         for artist in index.get("artist", []):
@@ -274,6 +279,7 @@ def collect_from_ma(
     providers: list[str] | None = None,
     *,
     progress=None,
+    want_stations: bool | None = None,
 ) -> dict[str, list[dict]]:
     """
     Read the catalog from Music Assistant's synced library rather than Subsonic.
@@ -335,11 +341,22 @@ def collect_from_ma(
         }
 
     tell("reading artists (from Music Assistant)", 0.02)
-    # Stations are not emitted from the MA path; provider-agnostic radio is
-    # parked on a branch.
+    # A station per artist, named "<artist> Radio"/"<artist> Station", keyed
+    # station.ma-<id> off the same library artist id the artists catalog uses,
+    # so "play <artist> radio" resolves to a rad:ma-<id> the MA similar-tracks
+    # resolver builds a real station from. Emitted only when the stations catalog
+    # exists (want_stations); the standalone env fallback matches the collect
+    # path.
+    if want_stations is None:
+        want_stations = bool(CATALOGS.get("stations"))
     for artist in walk(mass.music.artists):
         out["artists"].append(base(eid("artist", artist.item_id), artist.name))
+        if want_stations and artist.name:
+            out["stations"].append(
+                station_entity(eid("station", artist.item_id), artist.name))
     log(f"artists: {len(out['artists'])}")
+    if want_stations:
+        log(f"stations: {len(out['stations'])}")
 
     tell(f"reading albums ({len(out['artists'])} artists)", 0.2)
     for album in walk(mass.music.albums):

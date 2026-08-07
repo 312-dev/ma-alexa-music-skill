@@ -304,6 +304,137 @@ def test_star_stays_on_subsonic_without_a_provider_selection(monkeypatch):
     assert [s["id"] for s in songs] == ["t1"]  # Subsonic starred fixture
 
 
+# --- provider-agnostic radio (Layer 3) --------------------------------------
+
+
+def _seedable(uri, name, item_id):
+    track = _track(uri, name)
+    track.item_id = item_id
+    return track
+
+
+def test_radio_seeds_similar_from_the_artists_tracks():
+    """A station is the union of MA's similar tracks for a few of the artist's
+    own tracks, deduped. allow_lookup is set so a provider with no native similar
+    still gets a station from MA's cross-provider lookup."""
+    seeds = [_seedable(f"nav://track/{i}", f"S{i}", str(i)) for i in range(5)]
+    similar = [_seedable("nav://track/100", "Sim", "100")]
+    artist_tracks = _AsyncMethod(lambda item_id, prov: seeds)
+    similar_tracks = _AsyncMethod(
+        lambda item_id, prov, limit=25, allow_lookup=False: similar)
+    mass = _mass_with(
+        artists=types.SimpleNamespace(tracks=artist_tracks),
+        tracks=types.SimpleNamespace(similar_tracks=similar_tracks),
+    )
+
+    with _Loop() as loop:
+        songs, degraded = ma_resolve.radio("ma-7", mass, loop, seed_tracks=2)
+
+    assert degraded is False
+    assert [s["title"] for s in songs] == ["Sim"]      # deduped across seeds
+    assert len(similar_tracks.calls) == 2              # one per seed track
+    for args, kwargs in similar_tracks.calls:
+        assert args[1] == "library"
+        assert kwargs["allow_lookup"] is True
+
+
+def test_radio_floors_to_the_artist_and_reports_degraded_when_no_similar():
+    """No similar found is not an empty station: it floors to the artist's own
+    tracks so something coherent plays, and reports degraded so the caller does
+    not cache a non-station (the Subsonic Foreigner bug, in the MA path)."""
+    seeds = [_seedable("nav://track/1", "S1", "1")]
+    artist_tracks = _AsyncMethod(lambda item_id, prov: seeds)
+    similar_tracks = _AsyncMethod(
+        lambda item_id, prov, limit=25, allow_lookup=False: [])
+    mass = _mass_with(
+        artists=types.SimpleNamespace(tracks=artist_tracks),
+        tracks=types.SimpleNamespace(similar_tracks=similar_tracks),
+    )
+
+    with _Loop() as loop:
+        songs, degraded = ma_resolve.radio("ma-7", mass, loop)
+
+    assert degraded is True
+    assert [s["title"] for s in songs] == ["S1"]       # floored to artist tracks
+
+
+def test_radio_with_no_artist_tracks_is_degraded_and_empty():
+    artist_tracks = _AsyncMethod(lambda item_id, prov: [])
+    mass = _mass_with(
+        artists=types.SimpleNamespace(tracks=artist_tracks),
+        tracks=types.SimpleNamespace(
+            similar_tracks=_AsyncMethod(lambda *a, **k: [])),
+    )
+
+    with _Loop() as loop:
+        songs, degraded = ma_resolve.radio("ma-7", mass, loop)
+
+    assert degraded is True and songs == []
+
+
+def test_subsonic_artist_id_returns_the_opensubsonic_mapping():
+    artist = types.SimpleNamespace(provider_mappings=[
+        types.SimpleNamespace(provider_domain="spotify", item_id="sp1"),
+        types.SimpleNamespace(provider_domain="opensubsonic", item_id="nav-42"),
+    ])
+    mass = _mass_with(artists=types.SimpleNamespace(
+        get_library_item=_AsyncMethod(lambda db_id: artist)))
+    with _Loop() as loop:
+        assert ma_resolve.subsonic_artist_id("ma-42", mass, loop) == "nav-42"
+
+
+def test_subsonic_artist_id_is_empty_without_a_subsonic_mapping():
+    artist = types.SimpleNamespace(provider_mappings=[
+        types.SimpleNamespace(provider_domain="spotify", item_id="sp1")])
+    mass = _mass_with(artists=types.SimpleNamespace(
+        get_library_item=_AsyncMethod(lambda db_id: artist)))
+    with _Loop() as loop:
+        assert ma_resolve.subsonic_artist_id("ma-42", mass, loop) == ""
+
+
+def test_rad_prefers_the_fast_subsonic_station_for_a_subsonic_artist(monkeypatch):
+    """A Subsonic-backed artist takes the lyrics-free similar-artist path, and
+    MA's similar_tracks is never consulted."""
+    monkeypatch.setattr(ma_resolve, "subsonic_artist_id",
+                        lambda ident, m, l: "sub-9")
+    monkeypatch.setattr(core, "similar_artist_ids",
+                        lambda sid: ["sub-9", "sub-10"])
+    monkeypatch.setattr(core, "radio_pool",
+                        lambda sid, aids: [{"id": "s1", "title": "Fast"}])
+    ma_called = []
+    monkeypatch.setattr(ma_resolve, "radio",
+                        lambda *a, **k: ma_called.append(1) or ([], True))
+
+    with _Loop() as loop:
+        _set_ma(monkeypatch, loop, _mass_with(), providers=["p"])
+        songs = core.resolve_tracks("rad:ma-9")
+
+    assert [s["title"] for s in songs] == ["Fast"]
+    assert ma_called == []                          # slow path untouched
+    assert "rad:ma-9" in core._QUEUE_CACHE
+
+
+def test_rad_falls_back_to_ma_radio_for_a_non_subsonic_artist(monkeypatch):
+    """No Subsonic mapping, so the marked rad: id uses MA's provider-agnostic
+    radio, and its degraded verdict still decides caching."""
+    monkeypatch.setattr(ma_resolve, "subsonic_artist_id", lambda ident, m, l: "")
+    seeds = [_seedable("nav://track/1", "Seed", "1")]
+    similar = [_seedable("nav://track/2", "Sim", "2")]
+    mass = _mass_with(
+        artists=types.SimpleNamespace(
+            tracks=_AsyncMethod(lambda item_id, prov: seeds)),
+        tracks=types.SimpleNamespace(similar_tracks=_AsyncMethod(
+            lambda item_id, prov, limit=25, allow_lookup=False: similar)),
+    )
+
+    with _Loop() as loop:
+        _set_ma(monkeypatch, loop, mass, providers=["p"])
+        songs = core.resolve_tracks("rad:ma-7")
+
+    assert [s["title"] for s in songs] == ["Sim"]
+    assert "rad:ma-7" in core._QUEUE_CACHE          # real station is cached
+
+
 # --- streamable_uri: a library item must resolve to a PROVIDER uri -----------
 #
 # The bug these guard: a library track's own uri is library://track/<id>, and

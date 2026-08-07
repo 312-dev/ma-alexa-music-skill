@@ -89,10 +89,36 @@ def catalog_ids(state: dict | None = None) -> dict[str, str]:
 
     current = store.load() if state is None else state
     stored = current.get("catalogs") or {}
-    return {
+    ids = {
         kind: os.environ.get(f"CATALOG_{kind.upper()}", "") or stored.get(kind, "")
         for kind in CATALOG_KINDS
     }
+    # The optional stations catalog appears in the map only once it exists, so a
+    # deployment without it keeps exactly the five keys and every "is everything
+    # ready" check over the map stays true.
+    stations = os.environ.get("CATALOG_STATIONS", "") or stored.get("stations", "")
+    if stations:
+        ids["stations"] = stations
+    return ids
+
+
+def stations_enabled(state: dict | None = None) -> bool:
+    """Whether the operator asked for a station-per-artist catalog."""
+    current = store.load() if state is None else state
+    return bool(current.get("enable_stations"))
+
+
+def catalogs_ready(state: dict | None = None) -> bool:
+    """The five required catalogs exist, and the stations catalog too when it
+    was asked for. This is what lets the one-button setup skip catalog creation
+    on a re-run without stranding a just-enabled stations catalog uncreated."""
+    current = store.load() if state is None else state
+    ids = catalog_ids(current)
+    if not all(ids.get(kind) for kind in CATALOG_KINDS):
+        return False
+    if stations_enabled(current) and not ids.get("stations"):
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -404,6 +430,25 @@ def create_catalogs() -> Outcome:
             continue
         rows.append({"kind": kind, "ok": True, "detail": catalog_id})
 
+    # The optional stations catalog, created only when asked for. Same reuse-by-
+    # title and idempotent association as the five above, so enabling it and
+    # re-running heals rather than minting a second one. Type MusicPlaylist: Alexa
+    # has no native station type, and the station.<id> id is what marks it.
+    if stations_enabled(current):
+        title = "Music Assistant stations"
+        try:
+            catalog_id = catalogs.get("stations") or existing.get(title, "")
+            if not catalog_id:
+                catalog_id = smapi_rest.create_catalog(
+                    title, catalog_sync.TYPES["stations"])
+            catalogs["stations"] = catalog_id
+            store.update(catalogs=catalogs)
+            smapi_rest.associate_catalog(skill, catalog_id)
+            rows.append({"kind": "stations", "ok": True, "detail": catalog_id})
+        except Exception as exc:
+            rows.append({"kind": "stations", "ok": False,
+                         "detail": error_text(exc)})
+
     store.update(catalogs=catalogs)
     ok = bool(rows) and all(row["ok"] for row in rows)
     made = sum(1 for row in rows if row["ok"])
@@ -435,7 +480,11 @@ def provision(*, alias: str, public_base: str, vendor: str = "") -> Outcome:
     if not skill.ok:
         return Outcome(False, f"Setup stopped at the skill: {skill.detail}", rows)
 
-    if not all(catalog_ids().values()):
+    # Skip catalog creation only when everything asked for already exists,
+    # including the stations catalog when it was just enabled; otherwise a
+    # re-run after turning stations on would upload but never create the sixth
+    # catalog.
+    if not catalogs_ready():
         catalogs = create_catalogs()
         rows.append({"kind": "catalogs", "ok": catalogs.ok,
                      "detail": catalogs.detail})
@@ -501,6 +550,10 @@ def run_upload(*, progress: Callable[[str, float | None], None] | None = None,
         # refusal, not a fall back to crawling the Subsonic server, so nobody ends
         # up with a catalog they did not ask for.
         providers = current.get("catalog_providers") or []
+        # Emit stations only when the sixth catalog exists to receive them, so
+        # the crawl and the upload agree: no catalog id means no station
+        # entities and no wasted work building them.
+        want_stations = bool(ids.get("stations"))
         if mass is not None and loop is not None:
             if not providers:
                 return Outcome(False,
@@ -508,11 +561,12 @@ def run_upload(*, progress: Callable[[str, float | None], None] | None = None,
                                "under settings > 'Catalog these music providers "
                                "for voice search', then upload again.")
             collected = catalog_sync.collect_from_ma(
-                mass, loop, providers, progress=report)
+                mass, loop, providers, progress=report, want_stations=want_stations)
         else:
             # No live Music Assistant (the standalone CLI): the only source is the
             # Subsonic server this was originally built to crawl.
-            collected = catalog_sync.collect(progress=report)
+            collected = catalog_sync.collect(progress=report,
+                                             want_stations=want_stations)
         saved = store.load().get("catalog_hashes") or {}
         rows, uploads = [], dict(current.get("uploads") or {})
 

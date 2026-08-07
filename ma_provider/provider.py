@@ -80,7 +80,7 @@ from .settings import (  # noqa: E402
     CONF_ADMIN_SECRET, CONF_ADMIN_TOKEN, CONF_AFTER_CONTENT, CONF_ALIAS,
     CONF_AMAZON_URL,
     CONF_BRIDGE_URL, CONF_CLIENT_ID, CONF_CLIENT_SECRET, CONF_ENDPOINT_PORT,
-    CONF_CATALOG_PROVIDERS,
+    CONF_CATALOG_PROVIDERS, CONF_ENABLE_STATIONS,
     CONF_EXPOSE_GROUPS, CONF_HANDOFF_PHRASE, CONF_LINK_SECRET, CONF_MA_SOURCE,
     CONF_OTP_SECRET, CONF_PASSWORD, CONF_PATCH_SUBSONIC_PLAYLISTS,
     CONF_PUBLIC_BASE, CONF_SERVE_ENDPOINT,
@@ -2091,6 +2091,10 @@ class MaAlexaProvider(PlayerProvider):
             # list (possibly empty) rather than a string, so it is passed as-is.
             catalog_providers=list(
                 self.config.get_value(CONF_CATALOG_PROVIDERS) or []),
+            # Whether to catalog a station per artist. create_catalogs reads it
+            # from the state file to make the sixth catalog; the crawl reads it to
+            # fill it. Requires a reload, like the rest of this rail.
+            enable_stations=bool(self.config.get_value(CONF_ENABLE_STATIONS)),
             # Names the handoff catalog entity after the same phrase the spoken
             # command uses, so an MA-composed queue can be claimed by voice.
             handoff_phrase=str(self.config.get_value(CONF_HANDOFF_PHRASE) or ""),

@@ -324,6 +324,79 @@ def test_a_half_success_is_reported_per_kind(monkeypatch):
     assert failed == ["tracks"]
 
 
+# --- the optional stations catalog ------------------------------------------
+
+
+def test_catalog_ids_includes_stations_only_once_it_exists(monkeypatch):
+    monkeypatch.delenv("CATALOG_STATIONS", raising=False)
+    store.update(catalogs={k: f"c-{k}" for k in setup_ops.CATALOG_KINDS})
+    assert "stations" not in setup_ops.catalog_ids()
+    store.update(catalogs={**{k: f"c-{k}" for k in setup_ops.CATALOG_KINDS},
+                           "stations": "c-st"})
+    assert setup_ops.catalog_ids()["stations"] == "c-st"
+
+
+def test_catalogs_ready_waits_for_the_stations_catalog_when_enabled(monkeypatch):
+    monkeypatch.delenv("CATALOG_STATIONS", raising=False)
+    store.update(catalogs={k: f"c-{k}" for k in setup_ops.CATALOG_KINDS})
+    assert setup_ops.catalogs_ready()              # five present, stations off
+    store.update(enable_stations=True)
+    assert not setup_ops.catalogs_ready()          # enabled but not created
+    store.update(catalogs={**{k: f"c-{k}" for k in setup_ops.CATALOG_KINDS},
+                           "stations": "c-st"})
+    assert setup_ops.catalogs_ready()
+
+
+def test_create_catalogs_adds_the_stations_catalog_when_enabled(monkeypatch):
+    passing_endpoint()
+    store.update(skill_id="amzn1.ask.skill.x", enable_stations=True)
+    created = []
+    monkeypatch.setattr(smapi_rest, "list_catalogs", lambda: [])
+    monkeypatch.setattr(smapi_rest, "create_catalog",
+                        lambda title, kind: created.append((title, kind))
+                        or f"cat-{len(created)}")
+    monkeypatch.setattr(smapi_rest, "associate_catalog", lambda s, c: None)
+
+    outcome = setup_ops.create_catalogs()
+    assert outcome.ok
+    assert ("Music Assistant stations", "AMAZON.MusicPlaylist") in created
+    assert store.load()["catalogs"].get("stations")
+
+
+def test_create_catalogs_omits_stations_when_disabled(monkeypatch):
+    passing_endpoint()
+    store.update(skill_id="amzn1.ask.skill.x")  # enable_stations unset
+    created = []
+    monkeypatch.setattr(smapi_rest, "list_catalogs", lambda: [])
+    monkeypatch.setattr(smapi_rest, "create_catalog",
+                        lambda title, kind: created.append(title) or "cat")
+    monkeypatch.setattr(smapi_rest, "associate_catalog", lambda s, c: None)
+
+    setup_ops.create_catalogs()
+    assert "Music Assistant stations" not in created
+    assert "stations" not in (store.load().get("catalogs") or {})
+
+
+def test_provision_creates_stations_when_newly_enabled(monkeypatch):
+    """The five catalogs already exist and stations was just turned on, so a
+    re-run of the one button must still create the sixth rather than skip on
+    'catalogs already there'."""
+    passing_endpoint()
+    store.update(skill_id="amzn1.ask.skill.x", enable_stations=True,
+                 catalogs={k: f"c-{k}" for k in setup_ops.CATALOG_KINDS})
+    created = []
+    monkeypatch.setattr(smapi_rest, "list_catalogs", lambda: [])
+    monkeypatch.setattr(smapi_rest, "create_catalog",
+                        lambda title, kind: created.append(title) or "cat-st")
+    monkeypatch.setattr(smapi_rest, "associate_catalog", lambda s, c: None)
+
+    outcome = setup_ops.provision(alias="ma_alexa",
+                                  public_base="https://ma_alexa.example.test")
+    assert outcome.ok
+    assert "Music Assistant stations" in created
+    assert store.load()["catalogs"]["stations"] == "cat-st"
+
+
 # --- connecting the Amazon account ------------------------------------------
 
 
@@ -458,7 +531,7 @@ def test_an_unchanged_catalog_is_skipped(monkeypatch):
     store.update(skill_id="s", catalogs={"artists": "cat-a"},
                  uploads={"artists": "up-1"}, catalog_hashes={"artists": "h1"})
     monkeypatch.setattr(catalog_sync, "collect",
-                        lambda progress=None: {"artists": [{"id": "a"}]})
+                        lambda progress=None, want_stations=None: {"artists": [{"id": "a"}]})
     monkeypatch.setattr(catalog_sync, "apply_timestamps",
                         lambda kind, entities, saved: (entities, "h1"))
 
@@ -474,7 +547,7 @@ def test_a_changed_catalog_is_uploaded_and_recorded(monkeypatch):
     store.update(skill_id="s", catalogs={"artists": "cat-a"},
                  catalog_hashes={"artists": "old"})
     monkeypatch.setattr(catalog_sync, "collect",
-                        lambda progress=None: {"artists": [{"id": "a"}]})
+                        lambda progress=None, want_stations=None: {"artists": [{"id": "a"}]})
     monkeypatch.setattr(catalog_sync, "apply_timestamps",
                         lambda kind, entities, saved: (entities, "new"))
     monkeypatch.setattr(smapi_rest, "upload_catalog",
@@ -495,7 +568,7 @@ def test_the_ma_path_refuses_an_empty_provider_selection(monkeypatch):
     store.update(skill_id="s", catalogs={"artists": "cat-a"}, catalog_providers=[])
     crawled = []
     monkeypatch.setattr(catalog_sync, "collect",
-                        lambda progress=None: crawled.append("subsonic") or {})
+                        lambda progress=None, want_stations=None: crawled.append("subsonic") or {})
 
     outcome = setup_ops.run_upload(mass=object(), loop=object())
     assert outcome.ok is False
@@ -513,9 +586,9 @@ def test_the_ma_path_reads_from_the_chosen_providers(monkeypatch):
                  catalog_providers=["library--navidrome"])
     seen = {}
     monkeypatch.setattr(catalog_sync, "collect",
-                        lambda progress=None: seen.setdefault("collect", True) or {})
+                        lambda progress=None, want_stations=None: seen.setdefault("collect", True) or {})
 
-    def fake_from_ma(mass, loop, providers, progress=None):
+    def fake_from_ma(mass, loop, providers, progress=None, want_stations=None):
         seen["providers"] = providers
         return {"artists": [{"id": "a"}]}
 
