@@ -10,7 +10,7 @@
     "[alexa provider](https://github.com/music-assistant/server/tree/master/music_assistant/providers/alexa) by @alams154, whose auth and discovery this follows"
   ],
   "requirements": ["alexapy==1.29.17"],
-  "documentation": "https://github.com/GraysonCAdams/ma-alexa-music-skill/blob/main/ma_provider/README.md",
+  "documentation": "https://github.com/312-dev/ma-alexa-music-skill/blob/main/ma_provider/README.md",
   "multi_instance": true,
   "builtin": false
 }

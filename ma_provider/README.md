@@ -165,7 +165,7 @@ Restart MA after mounting, then add the provider under Settings -> Providers.
 | `bridge_url` | Public HTTPS base of the bridge, the same host the skill endpoint points at. |
 | `admin_token` | The bridge's `ADMIN_TOKEN`. Sent as `X-Admin-Token`. |
 | `alias` | The skill's invocation name. Must match the skill manifest. |
-| `handoff_phrase` | Must match `MA_HANDOFF_PHRASE` on the bridge. Default `music assistant`. |
+| `handoff_phrase` | Must match `MA_HANDOFF_PHRASE` on the bridge. Default `my mix`. |
 | `expose_groups` | Register Alexa speaker groups as players as well as individual Echoes. |
 | `url` | Amazon domain, e.g. `amazon.com`. |
 | `username` / `password` | Amazon account. |

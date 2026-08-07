@@ -5,8 +5,7 @@
 <h1 align="center">Music Assistant</h1>
 
 <p align="center">
-  An Alexa <b>Music Skill</b> that plays your self-hosted music library on Echo devices.<br>
-  <a href="https://graysoncadams.github.io/ma-alexa-music-skill/">Documentation and setup guide</a>
+  An Alexa <b>Music Skill</b> that plays your self-hosted music library on Echo devices.
 </p>
 
 ---
@@ -28,6 +27,29 @@ home audio groups.
 setup steps will check it against your own library first, which matters more
 than it sounds like it does.
 
+## Compared to the built-in Alexa provider
+
+Music Assistant already ships an [`alexa` provider](https://www.music-assistant.io/player-support/alexa/)
+by @alams154, and this project stands on it: same `alexapy` login, same device
+discovery, same device model. It is not meant as a rival, and the aim is for
+this to land as a *mode* on that provider rather than a second one. The two
+differ on a single axis, how Alexa receives the audio, and each side of that has
+a real cost.
+
+| | built-in `alexa` | this |
+|---|---|---|
+| What Alexa receives | one stream URL per queue (flow mode) | a track list, served as a native music-skill queue |
+| In the Alexa app | one entry for the whole session | one entry per track, each with its own art |
+| Next / previous | not offered | native, handled by Alexa |
+| Speaker groups | not exposed | exposed, named in the utterance |
+| Setup | nothing extra, works out of the box | an Amazon developer account, a public HTTPS endpoint, and a catalog Amazon has to ingest |
+
+Short version: the built-in provider is the easy, zero-setup way to get MA audio
+onto an Echo. This one asks a lot more of you at setup, and in return Alexa
+treats the result as first-class music with real per-track metadata and native
+transport. Pick the one that fits; if you just want sound on a speaker, the
+built-in provider is the right call.
+
 ## What you need
 
 - **Music Assistant.** This skill is a Music Assistant provider: it runs inside
@@ -40,15 +62,14 @@ than it sounds like it does.
 - An Amazon developer account. No AWS account and no Lambda.
 
 This is not a five minute install. The catalog upload alone takes time to
-ingest on Amazon's side. The [setup guide](https://graysoncadams.github.io/ma-alexa-music-skill/setup/what-this-is/)
-walks the whole path and is honest about which steps are slow.
+ingest on Amazon's side. [`ma_provider/README.md`](ma_provider/README.md) walks
+the whole path and is honest about which steps are slow.
 
 It also needs to keep running, not just be reachable when you ask for music.
 Alexa's binding to a music skill **decays on its own within hours**, silently,
 while every status Amazon reports stays green. The bridge re-provisions itself
 on a timer and watches its own traffic for searches that never reach playback.
-That is handled, but it is why this is a service rather than a script. See
-[Gaps and limits](https://graysoncadams.github.io/ma-alexa-music-skill/reference/limits/).
+That is handled, but it is why this is a service rather than a script.
 
 ## Quick start
 
@@ -56,7 +77,7 @@ Put the package where Music Assistant loads providers from, which is inside
 its own package, so the directory name has to be the manifest domain:
 
 ```sh
-git clone https://github.com/GraysonCAdams/ma-alexa-music-skill && cd ma-alexa-music-skill
+git clone https://github.com/312-dev/ma-alexa-music-skill && cd ma-alexa-music-skill
 # Bind-mount ma_provider/ at
 #   <ma>/site-packages/music_assistant/providers/ma_alexa
 # then restart Music Assistant.
@@ -106,10 +127,7 @@ data:
 The group name is part of the utterance, so an automation can target any device
 or group per call. Four Echoes went from idle to playing on one such command.
 
-Full explanation of why the two channels differ, and the duplicate-entity trap
-in Home Assistant, is in [Voice and text](https://graysoncadams.github.io/ma-alexa-music-skill/playing/voice-and-text/).
-
-## Music Assistant
+## How it works
 
 The skill is one provider doing two jobs. It exposes your Echo devices and
 speaker groups as Music Assistant players, so MA composes the queue and Alexa plays it
@@ -118,17 +136,12 @@ makes that possible, on a port of its own.
 
 It used to be two deployables, a Flask service plus an optional MA provider
 that talked to it over HTTP. They are one now, which is why the setup wizard is
-a settings page rather than a web app. See
-[`ma_provider/README.md`](ma_provider/README.md).
+a settings page rather than a web app.
 
-## Documentation
-
-The [site](https://graysoncadams.github.io/ma-alexa-music-skill/) covers setup end to end,
-plus how the thing actually works:
-
-- [Architecture](https://graysoncadams.github.io/ma-alexa-music-skill/how-it-works/architecture/) and [stateless queues](https://graysoncadams.github.io/ma-alexa-music-skill/how-it-works/queues/)
-- [Findings](https://graysoncadams.github.io/ma-alexa-music-skill/how-it-works/findings/), which is the most useful page if you are building anything against the Music Skill API
-- [Limits and known gaps](https://graysoncadams.github.io/ma-alexa-music-skill/reference/limits/)
+[`ma_provider/README.md`](ma_provider/README.md) is the full writeup: the
+architecture, the stateless queue model, the findings against the Music Skill
+API (the most useful part if you are building anything against it), and the
+known limits.
 
 ## Development
 

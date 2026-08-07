@@ -191,7 +191,7 @@ def check_tls(base: str) -> dict:
 # blocklists: Cloudflare's free tier answers Python-urllib with 403 while
 # letting curl, browsers and Amazon straight through, which made these checks
 # report an outage that did not exist.
-_UA = "Music Assistant-endpoint-check/1.0 (+https://github.com/GraysonCAdams/ma-alexa-music-skill)"
+_UA = "Music Assistant-endpoint-check/1.0 (+https://github.com/312-dev/ma-alexa-music-skill)"
 
 
 def http_get(url: str, timeout: float = 8.0) -> tuple[int, str, dict]:
