@@ -27,28 +27,29 @@ home audio groups.
 setup steps will check it against your own library first, which matters more
 than it sounds like it does.
 
-## Compared to the built-in Alexa provider
+## What it supports
 
-Music Assistant already ships an [`alexa` provider](https://www.music-assistant.io/player-support/alexa/)
-by @alams154, and this project stands on it: same `alexapy` login, same device
-discovery, same device model. It is not meant as a rival, and the aim is for
-this to land as a *mode* on that provider rather than a second one. The two
-differ on a single axis, how Alexa receives the audio, and each side of that has
-a real cost.
+Built on Music Assistant's own [`alexa` provider](https://www.music-assistant.io/player-support/alexa/)
+by @alams154 (same login and device discovery), it serves your library to Alexa
+as a native music skill:
 
-| | built-in `alexa` | this |
-|---|---|---|
-| What Alexa receives | one stream URL per queue (flow mode) | a track list, served as a native music-skill queue |
-| In the Alexa app | one entry for the whole session | one entry per track, each with its own art |
-| Next / previous | not offered | native, handled by Alexa |
-| Speaker groups | not exposed | exposed, named in the utterance |
-| Setup | nothing extra, works out of the box | an Amazon developer account, a public HTTPS endpoint, and a catalog Amazon has to ingest |
+- [x] A real Alexa queue, not a single pushed stream
+- [x] Per-track title, artist, album and cover art in the Alexa app
+- [x] Next, previous and skip
+- [x] Shuffle, loop and repeat
+- [x] Multi-room speaker groups, including whole-home audio
+- [x] Voice search of your own library: artists, albums, tracks, playlists, genres
+- [x] Any Subsonic-compatible server
+- [x] Runs entirely inside Music Assistant, no separate service
+- [x] Background library sync on a schedule, cancellable and resumable
+- [x] Self-healing: re-provisions the skill before Alexa silently drops the binding
+- [x] Live player-state updates pushed from Amazon, with polling as a fallback
+- [x] Seek, on seekable sources (realtime, MA-sourced streams cannot)
+- [ ] Voice `play <artist> radio` (Alexa reserves radio for first-party; parked on a branch)
 
-Short version: the built-in provider is the easy, zero-setup way to get MA audio
-onto an Echo. This one asks a lot more of you at setup, and in return Alexa
-treats the result as first-class music with real per-track metadata and native
-transport. Pick the one that fits; if you just want sound on a speaker, the
-built-in provider is the right call.
+If all you want is MA audio on an Echo with no setup, the built-in `alexa`
+provider is the simpler choice; this one trades a heavier setup for the native
+skill experience above.
 
 ## What you need
 
