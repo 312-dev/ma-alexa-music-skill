@@ -1,0 +1,60 @@
+---
+title: Music Assistant
+description: An Alexa Music Skill that plays a self-hosted Subsonic-compatible library on Echo devices.
+template: splash
+hero:
+  tagline: An Alexa Music Skill that plays your self-hosted music library on Echo devices. Speaks plain Subsonic on one side and Amazon's Music, Radio, and Podcast Skill API on the other.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Start here
+      link: setup/what-this-is/
+      icon: right-arrow
+    - text: How it works
+      link: how-it-works/architecture/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```
+"Alexa, play Radiohead on music assistant"
+```
+
+Music Assistant is a bridge. Alexa asks it what to play, it asks your Subsonic server,
+and Alexa's native player does the rest: a real queue, per-track metadata and
+art, working next and previous, shuffle, loop and repeat. Because it is a Music
+Skill rather than a custom skill, multi-room groups work.
+
+It speaks plain Subsonic 1.16.1 with no OpenSubsonic extensions, so it should
+work with Navidrome, Airsonic, Airsonic-Advanced, Gonic, LMS, Ampache,
+Funkwhale, Nextcloud Music or Astiga. It has been tested against Navidrome.
+
+<CardGrid>
+	<Card title="Not a five-minute install" icon="warning">
+		Setup needs an Amazon developer account, a publicly reachable HTTPS
+		endpoint, and a catalog upload that takes time to ingest. The
+		[setup path](setup/what-this-is/) is linear and says where the time goes.
+	</Card>
+	<Card title="The alias matters" icon="approve-check">
+		Every artist and track you own competes with the word you pick.
+		[Choosing an alias](setup/alias/) explains why, with the real failures.
+	</Card>
+	<Card title="Stateless by design" icon="setting">
+		Alexa carries the queue position, so the bridge stores no per-user
+		playback state and re-derives the queue from the contentId.
+		[Queues and contentIds](how-it-works/queues/).
+	</Card>
+	<Card title="Findings, not trivia" icon="document">
+		Undeclared controls, conditional icon fetches, a 60 second default URL
+		lifetime. [The findings](how-it-works/findings/) cost real time to learn.
+	</Card>
+</CardGrid>
+
+## What it is not
+
+It is a private, development-stage skill for your own library. It is not on the
+Alexa skill store, and it cannot become your default music provider, so you
+always name the alias out loud. Read
+[What this is](setup/what-this-is/) before starting.

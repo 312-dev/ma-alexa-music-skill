@@ -1,0 +1,28 @@
+{
+  "_source": "Copy to environment.json and fill in from your own live instance (read-only inspection; no playback needed). This file is a genericized template.",
+  "provider_instance": "ma_alexa--XXXXXXXX",
+  "players": [
+    {
+      "name": "Living Room",
+      "player_id": "ma_alexa--XXXXXXXX:DEVICESERIAL1",
+      "cleared": true
+    },
+    {
+      "name": "Kitchen",
+      "player_id": "ma_alexa--XXXXXXXX:DEVICESERIAL2",
+      "cleared": true
+    }
+  ],
+  "groups": [
+    {
+      "name": "Everywhere",
+      "player_id": "ma_alexa--XXXXXXXX:GROUPID",
+      "members": [
+        "ma_alexa--XXXXXXXX:DEVICESERIAL1",
+        "ma_alexa--XXXXXXXX:DEVICESERIAL2"
+      ]
+    }
+  ],
+  "ma_alexa_endpoint_port": 5056,
+  "notes": "The container name is not stable (app-<alloc id>); re-derive it rather than hard-coding. Select groups by player_id, never by display name."
+}

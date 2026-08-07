@@ -1,0 +1,2022 @@
+"""Tests for the Music Assistant provider.
+
+Music Assistant is not a dependency of the bridge and is not installed here, so
+everything MA-shaped is skipped rather than failed. What is left is the part
+that was actually hard: the utterance, and the shape of the call to the bridge.
+
+ma_provider/__init__.py resolves `setup` lazily for exactly this reason, so
+importing a submodule does not drag in music_assistant.
+"""
+
+from __future__ import annotations
+
+import inspect
+import asyncio
+import contextlib
+import time
+import json
+import pathlib
+from types import SimpleNamespace
+
+import pytest
+
+from ma_provider import bridge, utterance
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+# --- utterance --------------------------------------------------------------
+
+
+def test_command_for_a_single_device():
+    """No target: the Echo the command is delivered to plays it."""
+    assert (
+        utterance.custom_command("music assistant", "music assistant")
+        == "ask music assistant to play the music assistant playlist"
+    )
+
+
+def test_command_for_a_group():
+    """A group has no dialog interface, so the group is named in the sentence."""
+    assert (
+        utterance.custom_command("music assistant", "music assistant", "whole apartment")
+        == "ask music assistant to play the music assistant playlist on whole apartment"
+    )
+
+
+def test_command_uses_ask_not_on():
+    """`play X on music assistant` resolves to a speaker when typed. Never emit it."""
+    text = utterance.custom_command("music assistant", "music assistant", "kitchen")
+    assert text.startswith("ask music assistant to play ")
+    assert " from music assistant" not in text
+    assert not text.startswith("play ")
+
+
+def test_target_names_are_escaped():
+    assert utterance.sanitize("Echo Dot (Kitchen)") == "Echo Dot Kitchen"
+    assert utterance.sanitize("Liz & Gray's Room") == "Liz and Gray's Room"
+    assert utterance.sanitize("  Living   Room  ") == "Living Room"
+    assert utterance.sanitize("Bedroom\nplay something else") == (
+        "Bedroom play something else"
+    )
+    assert utterance.sanitize("Office / Upstairs") == "Office Upstairs"
+    assert utterance.sanitize("Nook \U0001f50a") == "Nook"
+
+
+def test_accented_names_survive():
+    """Stripping accents renames someone's speaker, and the target then misses."""
+    assert utterance.sanitize("Küche") == "Küche"
+
+
+def test_empty_target_is_dropped_not_left_dangling():
+    assert utterance.custom_command("music assistant", "music assistant", "***") == (
+        "ask music assistant to play the music assistant playlist"
+    )
+    assert utterance.custom_command("music assistant", "music assistant", None) == (
+        "ask music assistant to play the music assistant playlist"
+    )
+
+
+def test_unusable_alias_or_label_raises():
+    with pytest.raises(ValueError):
+        utterance.custom_command("", "music assistant")
+    with pytest.raises(ValueError):
+        utterance.custom_command("music assistant", "!!!")
+
+
+# --- bridge client ----------------------------------------------------------
+
+
+class FakeResponse:
+    def __init__(self, status=200, payload=None, text=""):
+        self.status = status
+        self._payload = payload or {}
+        self._text = text
+
+    async def json(self):
+        return self._payload
+
+    async def text(self):
+        return self._text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class FakeSession:
+    """Stands in for mass.http_session."""
+
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def post(self, url, **kwargs):
+        self.calls.append(("POST", url, kwargs))
+        return self.response
+
+
+def test_publish_request_shape():
+    client = bridge.BridgeClient("https://ma_alexa.example/", "tok", session=None)
+    url, body = client.publish_request(["t1", "t2"], "Evening")
+    assert url == "https://ma_alexa.example/queue"
+    assert body == {"tracks": ["t1", "t2"], "name": "Evening",
+                    "start_offset_ms": 0}
+    assert client.headers["X-Admin-Token"] == "tok"
+
+
+def test_a_seek_travels_with_the_queue_it_republishes():
+    """The only channel there is. MA re-issues play_media for a seek, so the
+    position has to ride along with that publish or it is lost."""
+    client = bridge.BridgeClient("https://ma_alexa.example/", "tok", session=None)
+    _url, body = client.publish_request(["t1"], "Evening", 90500)
+    assert body["start_offset_ms"] == 90500
+
+
+def test_a_negative_offset_is_clamped_not_forwarded():
+    """Alexa is handed an unsigned position; garbage in must not reach it."""
+    client = bridge.BridgeClient("https://ma_alexa.example/", "tok", session=None)
+    _url, body = client.publish_request(["t1"], "", -5)
+    assert body["start_offset_ms"] == 0
+
+
+def test_publish_posts_and_returns_the_content_id():
+    session = FakeSession(FakeResponse(payload={"content_id": "ext:abc", "count": 2}))
+    client = bridge.BridgeClient("https://ma_alexa.example", "tok", session)
+
+    content_id = asyncio.run(client.publish_queue(["t1", "t2"], "Evening"))
+
+    assert content_id == "ext:abc"
+    method, url, kwargs = session.calls[0]
+    assert (method, url) == ("POST", "https://ma_alexa.example/queue")
+    assert kwargs["json"] == {"tracks": ["t1", "t2"], "name": "Evening",
+                              "start_offset_ms": 0}
+    assert kwargs["headers"]["X-Admin-Token"] == "tok"
+
+
+def test_publish_track_ids_are_stringified():
+    session = FakeSession(FakeResponse(payload={"content_id": "ext:abc", "count": 1}))
+    client = bridge.BridgeClient("https://ma_alexa.example", "tok", session)
+    asyncio.run(client.publish_queue([123]))
+    assert session.calls[0][2]["json"]["tracks"] == ["123"]
+
+
+def test_publish_raises_on_http_error():
+    session = FakeSession(FakeResponse(status=401, text="unauthorized"))
+    client = bridge.BridgeClient("https://ma_alexa.example", "bad", session)
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(client.publish_queue(["t1"]))
+
+
+def test_publish_raises_without_a_content_id():
+    session = FakeSession(FakeResponse(payload={"count": 0}))
+    client = bridge.BridgeClient("https://ma_alexa.example", "tok", session)
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(client.publish_queue(["t1"]))
+
+
+def test_publish_refuses_an_empty_queue():
+    client = bridge.BridgeClient("https://ma_alexa.example", "tok", session=None)
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(client.publish_queue([]))
+
+
+# --- manifest ---------------------------------------------------------------
+
+
+def test_manifest_is_loadable_and_declares_a_player_provider():
+    manifest = json.loads((REPO / "ma_provider" / "manifest.json").read_text())
+    assert manifest["domain"]
+    assert manifest["type"] == "player"
+    assert "alexapy" in " ".join(manifest["requirements"])
+
+
+def test_importing_a_submodule_does_not_require_music_assistant():
+    """The suite has to pass on a machine with no MA installed."""
+    import ma_provider
+
+    assert ma_provider.DOMAIN
+    with pytest.raises(AttributeError):
+        ma_provider.definitely_not_an_attribute
+
+
+# --- the provider itself, only where MA is present --------------------------
+
+
+def _provider_module():
+    pytest.importorskip("music_assistant_models")
+    pytest.importorskip("music_assistant")
+    pytest.importorskip("alexapy")
+    from ma_provider import provider
+
+    return provider
+
+
+def _bare_player(provider, cls=None):
+    """An MaAlexaPlayer with no __init__ run: these tests touch one method.
+
+    Only the attributes the methods under test actually read are set, since
+    MA's Player.__init__ writes a default config through the whole config
+    controller and standing that up would make these tests of MA.
+
+    `cls` takes a subclass, for the cases that need to stand in for something
+    MA exposes as a read-only property and so cannot simply be assigned.
+    """
+    player = (cls or provider.MaAlexaPlayer).__new__(cls or provider.MaAlexaPlayer)
+    player.logger = SimpleNamespace(
+        warning=lambda *a, **k: None, info=lambda *a, **k: None,
+        debug=lambda *a, **k: None)
+    player.is_group = False
+    player._player_id = "p1"
+    player._attr_current_media = None
+    player._titles_to_items = {}
+    return player
+
+
+def _queue_with_seek(seconds):
+    """The chain play_media walks: queue -> current_item -> streamdetails."""
+    item = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=seconds))
+    queue = SimpleNamespace(current_item=item)
+    return SimpleNamespace(get=lambda _qid: queue,
+                           get_item=lambda _qid, _item_id: item)
+
+
+def test_seek_is_supported_by_republishing_with_an_offset():
+    """Not through alexapy, which has no seek, but through the Item schema.
+
+    MA implements seek as play_media on the current item with an offset, and
+    Alexa's Item carries stream.offsetInMilliseconds, so the position rides
+    along with the queue that seek republishes.
+    """
+    provider = _provider_module()
+    from music_assistant_models.enums import PlayerFeature
+
+    assert PlayerFeature.SEEK in provider.PLAYER_FEATURES
+    assert PlayerFeature.VOLUME_SET in provider.PLAYER_FEATURES
+    assert PlayerFeature.NEXT_PREVIOUS in provider.PLAYER_FEATURES
+
+
+def test_the_seek_position_is_read_off_the_queue_in_milliseconds():
+    """Nothing in PlayerMedia carries it; the queue item's streamdetails do.
+
+    MA keeps it as float seconds and Alexa wants integer milliseconds.
+    """
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    media = SimpleNamespace(source_id="q1", queue_item_id="i1")
+    player.mass = SimpleNamespace(player_queues=_queue_with_seek(90.5))
+
+    assert player._seek_offset_ms(media) == 90500
+
+
+def test_a_plain_play_publishes_no_offset():
+    """An ordinary play must not inherit the last seek."""
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=_queue_with_seek(0.0))
+
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id="q1", queue_item_id="i1")) == 0
+
+
+def test_a_queue_that_has_gone_is_not_an_offset_and_not_a_crash():
+    """Every hop to the offset is optional; a missing one means start at zero."""
+    provider = _provider_module()
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get=lambda _qid: None, get_item=lambda _qid, _item_id: None))
+
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id="q1", queue_item_id="i1")) == 0
+    assert player._seek_offset_ms(
+        SimpleNamespace(source_id=None, queue_item_id=None)) == 0
+
+
+def test_player_does_not_require_flow_mode():
+    """The whole point: discrete tracks with real metadata, not one opaque stream."""
+    provider = _provider_module()
+
+    # requires_flow_mode is a property on the Player, and the override ignores
+    # self, so it can be read off the class without an Amazon session.
+    assert provider.MaAlexaPlayer.requires_flow_mode.fget(None) is False
+
+
+def test_group_detection():
+    """Whole Home Audio groups arrive in the same device list as the speakers."""
+    provider = _provider_module()
+
+    assert provider._is_group({"deviceFamily": "WHA"})
+    assert not provider._is_group({"deviceFamily": "ECHO"})
+    assert not provider._is_group({})
+
+
+# --- rediscovery ------------------------------------------------------------
+
+
+class _FakePlayers:
+    """Just enough of MA's PlayerController to see which branch was taken."""
+
+    def __init__(self, existing=None):
+        self._existing = existing
+        self.registered = []
+
+    def get_player(self, player_id, raise_unavailable=False):
+        return self._existing
+
+    async def register_or_update(self, player):
+        self.registered.append(player)
+
+
+class _FakeMass:
+    def __init__(self, players):
+        self.players = players
+
+
+def _device(provider, serial="S1"):
+    device = provider.AlexaDevice()
+    device.device_serial_number = serial
+    device._cluster_members = []
+    return device
+
+
+def test_a_rediscovered_player_is_refreshed_not_replaced():
+    """Handing a fresh Player to register_or_update un-registers it.
+
+    That method swaps the object into the controller's dict and returns
+    without re-running registration, so the replacement never gets
+    `set_initialized()`. `all_players` filters on exactly that, which is what
+    the UI and the whole API read: every player silently disappeared while
+    still sitting in the dict.
+    """
+    provider = _provider_module()
+
+    refreshed = {}
+
+    class _Existing(provider.MaAlexaPlayer):
+        def __init__(self):
+            self.is_group = False
+            self.updated = 0
+
+        def refresh(self, device, name, *, speaker=None, member_ids=None):
+            refreshed.update(device=device, name=name, speaker=speaker,
+                             member_ids=member_ids)
+
+        def update_state(self, *a, **k):
+            self.updated += 1
+
+    existing = _Existing()
+    players = _FakePlayers(existing)
+    stand_in = type("P", (), {"mass": _FakeMass(players)})()
+
+    device = _device(provider)
+    asyncio.run(provider.MaAlexaProvider._publish(
+        stand_in, "p1", device, "Kitchen Echo"))
+
+    assert players.registered == [], "must not re-register an existing player"
+    assert refreshed["name"] == "Kitchen Echo"
+    assert existing.updated == 1
+
+
+def test_a_player_seen_for_the_first_time_is_registered():
+    """Only the branch is under test, so the Player itself is a stub.
+
+    MA's Player.__init__ writes a default player config through the whole
+    config controller. Standing that up would make this a test of MA rather
+    than of which branch `_publish` takes.
+    """
+    provider = _provider_module()
+
+    built = []
+
+    class _Stub:
+        def __init__(self, prov, player_id, device, name, **kwargs):
+            self.player_id = player_id
+            self.name = name
+            self.kwargs = kwargs
+            built.append(self)
+
+    players = _FakePlayers(None)
+    stand_in = type("P", (), {"mass": _FakeMass(players)})()
+    device = _device(provider)
+
+    real = provider.MaAlexaPlayer
+    provider.MaAlexaPlayer = _Stub
+    try:
+        asyncio.run(provider.MaAlexaProvider._publish(
+            stand_in, "p1", device, "Kitchen Echo", is_group=True,
+            member_ids=["m1"]))
+    finally:
+        provider.MaAlexaPlayer = real
+
+    assert len(players.registered) == 1
+    assert players.registered[0] is built[0]
+    assert built[0].player_id == "p1"
+    assert built[0].name == "Kitchen Echo"
+    assert built[0].kwargs["is_group"] is True
+    assert built[0].kwargs["member_ids"] == ["m1"]
+
+
+def test_refresh_takes_the_new_name_and_members_and_leaves_the_rest():
+    """A rediscovery can rename a group or change its members, nothing else."""
+    provider = _provider_module()
+
+    player = provider.MaAlexaPlayer.__new__(provider.MaAlexaPlayer)
+    player.is_group = True
+    player.group_name = "Old Name"
+    player._titles_to_items = {"a": "b"}
+
+    device = _device(provider, "S2")
+    speaker = _device(provider, "S3")
+    player.refresh(device, "Whole Apartment", speaker=speaker,
+                   member_ids=["m1", "m2"])
+
+    assert player.group_name == "Whole Apartment"
+    assert player._attr_name == "Whole Apartment"
+    assert player.device is device
+    assert player.speaker is speaker
+    assert player._attr_group_members == ["m1", "m2"]
+    # The queue's title index belongs to playback, not to discovery.
+    assert player._titles_to_items == {"a": "b"}
+
+
+def test_only_the_first_handoff_phrase_is_spoken():
+    """The setting is a list of phrases the bridge accepts, not one phrase.
+
+    Uttering the raw setting says the commas out loud and resolves to nothing,
+    which is a silent failure: Amazon answers the speaker, not the bridge, so
+    no log anywhere records it.
+    """
+    provider = _provider_module()
+
+    assert provider._first_phrase("ma_alexa queue, music assistant", "x") == "ma_alexa queue"
+    assert provider._first_phrase("  music assistant  ", "x") == "music assistant"
+    assert provider._first_phrase("", "fallback") == "fallback"
+    assert provider._first_phrase(None, "fallback") == "fallback"
+    assert provider._first_phrase(",, ,", "fallback") == "fallback"
+
+
+def test_the_utterance_names_the_kind_of_thing_it_wants():
+    """Without the noun, Alexa does not resolve the label at all.
+
+    Measured against an ingested catalog entity: "play handoff" came back
+    "I'm not quite sure how to help you with that" and never reached the
+    skill; "play the handoff playlist" resolved to playlist.ma-handoff and
+    played. Naming the kind is what picks the catalog to resolve against.
+    """
+    text = utterance.custom_command("music assistant", "handoff")
+    assert text == "ask music assistant to play the handoff playlist"
+    assert " playlist" in text
+
+    grouped = utterance.custom_command("music assistant", "handoff", "whole apartment")
+    # The target has to stay at the end, or `on ...` is read as part of the name.
+    assert grouped.endswith("on whole apartment")
+    assert "playlist on whole apartment" in grouped
+
+
+def test_a_group_is_started_by_one_of_its_own_members():
+    """A member is a perfectly good place to send the command.
+
+    The only constraint is that the thing spoken to is a real Echo: a Whole
+    Home Audio group is a cluster with no dialog interface of its own. An
+    earlier version required a speaker from outside the group, on a measurement
+    taken while the binding detector was re-provisioning the skill underneath
+    live sessions and breaking attempts indiscriminately. A member is preferred
+    so Alexa's confirmation lands in a room the music is about to play in.
+    """
+    provider = _provider_module()
+
+    speakers = {"MEM_A": object(), "MEM_B": object(), "OUTSIDER": object()}
+    members = ["MEM_A", "MEM_B"]
+
+    assert provider._group_speaker(speakers, members) == "MEM_A"
+
+
+def test_the_group_speaker_choice_is_stable():
+    """Discovery runs repeatedly; a different speaker each time is a race."""
+    provider = _provider_module()
+
+    speakers = {"Z": object(), "A": object(), "M": object(), "OUT": object()}
+    members = ["Z", "A", "M"]
+    assert provider._group_speaker(speakers, members) == "A"
+    assert provider._group_speaker(dict(reversed(list(speakers.items()))), members) == "A"
+
+
+def test_a_group_containing_every_speaker_is_startable():
+    """The case the outside-only rule wrongly declared broken.
+
+    A house whose group holds every Echo it owns is the common case, not an
+    edge one, and it starts fine.
+    """
+    provider = _provider_module()
+
+    speakers = {"MEM_A": object(), "MEM_B": object()}
+    assert provider._group_speaker(speakers, ["MEM_A", "MEM_B"]) == "MEM_A"
+
+
+def test_a_member_that_cannot_host_the_skill_is_not_spoken_to():
+    """clusterMembers can name a device that cannot run a music skill."""
+    provider = _provider_module()
+
+    speakers = {"CAPABLE": object(), "OUT": object()}
+    assert provider._group_speaker(speakers, ["NO_SKILL", "CAPABLE"]) == "CAPABLE"
+
+
+def test_a_group_of_only_incapable_members_still_gets_a_speaker():
+    """Never index an empty list; any real Echo is better than a crash."""
+    provider = _provider_module()
+
+    speakers = {"OUT_B": object(), "OUT_A": object()}
+    assert provider._group_speaker(speakers, ["NO_SKILL"]) == "OUT_A"
+
+
+# --- polling ----------------------------------------------------------------
+
+
+class _FailingStateApi:
+    """A state endpoint that raises, the way an asleep Echo's does."""
+
+    def __init__(self, raises=True, payload=None):
+        self.raises = raises
+        self.payload = payload
+        self.calls = 0
+
+    async def get_state(self):
+        self.calls += 1
+        if self.raises:
+            raise RuntimeError("device did not answer")
+        return self.payload
+
+
+def _pollable(provider, state_api):
+    player = _bare_player(provider)
+    player._attr_available = True
+    player._attr_name = "Bathroom Echo"
+    player.update_state = lambda *a, **k: None
+    type(player).state_api = property(lambda self: state_api)
+    return player
+
+
+def test_one_failed_poll_does_not_hide_a_speaker():
+    """The bug that lost two Echoes from the player list.
+
+    An Echo that is asleep or briefly unreachable still plays when something is
+    sent to it, and playing to one wakes it. Hiding it on a single miss takes a
+    working speaker off the list, and the old code did that while logging the
+    reason at debug, which nothing runs at.
+    """
+    provider = _provider_module()
+    player = _pollable(provider, _FailingStateApi())
+    try:
+        asyncio.run(player.poll())
+        assert player._attr_available is True
+        assert player._poll_failures == 1
+    finally:
+        del type(player).state_api
+
+
+def test_a_sustained_outage_does_hide_it():
+    provider = _provider_module()
+    player = _pollable(provider, _FailingStateApi())
+    try:
+        for _ in range(provider.POLL_FAILURES_BEFORE_UNAVAILABLE):
+            asyncio.run(player.poll())
+        assert player._attr_available is False
+    finally:
+        del type(player).state_api
+
+
+def test_answering_again_clears_the_failure_run():
+    provider = _provider_module()
+    api = _FailingStateApi()
+    player = _pollable(provider, api)
+    try:
+        asyncio.run(player.poll())
+        asyncio.run(player.poll())
+        api.raises = False
+        api.payload = {"playerInfo": {"state": "PLAYING"}}
+        asyncio.run(player.poll())
+        assert player._poll_failures == 0
+        assert player._attr_available is True
+    finally:
+        del type(player).state_api
+
+
+def test_an_empty_payload_is_not_a_claim_that_nothing_is_playing():
+    """A speaker group answers with no playerInfo while its members play.
+
+    Reading that as IDLE is what stopped the position advancing and left MA's
+    optimistic guess as the only clock.
+    """
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player._attr_playback_state = PlaybackState.PLAYING
+    player._attr_elapsed_time = 42
+
+    player._apply_state({})
+
+    assert player._attr_playback_state == PlaybackState.PLAYING
+    assert player._attr_elapsed_time == 42
+
+
+def test_a_real_idle_report_is_still_believed():
+    """Only an empty payload is ignored, not a payload that says IDLE."""
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player._attr_playback_state = PlaybackState.PLAYING
+
+    player._apply_state({"state": "IDLE"})
+
+    assert player._attr_playback_state == PlaybackState.IDLE
+
+
+# --- group capture ----------------------------------------------------------
+#
+# MA decides whether a group owns its members from the group's `powered` and
+# `is_active_session`. A member that is owned is hidden from the player picker,
+# so getting this wrong takes working speakers off the list.
+
+
+def _group(provider, state=None):
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player.is_group = True
+    player._attr_playback_state = state or PlaybackState.IDLE
+    return player
+
+
+# --- stopping a group by stopping its members --------------------------------
+#
+# Measured 2026-08-04: a stop sent to the group endpoint does not reach the
+# members. Five group stops in a row left a member audibly playing while the
+# group's own /api/np/player kept reporting PLAYING; a direct stop to each
+# member device silenced the room at once.
+
+
+def _group_with_members(provider, member_ids):
+    """A group whose member players record the stops sent to them.
+
+    `state_api` is a read-only property, so the recording stand-in is exposed
+    through a subclass that reads a per-instance attribute rather than being
+    assigned onto the instance.
+    """
+    from music_assistant_models.enums import PlaybackState
+
+    cls = type("StopTestPlayer", (provider.MaAlexaPlayer,), {
+        "state_api": property(lambda self: self._fake_state_api),
+    })
+    stopped: list[str] = []
+
+    def bare(pid, api):
+        p = _bare_player(provider, cls=cls)
+        p._player_id = pid
+        p._fake_state_api = api
+        return p
+
+    members = {
+        pid: bare(pid, SimpleNamespace(stop=lambda pid=pid: _noop(stopped.append(pid))))
+        for pid in member_ids
+    }
+    group = bare("group", SimpleNamespace(stop=lambda: _noop(stopped.append("GROUP_ENDPOINT"))))
+    group.is_group = True
+    group._attr_playback_state = PlaybackState.PLAYING
+    group._attr_group_members = list(member_ids)
+    group.update_state = lambda *a, **k: None
+    group.mass = SimpleNamespace(
+        players=SimpleNamespace(get_player=lambda pid: members.get(pid)))
+    return group, stopped
+
+
+def test_a_group_stop_goes_to_every_member_not_the_group_endpoint():
+    provider = _provider_module()
+    group, stopped = _group_with_members(provider, ["m1", "m2", "m3"])
+
+    asyncio.run(group.stop())
+
+    assert sorted(stopped) == ["m1", "m2", "m3"], (
+        "a group stop must reach each member directly, not the group endpoint")
+    assert "GROUP_ENDPOINT" not in stopped
+
+
+def test_a_group_stop_reports_idle_at_once():
+    """MA's pause watchdog needs the stop to present as stopped immediately,
+    the same as the single-player path."""
+    from music_assistant_models.enums import PlaybackState
+
+    provider = _provider_module()
+    group, _ = _group_with_members(provider, ["m1"])
+
+    asyncio.run(group.stop())
+
+    assert group._attr_playback_state == PlaybackState.IDLE
+    assert group._intent == "stop"
+
+
+def test_a_group_with_no_resolvable_members_falls_back_to_the_endpoint():
+    """Better the group endpoint than silently doing nothing."""
+    provider = _provider_module()
+    group, stopped = _group_with_members(provider, [])
+
+    asyncio.run(group.stop())
+
+    assert stopped == ["GROUP_ENDPOINT"]
+
+
+def test_a_single_player_stop_is_unchanged():
+    """The fan-out is for groups only; a plain Echo still stops itself and
+    arms the confirm loop against its own state."""
+    provider = _provider_module()
+    calls = []
+    cls = type("SingleStopPlayer", (provider.MaAlexaPlayer,), {
+        "state_api": property(lambda self: SimpleNamespace(
+            stop=lambda: _noop(calls.append("stop")))),
+    })
+    player = _bare_player(provider, cls=cls)
+    player.is_group = False
+    player.update_state = lambda *a, **k: None
+    player._confirm_transport = lambda *a, **k: calls.append("confirm")
+
+    asyncio.run(player.stop())
+
+    assert "stop" in calls
+    assert "confirm" in calls, "a single player still confirms against its state"
+
+
+def test_a_group_never_holds_its_members_whatever_it_is_doing():
+    """Capture protects an MA-formed sync session. There is not one here.
+
+    An Alexa Whole Home Audio group is Amazon's: Amazon assembles it, Amazon
+    dissolves it, and a command sent to a member is a request Amazon knows how
+    to service. Two earlier versions held members while playing-or-paused and
+    then while playing, and each one deleted every Echo in the house from the
+    player picker for as long as the group was in that state, while leaving
+    them visible under Settings > Players.
+    """
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    for state in (PlaybackState.IDLE, PlaybackState.PLAYING,
+                  PlaybackState.PAUSED):
+        assert _group(provider, state).is_active_session is False, state
+
+
+def test_a_plain_echo_never_holds_anything():
+    """MA requires False from a non-group, whatever it happens to be doing."""
+    provider = _provider_module()
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player.is_group = False
+    player._attr_playback_state = PlaybackState.PLAYING
+    assert player.is_active_session is False
+
+
+def _constructed(provider, is_group):
+    """Run only this class's __init__ body.
+
+    MA's Player.__init__ writes a default player config through the whole
+    config controller, and standing that up would make this a test of MA.
+    """
+    player = provider.MaAlexaPlayer.__new__(provider.MaAlexaPlayer)
+    base = provider.Player.__init__
+    provider.Player.__init__ = lambda self, prov, pid: None
+    try:
+        provider.MaAlexaPlayer.__init__(
+            player, None, "p1", _device(provider), "Whole Apartment",
+            is_group=is_group)
+    finally:
+        provider.Player.__init__ = base
+    return player
+
+
+def test_a_group_does_not_claim_to_be_powered():
+    """`powered is True` short-circuits MA's check and captures forever.
+
+    None is what makes it fall through to is_active_session, which is the
+    question actually being asked.
+    """
+    provider = _provider_module()
+
+    assert _constructed(provider, is_group=True)._attr_powered is None
+    assert _constructed(provider, is_group=False)._attr_powered is True
+
+
+def test_the_seeked_item_is_addressed_by_id_not_by_the_queue_position():
+    """play_index assigns current_item after loading, so a seek can race it.
+
+    Observed 2026-08-02: one seek in a run of them published no offset and
+    restarted the song, because the queue's idea of "current" was still the
+    previous item, whose streamdetails carry no seek.
+    """
+    provider = _provider_module()
+
+    stale = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=0.0))
+    seeked = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=74.0))
+
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get_item=lambda _qid, item_id: seeked if item_id == "wanted" else None,
+        get=lambda _qid: SimpleNamespace(current_item=stale)))
+
+    media = SimpleNamespace(source_id="q1", queue_item_id="wanted")
+    assert player._seek_offset_ms(media) == 74000
+
+
+def test_an_unknown_item_id_falls_back_to_the_queue_position():
+    """Better the queue's guess than no offset at all."""
+    provider = _provider_module()
+
+    current = SimpleNamespace(streamdetails=SimpleNamespace(seek_position=30.0))
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get_item=lambda _qid, _item_id: None,
+        get=lambda _qid: SimpleNamespace(current_item=current)))
+
+    media = SimpleNamespace(source_id="q1", queue_item_id="gone")
+    assert player._seek_offset_ms(media) == 30000
+
+
+# --- what a poll is allowed to erase ----------------------------------------
+
+
+def _polled(provider, previous=None):
+    player = _bare_player(provider)
+    player._attr_current_media = previous
+    return player
+
+
+def _media(provider, **kwargs):
+    from music_assistant_models.player import PlayerMedia
+
+    return PlayerMedia(uri="ma_alexa://p1/Song", title="Song", **kwargs)
+
+
+def _info(**progress):
+    return {"state": "PLAYING", "infoText": {"title": "Song"},
+            "progress": progress}
+
+
+def test_a_poll_without_a_duration_keeps_the_one_we_had():
+    """The duration visibly reset to zero on every resync.
+
+    current_media is rebuilt from scratch each poll, so a field Alexa omitted
+    was erased rather than left alone, taking the progress bar with it.
+    """
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5))
+
+    assert player._attr_current_media.duration == 240
+
+
+def test_a_poll_that_does_report_a_duration_is_believed():
+    """mediaLength is seconds. This test asserted 300 against a payload of
+    300000, which only passed while the code divided by 1000, so the two wrong
+    halves agreed with each other and the pair looked correct."""
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5, mediaLength=300))
+
+    assert player._attr_current_media.duration == 300
+
+
+def test_a_zero_duration_is_not_a_duration():
+    """Alexa sends 0 around a transition; it means unknown, not instantaneous."""
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240))
+
+    player._apply_state(_info(mediaProgress=5, mediaLength=0))
+
+    assert player._attr_current_media.duration == 240
+
+
+def test_a_new_track_does_not_inherit_the_old_metadata():
+    """Carrying values forward is only safe while the title is unchanged."""
+    provider = _provider_module()
+    player = _polled(provider, _media(provider, duration=240, artist="Someone"))
+
+    player._apply_state({"state": "PLAYING",
+                         "infoText": {"title": "A Different Song"},
+                         "progress": {}})
+
+    assert player._attr_current_media.title == "A Different Song"
+    assert player._attr_current_media.duration is None
+    assert player._attr_current_media.artist is None
+
+
+def test_artist_and_art_survive_a_thin_poll_too():
+    """Alexa omits more than just the duration, especially on a group."""
+    provider = _provider_module()
+    player = _polled(provider, _media(
+        provider, artist="Someone", album="A Record",
+        image_url="https://art.test/1.jpg"))
+
+    player._apply_state(_info(mediaProgress=5))
+
+    media = player._attr_current_media
+    assert media.artist == "Someone"
+    assert media.album == "A Record"
+    assert media.image_url == "https://art.test/1.jpg"
+
+
+def test_an_idle_speaker_does_not_log_on_every_poll():
+    """An Echo with nothing playing answers with no title forever.
+
+    Logging that per poll turns a signal into 36 lines a minute, which is how
+    a log stops being read at all.
+    """
+    provider = _provider_module()
+    lines = []
+
+    player = _polled(provider, None)
+    # The state-vocabulary instrument logs the first sighting of each raw
+    # state; seed it so this test stays about the title logging it is checking,
+    # not that one-time line. Its own coverage is below.
+    player._states_seen_store = {"IDLE"}
+    player.logger = SimpleNamespace(info=lambda m, *a: lines.append(m % a),
+                                    warning=lambda *a, **k: None,
+                                    debug=lambda *a, **k: None)
+    for _ in range(5):
+        player._apply_state({"state": "IDLE", "infoText": {}, "progress": {}})
+
+    assert lines == []
+
+
+def test_losing_the_title_mid_track_is_worth_one_line():
+    provider = _provider_module()
+    lines = []
+
+    player = _polled(provider, _media(provider, duration=240))
+    player._states_seen_store = {"PLAYING"}  # see the note above; not what this tests
+    player.logger = SimpleNamespace(info=lambda m, *a: lines.append(m % a),
+                                    warning=lambda *a, **k: None,
+                                    debug=lambda *a, **k: None)
+
+    player._apply_state({"state": "PLAYING", "infoText": {}, "progress": {}})
+
+    assert len(lines) == 1
+    assert "stopped reporting a track title" in lines[0]
+    assert player._attr_current_media.title == "Song", "media left as it was"
+
+
+def test_a_novel_playback_state_logs_once_and_then_stays_silent():
+    """The vocabulary instrument: one line the first time /api/np/player emits
+    a state, silent forever after. Learns what the endpoint actually sends
+    (STOPPED? FINISHED? BUFFER_UNDERRUN?) without becoming per-poll spam."""
+    provider = _provider_module()
+    lines = []
+    player = _polled(provider, _media(provider, duration=240))
+    player.logger = SimpleNamespace(info=lambda m, *a: lines.append(m % a),
+                                    warning=lambda *a, **k: None,
+                                    debug=lambda *a, **k: None)
+
+    for _ in range(4):
+        player._apply_state({"state": "PLAYING", "infoText": {"title": "Song"},
+                             "progress": {}})
+
+    assert len(lines) == 1, "logged once for the first PLAYING, not per poll"
+    assert "reported state 'PLAYING' for the first time" in lines[0]
+
+
+# --- letting MA's queue follow Alexa ----------------------------------------
+
+
+def _with_queue(provider, player, *titles):
+    # name is the composite MA builds, "Artist - Title"; media_item.name is the
+    # track title on its own. Tests pass whichever shape they mean.
+    items = [SimpleNamespace(name=t, media_item=None, queue_item_id=f"id-{i}")
+             for i, t in enumerate(titles)]
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=lambda _qid: items))
+    return player
+
+
+def test_the_playing_title_is_matched_against_the_live_queue():
+    """The map built at play_media is memory only.
+
+    It is empty after a restart and after a queue transferred in from another
+    player, and those are exactly the moments MA's queue index has no other way
+    to catch up: the group was audibly on one track while MA showed the track
+    the queue had arrived holding.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "And I Love You So", "Triste", "My Way")
+
+    assert player._queue_item_for("My Way") == "id-2"
+
+
+def test_the_prebuilt_map_wins_when_it_has_the_answer():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+    player._titles_to_items = {"my way": "from-the-map"}
+
+    assert player._queue_item_for("My Way") == "from-the-map"
+
+
+def test_matching_ignores_case_the_way_alexa_reports_it():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "THAT'S LIFE")
+
+    assert player._queue_item_for("That's Life") == "id-0"
+
+
+def test_a_title_that_is_not_in_the_queue_matches_nothing():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+
+    assert player._queue_item_for("Something Else") is None
+
+
+def test_no_queue_at_all_is_not_a_crash():
+    """Polling starts before anything has ever played on this player."""
+    provider = _provider_module()
+    player = _polled(provider, None)
+
+    def explode(_qid):
+        raise KeyError("no queue")
+
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=explode))
+
+    assert player._queue_item_for("My Way") is None
+
+
+def test_the_polled_media_names_the_queue_it_belongs_to():
+    """MA will not believe a queue_item_id without a matching source_id.
+
+    PlayerQueues._parse_player_current_item_id requires both, and its fallbacks
+    parse a Sonos uri or an MA stream url, neither of which an ma_alexa:// uri
+    can look like. Without source_id the queue index never advances and MA goes
+    on showing whatever track the queue was holding when it arrived.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None), "My Way")
+
+    player._apply_state({"state": "PLAYING",
+                         "infoText": {"title": "My Way"},
+                         "progress": {"mediaProgress": 1}})
+
+    media = player._attr_current_media
+    assert media.source_id == "p1", "must equal the player id, which keys the queue"
+    assert media.queue_item_id == "id-0"
+    assert player._attr_active_source == "p1", "playing our queue: source is the player"
+
+
+def test_external_playback_is_reported_as_such_not_the_stale_queue():
+    """A voice command plays a track that is in none of our queue items. MA would
+    otherwise keep showing the queue it can no longer follow, so the player names
+    no queue and reports an external source, which is what makes MA fall back to
+    the track actually playing. Observed 2026-08-06: an Echo holding a 500-track
+    MA queue was voice-told to play Breaking Benjamin and MA showed the queue's
+    first track for every song."""
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Lana Del Rey - Lust For Life")
+
+    player._apply_state({"state": "PLAYING",
+                         "infoText": {"title": "Feed the Wolf"},
+                         "progress": {"mediaProgress": 1}})
+
+    media = player._attr_current_media
+    assert media.title == "Feed the Wolf", "shows the track actually playing"
+    assert media.source_id is None, "must not name the queue on external playback"
+    assert media.queue_item_id is None
+    assert player._attr_active_source == "alexa", "an EXTERNAL_SOURCES value"
+
+
+def test_alexa_reports_a_title_where_ma_holds_artist_and_title():
+    """The reason queue following never worked, on any track.
+
+    MA names a queue item "Artist - Title"; Alexa reports the title alone.
+    Comparing them directly never matched once, and with no match MA cannot
+    parse a current item id, so _update_queue_from_player returns early and
+    both the queue index and the scrubber freeze. Measured 2026-08-02 against
+    a live queue of ['Perry Como - And I Love You So', 'Ramones - Blitzkrieg
+    Bop', ...] while Alexa reported 'Mony, Mony'.
+    """
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Perry Como - And I Love You So",
+                         "The White Stripes - Seven Nation Army")
+
+    assert player._queue_item_for("Seven Nation Army") == "id-1"
+    assert player._queue_item_for("And I Love You So") == "id-0"
+
+
+def test_the_media_items_own_name_is_preferred():
+    """The composite is a display string; the media item carries the truth."""
+    provider = _provider_module()
+    item = SimpleNamespace(name="Some Artist - Wrong Display",
+                           media_item=SimpleNamespace(name="Real Title"),
+                           queue_item_id="id-x")
+    player = _polled(provider, None)
+    player.mass = SimpleNamespace(
+        player_queues=SimpleNamespace(items=lambda _qid: [item]))
+
+    assert player._queue_item_for("Real Title") == "id-x"
+
+
+def test_the_whole_composite_still_matches():
+    """Some sources may report the composite; it must not stop working."""
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Robyn - Dancing On My Own")
+
+    assert player._queue_item_for("Robyn - Dancing On My Own") == "id-0"
+
+
+def test_a_hyphen_in_the_artist_does_not_eat_the_title():
+    """rpartition, not partition: split on the last separator."""
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Emerson, Lake - Palmer - Lucky Man")
+
+    assert player._queue_item_for("Lucky Man") == "id-0"
+
+
+def test_a_title_containing_a_hyphen_survives():
+    provider = _provider_module()
+    player = _with_queue(provider, _polled(provider, None),
+                         "Robyn - Dancing On My Own - Radio Edit")
+
+    assert player._queue_item_for("Radio Edit") == "id-0"
+
+
+# --- tracks that are not on the Subsonic server -----------------------------
+#
+# Phase 2 of PLAN.md. A queue Music Assistant composes can hold a Spotify or
+# Tidal track, which has no Subsonic id at all and used to be dropped from the
+# published list without playing. It now travels as an object the bridge
+# fetches back out of MA.
+
+
+def _bare_provider(provider, *, allow_ma=True):
+    """A provider with no __init__ run, for the queue-mapping methods only.
+
+    Standing up a real one logs into Amazon. These methods read config, a
+    logger and the stream route, and nothing else.
+    """
+    instance = provider.MaAlexaProvider.__new__(provider.MaAlexaProvider)
+    instance.logger = SimpleNamespace(
+        warning=lambda *a, **k: None, info=lambda *a, **k: None,
+        debug=lambda *a, **k: None)
+    instance.config = SimpleNamespace(
+        get_value=lambda key, default=None: (
+            allow_ma if key == provider.CONF_MA_SOURCE else default
+        )
+    )
+    return instance
+
+
+def _mapping(domain, item_id, available=True):
+    return SimpleNamespace(
+        provider_domain=domain, item_id=item_id, available=available)
+
+
+def _item(name, uri="", mappings=(), artists=(), album="", duration=0, image=None):
+    media_item = SimpleNamespace(
+        name=name, uri=uri, provider_mappings=list(mappings),
+        artists=[SimpleNamespace(name=a) for a in artists],
+        album=SimpleNamespace(name=album) if album else None,
+        duration=duration, image=image,
+    )
+    return SimpleNamespace(
+        name=name, uri=uri, media_item=media_item, queue_item_id=f"q-{name}",
+        duration=duration, image=image,
+    )
+
+
+def test_a_subsonic_track_is_published_as_a_pre_resolved_record():
+    """Was a bare id; now it carries the metadata MA already had, so the bridge
+    does not fetch it back per track. Still streams from Subsonic (no `ref`)."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks(
+        [_item("Light Year", mappings=[_mapping("opensubsonic", "t1")],
+               artists=("Someone",), album="Sky", duration=200)]
+    )
+    (track,) = tracks
+    assert track["source"] == "subsonic"
+    assert track["id"] == "t1"
+    assert "ref" not in track, "it streams from Subsonic, not via MA"
+    assert track["title"] == "Light Year"
+    assert track["artist"] == "Someone"
+    assert track["duration"] == 200
+
+
+def test_a_subsonic_track_without_a_title_falls_back_to_a_bare_id():
+    """No metadata to carry, so let the bridge fetch that one the old way."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks(
+        [_item("", mappings=[_mapping("opensubsonic", "t1")])]
+    )
+    assert tracks == ["t1"]
+
+
+def test_a_track_with_no_subsonic_id_is_published_as_a_music_assistant_track():
+    """It used to be dropped and silently not play."""
+    provider = _provider_module()
+    from ma_provider import stream_ref
+
+    instance = _bare_provider(provider)
+    tracks, _titles = instance.publish_tracks([
+        _item("Dancing On My Own", uri="spotify://track/abc",
+              artists=("Robyn",), album="Body Talk", duration=293),
+    ])
+
+    (track,) = tracks
+    assert track["source"] == "ma"
+    assert stream_ref.decode_ref(track["ref"]) == "spotify://track/abc"
+    assert track["title"] == "Dancing On My Own"
+    assert track["artist"] == "Robyn"
+    assert track["album"] == "Body Talk"
+    assert track["duration"] == 293
+
+
+def test_subsonic_wins_when_a_track_is_on_both():
+    """Deliberate, not incidental.
+
+    Navidrome serves a finite file with Accept-Ranges, so those tracks seek and
+    survive being moved between rooms. Music Assistant's audio is realtime and
+    does neither. Routing a track through MA that Subsonic already has would
+    trade working features for nothing.
+    """
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("Light Year", uri="spotify://track/abc",
+              mappings=[_mapping("opensubsonic", "t1")]),
+    ])
+    # Still Subsonic, now carrying its metadata rather than a bare id.
+    assert tracks[0]["source"] == "subsonic"
+    assert tracks[0]["id"] == "t1"
+
+
+def test_an_unavailable_subsonic_mapping_falls_through_to_music_assistant():
+    """A mapping that exists but is marked unavailable cannot be streamed.
+
+    Both kinds are dicts now, so the source is what tells them apart.
+    """
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("Light Year", uri="spotify://track/abc",
+              mappings=[_mapping("opensubsonic", "t1", available=False)]),
+    ])
+    assert tracks[0]["source"] == "ma"
+
+
+def test_the_two_kinds_keep_their_order_in_one_queue():
+    """MA does not group its queue by source, so the publish must not either."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+        _item("C", mappings=[_mapping("opensubsonic", "t2")]),
+    ])
+    assert [t["source"] for t in tracks] == ["subsonic", "ma", "subsonic"]
+    assert tracks[0]["id"] == "t1" and tracks[2]["id"] == "t2"
+
+
+def test_turning_the_setting_off_goes_back_to_dropping_them():
+    """The escape hatch, for a source that turns out to misbehave."""
+    provider = _provider_module()
+    instance = _bare_provider(provider, allow_ma=False)
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+    ])
+    # B (MA-only) is dropped; A (Subsonic) survives as its pre-resolved record.
+    assert len(tracks) == 1
+    assert tracks[0]["source"] == "subsonic" and tracks[0]["id"] == "t1"
+
+
+def test_an_item_with_no_uri_cannot_be_published_either_way():
+    """There is nothing to name it by, so it is still dropped."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    tracks, _titles = instance.publish_tracks([_item("Mystery")])
+    assert tracks == []
+
+
+def test_only_art_amazon_can_reach_is_carried():
+    """Amazon fetches art itself, and MA's image proxy is on the tailnet.
+
+    A Spotify or Tidal cover is on a public CDN and is handed over as-is; a
+    local file's artwork is left out rather than pointed at a host Amazon
+    cannot resolve.
+    """
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    public = SimpleNamespace(remotely_accessible=True,
+                             path="https://i.scdn.co/image/abc")
+    private = SimpleNamespace(remotely_accessible=False, path="/local/cover.jpg")
+
+    tracks, _titles = instance.publish_tracks([
+        _item("A", uri="spotify://track/a", image=public),
+        _item("B", uri="filesystem_local://track/b", image=private),
+    ])
+    assert tracks[0]["art_url"] == "https://i.scdn.co/image/abc"
+    assert "art_url" not in tracks[1]
+
+
+def test_the_title_index_still_covers_both_kinds():
+    """MA follows Alexa by name, and that has to work for every track played."""
+    provider = _provider_module()
+    instance = _bare_provider(provider)
+
+    _tracks, titles = instance.publish_tracks([
+        _item("A", mappings=[_mapping("opensubsonic", "t1")]),
+        _item("B", uri="spotify://track/b"),
+    ])
+    assert titles == {"a": "q-A", "b": "q-B"}
+
+
+# --- what Alexa reports about position --------------------------------------
+
+
+def _progress_player(provider, payload):
+    player = _bare_player(provider)
+    player.mass = SimpleNamespace(player_queues=SimpleNamespace(
+        get=lambda _q: None, get_item=lambda _q, _i: None))
+    player._attr_current_media = None
+    player._attr_playback_state = None
+    player._attr_name = "Kitchen Echo"
+    player.update_state = lambda *a, **k: None
+    player._apply_state(payload)
+    return player
+
+
+def test_position_and_length_are_read_as_seconds():
+    """Both are seconds, whatever the millisecond-shaped names suggest.
+
+    Measured 2026-08-03 against a live Echo: mediaLength stayed 226 for a
+    3:46 track while mediaProgress climbed 11 -> 21 -> 32 -> 42 across four
+    ten-second polls. Dividing by 1000 made the position advance at a
+    thousandth of real time, which is what "the scrubber never moves" was.
+    """
+    provider = _provider_module()
+    player = _progress_player(provider, {
+        "playerInfo": {"state": "PLAYING"},
+        "infoText": {"title": "Harder, Better, Faster, Stronger"},
+        "progress": {"mediaLength": 226, "mediaProgress": 42,
+                     "allowScrubbing": False},
+    })
+
+    assert player._attr_elapsed_time == 42
+    assert player._attr_current_media.duration == 226
+
+
+def test_a_length_of_zero_is_no_length_rather_than_a_zero_length():
+    provider = _provider_module()
+    player = _progress_player(provider, {
+        "playerInfo": {"state": "PLAYING"},
+        "infoText": {"title": "Something"},
+        "progress": {"mediaLength": 0, "mediaProgress": 0},
+    })
+    assert player._attr_current_media.duration is None
+
+
+# --- publishing without the round trip --------------------------------------
+#
+# Inside Music Assistant the bridge is this process, so `LocalBridge` calls
+# `queue_api.publish` directly. It has to be interchangeable with `BridgeClient`
+# at the one call site in the provider, so these mirror the HTTP tests above.
+
+
+@pytest.fixture
+def local_queue_dir(tmp_path, monkeypatch):
+    from ma_provider import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "external")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    return queue_api
+
+
+def test_a_local_publish_returns_a_content_id(local_queue_dir, fake_subsonic):
+    content_id = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"], "Evening"))
+
+    assert content_id.startswith(f"{local_queue_dir.CONTENT_PREFIX}:")
+    stored = local_queue_dir.resolve(content_id.split(":", 1)[1])
+    assert [s["id"] for s in stored] == ["t1", "t2"]
+
+
+def test_a_local_publish_is_the_same_content_id_as_republishing(local_queue_dir,
+                                                                fake_subsonic):
+    """The token hashes the track list, so an unchanged queue keeps its id.
+
+    That property is what stops a republish orphaning the queue Alexa is
+    already holding, and it must survive the move off HTTP.
+    """
+    once = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"]))
+    again = asyncio.run(bridge.LocalBridge().publish_queue(["t1", "t2"]))
+    assert once == again
+
+
+def test_a_local_publish_stringifies_track_ids(local_queue_dir, monkeypatch):
+    """Same coercion the HTTP body did, now that there is no body.
+
+    Asserted on what `publish` was handed rather than on the outcome, because a
+    caller holding ids as ints would otherwise fail deep inside the Subsonic
+    lookup with a message about an unknown song.
+    """
+    seen = {}
+
+    def fake_publish(tracks, name="", start_offset_ms=0):
+        seen.update(tracks=tracks, name=name, start_offset_ms=start_offset_ms)
+        return {"token": "abc", "tracks": [{"id": "123"}], "requested": 1}
+
+    monkeypatch.setattr(local_queue_dir, "publish", fake_publish)
+    asyncio.run(bridge.LocalBridge().publish_queue([123], "Evening", -5))
+
+    assert seen["tracks"] == ["123"], "ids must reach publish as strings"
+    assert seen["name"] == "Evening"
+    assert seen["start_offset_ms"] == 0, "a negative offset is clamped, not passed"
+
+
+def test_a_local_publish_refuses_an_empty_queue():
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(bridge.LocalBridge().publish_queue([]))
+
+
+def test_a_local_publish_refuses_a_queue_with_nothing_playable(local_queue_dir,
+                                                               fake_subsonic):
+    """Every id unknown to the library is a failure, not an empty success.
+
+    The HTTP path raised here because the bridge answered without a
+    content_id. Locally there is no response to inspect, so the check is on
+    what was actually stored; without it the provider would speak an utterance
+    for a queue with no tracks and the Echo would say it found nothing.
+    """
+    with pytest.raises(bridge.BridgeError):
+        asyncio.run(bridge.LocalBridge().publish_queue(["nope-1", "nope-2"]))
+
+
+def test_both_bridges_present_the_same_call(local_queue_dir, fake_subsonic):
+    """The provider has one call site and must not have to know which it holds."""
+    for impl in (bridge.LocalBridge(), bridge.BridgeClient("http://x", "t", None)):
+        publish = impl.publish_queue
+        assert asyncio.iscoroutinefunction(publish)
+        names = publish.__code__.co_varnames[:publish.__code__.co_argcount]
+        assert names == ("self", "tracks", "name", "start_offset_ms")
+
+
+# --- volume, which needed saying twice --------------------------------------
+
+
+async def _resolved(value):
+    """`current_volume` is awaited; None means Alexa would not say."""
+    return value
+
+
+@contextlib.contextmanager
+def _quick_confirm(provider, seconds=0.01):
+    """Shorten the confirm delay without monkeypatch.
+
+    The in-container runner (tools/run_provider_tests.py) is a small stub that
+    cannot inject pytest fixtures, and these are exactly the tests that have to
+    run where Music Assistant actually exists.
+    """
+    original = provider.VOLUME_CONFIRM_SECONDS
+    provider.VOLUME_CONFIRM_SECONDS = seconds
+    try:
+        yield
+    finally:
+        provider.VOLUME_CONFIRM_SECONDS = original
+
+
+def _volume_player(provider, reported=None):
+    """A player whose only job is to record what it sent to Alexa.
+
+    The fake had drifted out of shape with what it stands in for -- it took no
+    `queue_delay` and answered `get_state`, where the confirm loop has read the
+    account-wide volume endpoint since it was found that an idle speaker
+    reports no volume at all. Both tests raised TypeError on the first line and
+    the in-container runner called that a pass, because it never awaited them.
+    """
+    sent: list[float] = []
+
+    class FakeApi:
+        async def set_volume(self, level, queue_delay=None):
+            sent.append(level)
+
+    # `state_api`, `provider_instance` and `name` are all read-only properties
+    # -- two on MaAlexaPlayer, one inherited from Music Assistant's Player -- so
+    # the stand-ins are declared on a subclass rather than assigned onto the
+    # instance, where they would raise "has no setter".
+    fake_api = FakeApi()
+    fake_provider = SimpleNamespace(
+        current_volume=lambda _serial: _resolved(reported))
+    cls = type("VolumeTestPlayer", (provider.MaAlexaPlayer,), {
+        "state_api": property(lambda self: fake_api),
+        "provider_instance": property(lambda self: fake_provider),
+        "name": property(lambda self: "Test Speaker"),
+    })
+    player = _bare_player(provider, cls=cls)
+    player.sent = sent
+    player.device = SimpleNamespace(device_serial_number="SERIAL1")
+    player.update_state = lambda: None
+    player._attr_volume_level = 0
+    player._volume_wanted = None
+    player._volume_asked_at = 0.0
+    player._volume_resent = False
+    player._volume_confirm = None
+    return player
+
+
+async def test_a_volume_the_speaker_ignored_is_sent_again():
+    """Measured on a live Echo: the first send returns without error and the
+    speaker does not change. Two sends were needed, by hand, every time."""
+    provider = _provider_module()
+    with _quick_confirm(provider):
+        player = _volume_player(provider, reported=25)   # still the old value
+        await player.volume_set(36)
+        await player._volume_confirm
+
+    # Once, then again for each attempt the loop has left. Written against the
+    # constant rather than a literal: this asserted exactly two sends from when
+    # there was a single resend, and stayed that way after the resend became a
+    # bounded loop, because nothing in the container was awaiting it.
+    assert player.sent == [0.36] * provider.VOLUME_ATTEMPTS, (
+        "the ignored command must be repeated, and a bounded number of times")
+
+
+async def test_a_volume_the_speaker_took_is_not_sent_again():
+    """Resending unconditionally would double every volume call."""
+    provider = _provider_module()
+    with _quick_confirm(provider):
+        player = _volume_player(provider, reported=36)   # Alexa agrees
+        await player.volume_set(36)
+        await player._volume_confirm
+
+    assert player.sent == [0.36]
+    assert player._volume_wanted is None, "confirmed, so nothing is outstanding"
+
+
+async def test_a_newer_request_supersedes_the_one_being_confirmed():
+    """Dragging a slider produces a run of sets. The confirm for an
+    abandoned one must not fire and put the volume back."""
+    provider = _provider_module()
+    with _quick_confirm(provider, seconds=0.05):
+        player = _volume_player(provider, reported=25)
+        await player.volume_set(36)
+        first = player._volume_confirm
+        await player.volume_set(50)
+        await asyncio.sleep(0.12)
+
+    assert first.cancelled() or first.done()
+    assert 0.36 not in player.sent[1:], "the abandoned value was not resent"
+
+
+def test_the_poll_does_not_overwrite_a_volume_just_asked_for():
+    """The second defect, and the cosmetic one.
+
+    Amazon reports the previous volume for several seconds after accepting a
+    change, and poll used to copy that straight over the requested value. The
+    slider moved and snapped back, which reads as the command being ignored
+    even on the occasions it was not.
+    """
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time()
+
+    player._reconcile_volume(25)
+    assert player._attr_volume_level == 36
+
+
+def test_the_poll_is_believed_once_alexa_agrees():
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time()
+
+    player._reconcile_volume(36)
+    assert player._attr_volume_level == 36
+    assert player._volume_wanted is None
+
+
+def test_a_volume_that_never_arrives_stops_being_defended():
+    """Giving up matters as much as holding on. If Amazon has refused the
+    change, a slider that keeps showing the requested value is lying about the
+    volume of the room."""
+    provider = _provider_module()
+    player = _volume_player(provider)
+    player._volume_wanted = 36
+    player._volume_asked_at = time.time() - provider.VOLUME_SETTLE_SECONDS - 1
+
+    player._reconcile_volume(25)
+    assert player._attr_volume_level == 25
+    assert player._volume_wanted is None
+
+
+def test_a_volume_changed_on_the_device_is_still_picked_up():
+    """With nothing outstanding Alexa wins, because voice and the buttons on
+    the speaker are real changes with no other way in."""
+    provider = _provider_module()
+    player = _volume_player(provider)
+
+    player._reconcile_volume(70)
+    assert player._attr_volume_level == 70
+
+
+def _stated(provider, *, is_group):
+    """A player that can survive one _apply_state, for the volume block."""
+    player = _bare_player(provider)
+    player.is_group = is_group
+    player._attr_name = "Whole Apartment" if is_group else "Bathroom Echo"
+    player._attr_volume_level = None
+    player._attr_volume_muted = None
+    player._volume_wanted = None
+    player._volume_asked_at = 0.0
+    return player
+
+
+_AUDIBLE = {"state": "PLAYING", "infoText": {}, "progress": {},
+            "volume": {"volume": 0, "muted": False}}
+
+
+def test_a_group_does_not_publish_a_volume_of_its_own():
+    """The slider read 0 on four speakers you could hear across the apartment.
+
+    Alexa answers a group's own volume with the cluster device's, which is 0
+    while every member is between 11 and 17. Music Assistant will never
+    correct it: cmd_volume_set on a PlayerType.GROUP is redirected to
+    set_group_volume, which writes to the members, and group_volume is the
+    maximum over those members taken with exclude_self=True. So this field is
+    written by nobody and read by nobody except the UI it misleads.
+    """
+    provider = _provider_module()
+    player = _stated(provider, is_group=True)
+
+    player._apply_state(_AUDIBLE)
+
+    assert player._attr_volume_level is None
+    assert player._attr_volume_muted is None
+
+
+def test_a_speaker_still_publishes_its_volume():
+    """The guard is about groups only; a real Echo owns its volume."""
+    provider = _provider_module()
+    player = _stated(provider, is_group=False)
+
+    player._apply_state(_AUDIBLE | {"volume": {"volume": 13, "muted": False}})
+
+    assert player._attr_volume_level == 13
+    assert player._attr_volume_muted is False
+
+
+# --- what it cost to make Amazon obey ----------------------------------------
+
+
+def _tallying(provider):
+    player = _bare_player(provider)
+    player._attrs = {}
+    type(player).extra_attributes = property(lambda self: self._attrs)
+    player.update_state = lambda *a, **k: None
+    return player
+
+
+def test_a_command_that_landed_first_time_costs_nothing():
+    provider = _provider_module()
+    player = _tallying(provider)
+
+    player._note_convergence("stop", resends=0, gave_up=False)
+
+    assert player.extra_attributes[provider.ATTR_RESENDS] == 0
+    assert player.extra_attributes[provider.ATTR_GAVE_UP] == 0
+
+
+def test_resends_and_give_ups_accumulate_separately():
+    """A resend is Amazon dropping a command and taking it on the second ask,
+    which the retry exists for. Giving up means the speaker was left doing
+    something other than what was asked, which is a different claim."""
+    provider = _provider_module()
+    player = _tallying(provider)
+
+    player._note_convergence("pause", resends=1, gave_up=False)
+    player._note_convergence("stop", resends=2, gave_up=True)
+
+    assert player.extra_attributes[provider.ATTR_RESENDS] == 3
+    assert player.extra_attributes[provider.ATTR_GAVE_UP] == 1
+    assert player.extra_attributes[provider.ATTR_LAST_LOST] == "stop"
+
+
+def test_every_published_value_is_a_type_the_api_accepts():
+    """EXTRA_ATTRIBUTES_TYPES is `str | int | float | bool | None`. A nested
+    dict is not a legal value, and the first version of this published one."""
+    provider = _provider_module()
+    player = _tallying(provider)
+
+    player._note_convergence("stop", resends=2, gave_up=True)
+
+    assert all(isinstance(v, (str, int, float, bool, type(None)))
+               for v in player.extra_attributes.values())
+
+
+def test_the_totals_only_ever_climb():
+    """The reader is a live test that snapshots before a command and looks
+    again after. A diff of two monotonic totals cannot go stale between those
+    reads; a 'what happened most recently' field can, and would report the
+    wrong command's outcome under the concurrency this provider has."""
+    provider = _provider_module()
+    player = _tallying(provider)
+
+    seen = []
+    for _ in range(3):
+        player._note_convergence("stop", resends=1, gave_up=False)
+        seen.append(player.extra_attributes[provider.ATTR_RESENDS])
+
+    assert seen == [1, 2, 3]
+
+
+# --- carrying the position between reads of Alexa ----------------------------
+
+
+def _ticking(provider, *, state, elapsed, last_updated):
+    from music_assistant_models.enums import PlaybackState
+
+    player = _bare_player(provider)
+    player._attr_playback_state = getattr(PlaybackState, state)
+    player._attr_elapsed_time = elapsed
+    player._attr_elapsed_time_last_updated = last_updated
+    return player
+
+
+def test_a_playing_position_is_carried_forward_between_reads():
+    """MA's `skip` subtracts from the position *as stored*, not extrapolated.
+
+    With the read throttled to a minute while push is healthy, a rewind of 20
+    seconds from a track half a minute in was computed against a stored 2.2s
+    and refused. The live suite spent 216s on six rewind cells waiting for a
+    publish that a healthy stream had no reason to send.
+    """
+    provider = _provider_module()
+    player = _ticking(provider, state="PLAYING", elapsed=10.0,
+                      last_updated=time.time() - 30.0)
+
+    player._advance_position()
+
+    assert 39.0 <= player._attr_elapsed_time <= 41.0
+    assert time.time() - player._attr_elapsed_time_last_updated < 1.0
+
+
+def test_carrying_the_position_forward_changes_nothing_for_music_assistant():
+    """It is arithmetic, not a guess, and this is why it is safe.
+
+    MA computes `corrected_elapsed_time` as elapsed + (now - last_updated).
+    Advancing both by the same amount leaves that identical, so every consumer
+    that extrapolates reads exactly what it read before.
+    """
+    provider = _provider_module()
+    now = time.time()
+    player = _ticking(provider, state="PLAYING", elapsed=10.0, last_updated=now - 30.0)
+    corrected_before = player._attr_elapsed_time + (now - player._attr_elapsed_time_last_updated)
+
+    player._advance_position()
+    corrected_after = player._attr_elapsed_time + (
+        time.time() - player._attr_elapsed_time_last_updated)
+
+    assert abs(corrected_after - corrected_before) < 0.5
+
+
+def test_a_paused_position_is_left_alone():
+    """A paused player's position does not move, and advancing it is the guess
+    this is careful not to make."""
+    provider = _provider_module()
+    player = _ticking(provider, state="PAUSED", elapsed=10.0,
+                      last_updated=time.time() - 30.0)
+
+    player._advance_position()
+
+    assert player._attr_elapsed_time == 10.0
+
+
+def test_a_tick_inside_the_read_interval_does_not_ask_amazon():
+    provider = _provider_module()
+    player = _ticking(provider, state="PLAYING", elapsed=10.0,
+                      last_updated=time.time() - 5.0)
+    player._read_interval = 60.0
+    player._last_read_at = time.monotonic()
+    player.update_state = lambda *a, **k: None
+    asked = []
+    type(player).state_api = property(
+        lambda self: SimpleNamespace(get_state=lambda: asked.append("read")))
+
+    asyncio.run(player.poll())
+    assert asked == []
+    assert player._attr_elapsed_time > 10.0
+
+
+def test_a_resync_reads_amazon_however_recently_it_was_read():
+    """The resync is the correction for every optimistically-answered control.
+
+    Letting it fall to the throttle would leave the optimistic value standing
+    as though it had been confirmed, which is a check that reports success
+    while checking nothing. `_resync_soon` and the push-reconnect catch-up both
+    pass force for this reason.
+    """
+    provider = _provider_module()
+    player = _ticking(provider, state="PLAYING", elapsed=10.0,
+                      last_updated=time.time() - 5.0)
+    player._read_interval = 60.0
+    player._last_read_at = time.monotonic()
+    player.update_state = lambda *a, **k: None
+    player._apply_state = lambda info: None
+    asked = []
+
+    async def get_state():
+        asked.append("read")
+        return {"playerInfo": {}}
+
+    type(player).state_api = property(lambda self: SimpleNamespace(get_state=get_state))
+
+    asyncio.run(player.poll(force=True))
+    assert asked == ["read"]
+
+
+# --- a power command MA promised never to send -------------------------------
+
+
+def test_powering_off_a_group_stops_it_rather_than_raising():
+    """PlayerFeature.POWER is not declared, and MA calls power() anyway.
+
+    _handle_cmd_power's fake-power branch has `if type == GROUP: await
+    player.power(powered)` with no feature check, and Fake power control is
+    offered in the dropdown for every player. MA's base power() raises
+    NotImplementedError, so one config change would have turned a UI toggle
+    into a traceback.
+    """
+    provider = _provider_module()
+    player = _bare_player(provider)
+    player.is_group = True
+    player._attr_name = "Whole Apartment"
+    stopped = []
+    player.stop = lambda: _noop(stopped.append("stop"))
+
+    asyncio.run(player.power(False))
+    assert stopped == ["stop"]
+
+    asyncio.run(player.power(True))
+    assert stopped == ["stop"], "powering on must not stop what is playing"
+
+
+async def _noop(_value=None):
+    return None
+
+
+# --- retries that outlived their command -------------------------------------
+
+
+def _confirmable_player(provider):
+    """A player with both retry loops present and nothing else."""
+    player = _bare_player(provider)
+    player._transport_confirm = None
+    player._play_confirm = None
+    return player
+
+
+async def test_a_newer_command_cancels_a_retry_of_any_kind():
+    """Measured 2026-08-03 on the live group:
+
+        22:42:06  publish on Whole Apartment took 0.09s   <- a play starts
+        22:42:15  stop did not stick (Alexa reports PLAYING); resending
+        22:42:20  stop did not stick (Alexa reports PLAYING); resending
+        22:42:25  stop landed on attempt 3
+
+    The stop's confirm loop was still running when the next play began, read
+    the new playback as its own command having been dropped, and stopped the
+    speaker three times over twenty seconds. Each loop used to cancel only its
+    own predecessor, so a stop retry and a play retry could not see each other.
+    """
+    provider = _provider_module()
+    player = _confirmable_player(provider)
+
+    async def forever():
+        await asyncio.sleep(30)
+
+    stop_retry = asyncio.create_task(forever())
+    play_retry = asyncio.create_task(forever())
+    player._transport_confirm = stop_retry
+    player._play_confirm = play_retry
+
+    player._supersede_confirms()
+    await asyncio.sleep(0)
+
+    assert stop_retry.cancelled(), "a live stop retry must not outlive a new command"
+    assert play_retry.cancelled(), "nor a live play retry"
+    assert player._transport_confirm is None
+    assert player._play_confirm is None
+
+
+async def test_arming_a_transport_confirm_supersedes_a_play_confirm():
+    """The cross-kind case, which is the one that actually happened."""
+    provider = _provider_module()
+    player = _confirmable_player(provider)
+
+    async def forever():
+        await asyncio.sleep(30)
+
+    play_retry = asyncio.create_task(forever())
+    player._play_confirm = play_retry
+
+    async def send():
+        return None
+
+    player._reported_transport_state = send
+    player._confirm_transport("stop", frozenset({"PAUSED"}), send)
+    await asyncio.sleep(0)
+    assert play_retry.cancelled()
+    player._transport_confirm.cancel()
+
+
+def test_a_group_declares_itself_natively_playing():
+    """Music Assistant will not do it for a group, and without it every pause
+    on that group arrives here as a stop.
+
+    `_handle_play_media` marks a player as natively playing only when
+    `player.type != PlayerType.GROUP`, on the reasoning that a group delegates
+    to a sync leader. An Alexa speaker group has no leader to delegate to: it
+    is one endpoint that takes transport commands itself. Left unset,
+    `_get_control_target(player, PAUSE, require_active=True)` returns None and
+    `_handle_cmd_pause` takes its "does not support pause, using STOP instead"
+    branch.
+    """
+    provider = _provider_module()
+    source = inspect.getsource(provider.MaAlexaPlayer.play_media)
+
+    assert "set_active_output_protocol" in source, (
+        "a group must declare native playback or MA converts its pause to stop")
+    assert "self.is_group" in source, "only a group needs it; MA sets it for the rest"
+
+
+# --- the two layers, each in its own units -----------------------------------
+
+
+def _positioned_player(provider, offset_s=0.0):
+    player = _bare_player(provider)
+    player._stream_offset_s = offset_s
+    return player
+
+
+def test_a_position_is_reported_relative_to_where_the_stream_starts():
+    """MA adds the seek offset back on for a player that is not in flow mode:
+
+        elapsed_time = player_elapsed * speed
+        if seek_pos := queue.current_item.streamdetails.seek_position:
+            elapsed_time += seek_pos
+
+    Alexa reports absolute media time, because a seek here republishes the
+    whole track with `stream.offsetInMilliseconds`. Reporting that straight
+    through made every seek land twice.
+    """
+    provider = _provider_module()
+    player = _positioned_player(provider, offset_s=60.0)
+
+    player._report_position(75.0)          # Alexa: 75s into the track
+
+    assert player._attr_elapsed_time == 15.0, (
+        "MA adds the 60s offset back, so 15 + 60 = the 75 Alexa is really at")
+
+
+def test_a_plain_play_reports_the_position_unchanged():
+    """Nothing to subtract when nothing was sought."""
+    provider = _provider_module()
+    player = _positioned_player(provider)
+
+    player._report_position(42.0)
+
+    assert player._attr_elapsed_time == 42.0
+
+
+def test_a_position_never_goes_negative():
+    """Alexa can report a position below the offset for a moment around the
+    handover, and a negative elapsed time is not a thing MA can display."""
+    provider = _provider_module()
+    player = _positioned_player(provider, offset_s=60.0)
+
+    player._report_position(2.0)
+
+    assert player._attr_elapsed_time == 0.0

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+node_modules/
+dist/
+.astro/
+data/
+.claude/worktrees/
+tests/live/environment.json
+tests/live/results/
+.ruff_cache/
+.env

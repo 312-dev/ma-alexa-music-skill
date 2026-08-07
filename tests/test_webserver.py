@@ -1,0 +1,376 @@
+"""The aiohttp adapter: Music Assistant's front door when it runs inside MA.
+
+These drive the real `MaAlexaWebServer` over a real socket rather than calling
+its handlers, because almost everything that can go wrong in an adapter is in
+the seam it is supposed to hide. A handler returning the right tuple while
+aiohttp renders it as a 500 is exactly the failure this file exists to catch,
+and it is invisible to a test that calls the handler directly.
+
+Deliberately paired with the Flask suite rather than replacing it. The two
+adapters must agree, because Amazon cannot tell them apart, and
+`test_both_adapters_answer_the_same_way` is the check that they do.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import time
+
+import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
+
+from ma_provider import core, webserver
+from conftest import directive
+
+
+@pytest.fixture
+async def aio(fake_subsonic, monkeypatch):
+    """A live server on an ephemeral port, torn down with the test."""
+    import logging
+
+    server = webserver.MaAlexaWebServer(logging.getLogger("test-ma_alexa"))
+    application = web.Application()
+    application.add_routes(server._routes())
+
+    # The pool the handlers hop through is normally created in start(), which
+    # also binds a port and starts mDNS. Neither belongs in a unit test, so the
+    # pool is supplied directly and the rest is left alone.
+    from concurrent.futures import ThreadPoolExecutor
+    server._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-web")
+
+    client = TestClient(TestServer(application))
+    await client.start_server()
+    try:
+        yield client
+    finally:
+        await client.close()
+        server._pool.shutdown(wait=False)
+
+
+# --- the shapes an adapter has to render ------------------------------------
+
+
+async def test_a_directive_round_trips(aio):
+    resp = await aio.post("/music", json=directive(
+        "Alexa.Media.Search", "GetPlayableContent", {"filters": {}}, "1.0"))
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["header"]["namespace"] == "Alexa.Media.Search"
+
+
+async def test_the_root_answers_a_directive_and_a_browser(aio):
+    """Both, on one path. A 405 here is a black screen in the Alexa app."""
+    posted = await aio.post("/", json=directive(
+        "Alexa.Media.Search", "GetPlayableContent", {"filters": {}}, "1.0"))
+    assert posted.status == 200
+
+    got = await aio.get("/")
+    assert got.status == 200
+    assert got.headers["Content-Type"].startswith("text/html")
+    assert "Music Assistant" in await got.text()
+
+
+async def test_a_page_carries_its_charset(aio):
+    """`Page` states one content type string; aiohttp wants it in two parts."""
+    resp = await aio.get("/privacy")
+    assert resp.status == 200
+    assert resp.headers["Content-Type"] == "text/html; charset=utf-8"
+
+
+async def test_healthz_is_public_and_says_nothing_else(aio):
+    resp = await aio.get("/healthz")
+    assert resp.status == 200
+    assert await resp.json() == {"ok": True}
+
+
+async def test_an_icon_is_sent_with_no_validators(aio):
+    """Amazon's manifest validator fails the whole update on a 304.
+
+    So the icon route must never emit an ETag or a Last-Modified, which is why
+    core returns the bytes rather than a path for this one route. An adapter
+    that "helpfully" served it as a file would reintroduce the bug.
+    """
+    resp = await aio.get("/icons/ma-512.png")
+    assert resp.status == 200
+    assert resp.headers["Cache-Control"] == "no-store"
+    assert "ETag" not in resp.headers
+    assert "Last-Modified" not in resp.headers
+
+
+async def test_a_path_outside_the_icon_directory_is_refused(aio):
+    resp = await aio.get("/icons/../core.py")
+    assert resp.status in (400, 404)
+
+
+# --- signed asset routes ----------------------------------------------------
+
+
+async def test_a_bad_signature_is_refused(aio):
+    import time
+    resp = await aio.get(f"/stream/t1/{int(time.time()) + 60}/{'0' * 32}")
+    assert resp.status == 403
+
+
+async def test_a_non_numeric_expiry_is_refused_rather_than_raising(aio):
+    """Flask's route converter parsed this; aiohttp hands over the raw string.
+
+    Without the explicit int() the signature check would raise on the way in
+    and the adapter would answer 500 to something that is simply not signed.
+    """
+    resp = await aio.get("/stream/t1/not-a-number/" + "0" * 32)
+    assert resp.status == 403
+
+
+async def test_a_signed_stream_is_piped_through(aio, monkeypatch):
+    seen = []
+
+    def fake_fetch(url, range_header=None, default_content_type=""):
+        seen.append((url, range_header))
+        return core.Upstream(200, {"Content-Type": "audio/mpeg"},
+                             io.BytesIO(b"the audio"))
+
+    monkeypatch.setattr(core, "fetch_upstream", fake_fetch)
+    url, expires = core.signed_url("stream", "t1")
+    resp = await aio.get(url[url.index("/stream/"):])
+
+    assert resp.status == 200
+    assert await resp.read() == b"the audio"
+    assert seen and seen[0][0].endswith("t1.mp3")
+
+
+async def test_a_range_header_reaches_the_upstream(aio, monkeypatch):
+    """The room-to-room move and the scrub both arrive as a Range."""
+    seen = []
+
+    def fake_fetch(url, range_header=None, default_content_type=""):
+        seen.append(range_header)
+        return core.Upstream(206, {"Content-Type": "audio/mpeg",
+                                   "Content-Range": "bytes 10-99/100"},
+                             io.BytesIO(b"tail"))
+
+    monkeypatch.setattr(core, "fetch_upstream", fake_fetch)
+    url, _expires = core.signed_url("stream", "t1")
+    resp = await aio.get(url[url.index("/stream/"):],
+                         headers={"Range": "bytes=10-"})
+
+    assert resp.status == 206
+    assert resp.headers["Content-Range"] == "bytes 10-99/100"
+    assert seen == ["bytes=10-"]
+
+
+async def test_a_buffered_track_is_served_as_a_real_file(aio, monkeypatch, tmp_path):
+    """A LocalFile answer must become a 206-capable response.
+
+    This is the whole reason `core` hands back a path instead of bytes: seeking
+    a Music Assistant track depends on the adapter's own range handling.
+    """
+    from ma_provider import mastream_cache, stream_ref
+
+    ref = stream_ref.encode_ref("deezer://track/3135556")
+    audio = tmp_path / "buffered.mp3"
+    audio.write_bytes(b"0123456789" * 10)
+
+    monkeypatch.setattr(mastream_cache, "ENABLED", True)
+    monkeypatch.setattr(mastream_cache, "path_for", lambda _r: audio)
+    monkeypatch.setattr(mastream_cache, "ensure", lambda _r: audio)
+
+    _url, expires = core.signed_url("mastream", ref)
+    sig = core.sign("mastream", ref, expires)
+    resp = await aio.get(f"/mastream/{ref}/{expires}/{sig}",
+                         headers={"Range": "bytes=5-14"})
+
+    assert resp.status == 206, "a scrub must get a partial response"
+    assert await resp.read() == b"5678901234"
+
+
+# --- admin plane ------------------------------------------------------------
+
+
+async def test_captures_needs_a_token(aio):
+    assert (await aio.get("/captures")).status == 401
+
+
+async def test_diag_needs_a_token(aio):
+    assert (await aio.get("/diag")).status == 401
+
+
+async def test_captures_accepts_the_token_from_a_local_peer(aio):
+    resp = await aio.get("/captures", headers={"X-Admin-Token": "test-admin-token"})
+    assert resp.status == 200
+
+
+# --- OAuth ------------------------------------------------------------------
+
+
+async def test_authorize_refuses_a_foreign_redirect(aio):
+    resp = await aio.get("/oauth/authorize", params={
+        "client_id": "ma-alexa", "response_type": "code",
+        "redirect_uri": "https://evil.example.com/steal",
+    })
+    assert resp.status == 400
+
+
+async def test_the_link_flow_redirects_with_a_code(aio):
+    resp = await aio.post("/oauth/authorize", data={
+        "redirect_uri": "https://pitangui.amazon.com/api/skill/link/V1",
+        "state": "abc", "passphrase": "test-link-secret",
+    }, allow_redirects=False)
+    assert resp.status == 302
+    location = resp.headers["Location"]
+    assert location.startswith("https://pitangui.amazon.com/api/skill/link/V1?")
+    assert "state=abc" in location
+
+
+async def test_a_wrong_passphrase_is_refused(aio):
+    resp = await aio.post("/oauth/authorize", data={
+        "redirect_uri": "https://pitangui.amazon.com/api/skill/link/V1",
+        "state": "abc", "passphrase": "wrong",
+    }, allow_redirects=False)
+    assert resp.status == 403
+
+
+# --- the handoff endpoint ---------------------------------------------------
+
+
+async def test_publishing_a_queue_needs_the_token(aio):
+    resp = await aio.post("/queue", json={"tracks": ["t1"]})
+    assert resp.status == 401
+
+
+async def test_a_published_queue_comes_back_by_token(aio, tmp_path, monkeypatch):
+    from ma_provider import queue_api
+
+    monkeypatch.setattr(queue_api, "STATE_DIR", tmp_path / "external")
+    queue_api.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    headers = {"X-Admin-Token": "test-admin-token"}
+    published = await aio.post("/queue", json={"tracks": ["t1", "t2"]},
+                               headers=headers)
+    assert published.status == 200
+    content_id = (await published.json())["content_id"]
+
+    token = content_id.split(":", 1)[1]
+    shown = await aio.get(f"/queue/{token}", headers=headers)
+    assert shown.status == 200
+    assert (await shown.json())["count"] == 2
+
+
+# --- the two adapters must not drift ----------------------------------------
+
+
+# --- a busy port ------------------------------------------------------------
+
+
+async def test_a_busy_port_does_not_take_the_provider_down(monkeypatch, caplog):
+    """The migration state, and the rollback state, both have two listeners.
+
+    Letting the OSError propagate would fail the whole provider and remove
+    every Echo from Music Assistant, which has nothing to do with whether a
+    socket is free. start() reports the failure instead of raising it.
+    """
+    import logging
+    import socket
+
+    held = socket.socket()
+    held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    held.bind(("127.0.0.1", 0))
+    held.listen(1)
+    port = held.getsockname()[1]
+
+    server = webserver.MaAlexaWebServer(
+        logging.getLogger("test-ma-alexa-busy"), port=port, host="127.0.0.1")
+    try:
+        with caplog.at_level(logging.ERROR):
+            started = await server.start()
+        assert started is False
+        assert server.serving is False
+        assert "could not bind" in caplog.text
+    finally:
+        await server.stop()
+        held.close()
+
+
+async def test_an_unconfigured_instance_does_not_serve_and_says_why(monkeypatch, caplog):
+    """MA is told these settings are optional, so the server checks them.
+
+    Marking them required made MA refuse to load the whole provider, which
+    removed every Echo player over an Alexa endpoint nobody had configured yet.
+    """
+    import logging
+
+    monkeypatch.setattr(core, "PUBLIC_BASE", "")
+    server = webserver.MaAlexaWebServer(
+        logging.getLogger("test-ma-alexa-unset"), port=0, host="127.0.0.1")
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert await server.start() is False
+        assert "public base URL" in caplog.text
+        assert "Echo players keep working" in caplog.text
+    finally:
+        await server.stop()
+
+
+async def test_a_free_port_reports_that_it_is_serving():
+    """The other half of the same signal, since the provider branches on it."""
+    import logging
+
+    server = webserver.MaAlexaWebServer(
+        logging.getLogger("test-ma-alexa-free"), port=0, host="127.0.0.1")
+    try:
+        assert await server.start() is True
+        assert server.serving is True
+    finally:
+        await server.stop()
+        assert server.serving is False
+
+
+# --- the Amazon developer-account callback ----------------------------------
+
+
+async def test_the_consent_callback_completes_the_link(aio, monkeypatch):
+    """Music Assistant cannot host this route, so this listener must.
+
+    Amazon redirects only to https, and this is the only listener on the
+    public origin. Without it, connecting the developer account from MA's
+    settings has nowhere to land.
+    """
+    from ma_provider import setup_ops, smapi_rest
+
+    exchanged = []
+    monkeypatch.setattr(smapi_rest, "complete",
+                        lambda code, cid, secret, verifier:
+                        exchanged.append((code, cid, verifier)) or {})
+    setup_ops._PENDING.clear()
+    setup_ops._PENDING.update({"state": "st", "verifier": "v", "at": time.time(),
+                               "client_id": "cid", "client_secret": "sec",
+                               "origin": ""})
+
+    response = await aio.get("/setup/oauth/callback?code=abc&state=st")
+    assert response.status == 200
+    assert "Connected to Amazon" in await response.text()
+    assert exchanged == [("abc", "cid", "v")]
+
+
+async def test_a_callback_nobody_asked_for_is_refused(aio):
+    """The state value is the whole protection on a route open to the world."""
+    from ma_provider import setup_ops
+
+    setup_ops._PENDING.clear()
+    response = await aio.get("/setup/oauth/callback?code=abc&state=forged")
+    assert response.status == 400
+    assert "did not match" in await response.text()
+
+
+async def test_amazon_reporting_an_error_does_not_look_like_success(aio):
+    from ma_provider import setup_ops
+
+    setup_ops._PENDING.clear()
+    setup_ops._PENDING.update({"state": "st", "verifier": "v", "at": time.time(),
+                               "client_id": "cid", "client_secret": "sec"})
+    response = await aio.get(
+        "/setup/oauth/callback?error=access_denied&error_description=nope")
+    assert response.status == 400
+    body = await response.text()
+    assert "access_denied" in body and "Connected" not in body

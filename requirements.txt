@@ -1,0 +1,11 @@
+# Music Assistant runs inside Music Assistant, which brings aiohttp and the rest of the
+# runtime with it. What is left here is what MA does not already have.
+
+# Request signature verification (signature.py). Optional at runtime: the
+# module degrades to an "unavailable" reason if it is not importable.
+cryptography==46.0.3
+
+# Optional. Only used when MDNS is set, to advertise <name>.local on the LAN,
+# which is a convenience for reaching the endpoint by name. Absent, mdns.py is
+# a no-op.
+zeroconf==0.148.0

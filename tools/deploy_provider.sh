@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Ship the Music Assistant provider to the box and make MA actually run it.
+#
+# Run from a checkout:  tools/deploy_provider.sh
+#
+# WHY A RESTART, AND WHY ONLY ONE
+#
+# MA loads a provider through `load_provider_module`, which is:
+#
+#     @lru_cache
+#     def _get_provider_module(domain):
+#         return importlib.import_module(f".{domain}", "music_assistant.providers")
+#
+# Two layers of caching over one import. So disabling and re-enabling the
+# provider, or calling `config/providers/reload`, re-runs `setup()` against the
+# module object already in memory and cannot pick up an edited file. Only a
+# fresh process re-reads the source.
+#
+# An earlier version of this script toggled `enabled` in settings.json around
+# two `docker kill`s. None of that was doing what it claimed:
+#
+#   - the toggle re-instantiated the provider, it never reloaded code
+#   - `docker kill` spends Nomad's restart budget, which on this job is
+#     `Attempts = 2, Interval = 30m, Mode = fail`. Two kills exhaust it in one
+#     run, and the third death drops the job into an exponential reschedule
+#     backoff that tops out at an hour. Measured 2026-08-03: MA sat dead for
+#     four minutes and would have sat there far longer untouched.
+#
+# One Nomad-issued restart does the whole job. `Total Restarts` is per
+# allocation, so when the budget is spent a force-reschedule brings up a fresh
+# allocation with a fresh budget rather than waiting the interval out.
+#
+# VERIFYING IT LANDED
+#
+# The provider logs `ma_alexa provider build <stamp>` at load, where the stamp is
+# a digest of its own source. This script prints the local digest and the one
+# MA reports, and fails if they differ. That is the check that would have made
+# a wrong bind-mount path, a missed rsync or a stale process visible in
+# seconds instead of hours.
+set -euo pipefail
+
+BOX=${MA_ALEXA_BOX:-my-box}
+SSH=(ssh -o BatchMode=yes "$BOX")
+REMOTE_DIR=/opt/ma_alexa/ma_provider
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+WANT=$(python3 "$ROOT/tools/build_stamp.py" "$ROOT/ma_provider")
+echo "==> local build $WANT"
+
+rsync -az --delete --exclude __pycache__ -e "ssh -o BatchMode=yes" \
+  "$ROOT/ma_provider/" "$BOX:$REMOTE_DIR/"
+echo "==> synced to $BOX:$REMOTE_DIR"
+
+# Skill icons live beside ma_provider and are bind-mounted to /app/icons. If they
+# are missing, Alexa's hourly re-provision fails on the icon URLs and the binding
+# decays into "plays something random", so keep them in sync on every deploy.
+rsync -az --delete -e "ssh -o BatchMode=yes" \
+  "$ROOT/icons/" "$BOX:/opt/ma_alexa/icons/"
+echo "==> synced icons to $BOX:/opt/ma_alexa/icons"
+
+# The container name is app-<alloc-id> and the alloc id changes on every
+# restart, so it is looked up fresh every time rather than remembered.
+alloc() {
+  "${SSH[@]}" 'nomad job allocs -json music-assistant 2>/dev/null' |
+    python3 -c 'import json,sys
+running = [a["ID"] for a in json.load(sys.stdin) if a["ClientStatus"] == "running"]
+print(running[0] if running else "")'
+}
+
+A=$(alloc)
+if [[ -n "$A" ]] && "${SSH[@]}" "nomad alloc restart $A" >/dev/null 2>&1; then
+  echo "==> restarted allocation ${A%%-*}"
+else
+  # Either nothing was running or the restart budget is spent. A new
+  # allocation is the way out of both.
+  echo "==> restart unavailable, rescheduling the job"
+  "${SSH[@]}" 'nomad job eval -force-reschedule music-assistant' >/dev/null
+fi
+
+echo "==> waiting for the provider to report its build"
+GOT=""
+for _ in $(seq 1 60); do
+  A=$(alloc)
+  if [[ -n "$A" ]]; then
+    GOT=$("${SSH[@]}" "docker logs --since 5m app-$A 2>&1" |
+      sed 's/\x1b\[[0-9;]*m//g' |
+      grep -oE 'ma_alexa provider build [0-9a-f]+' | tail -1 | awk '{print $4}') || true
+    [[ -n "$GOT" ]] && break
+  fi
+  sleep 5
+done
+
+if [[ "$GOT" != "$WANT" ]]; then
+  echo "==> FAILED: Music Assistant is running build '${GOT:-none}', not $WANT" >&2
+  exit 1
+fi
+
+# Waited for, not counted once. Discovery is an Amazon round trip that lands a
+# second or two after the provider logs its build, so counting immediately
+# reported zero players on a deploy where all ten came up fine. A verification
+# step that says "0 players" when there are ten is worse than none: it trains
+# the reader to ignore the one line that would tell them the deploy broke
+# playback.
+COUNT=0
+for _ in $(seq 1 24); do
+  COUNT=$("${SSH[@]}" "docker logs --since 5m app-$A 2>&1" |
+    sed 's/\x1b\[[0-9;]*m//g' | grep -coE 'registered: ma-alexa--[^ ]+' || true)
+  [[ "$COUNT" -gt 0 ]] && break
+  sleep 5
+done
+
+if [[ "$COUNT" -eq 0 ]]; then
+  echo "==> FAILED: build $GOT is running but no players registered" >&2
+  exit 1
+fi
+echo "==> running build $GOT, $COUNT players registered"
