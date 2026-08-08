@@ -4,12 +4,16 @@
   "stage": "experimental",
   "name": "Alexa",
   "description": "Play your Music Assistant library on Echo devices and Alexa speaker groups, as a native Alexa queue with per-track metadata.",
-  "codeowners": ["@GraysonCAdams"],
+  "codeowners": [
+    "@GraysonCAdams"
+  ],
   "credits": [
     "[alexapy](https://gitlab.com/keatontaylor/alexapy)",
     "[alexa provider](https://github.com/music-assistant/server/tree/master/music_assistant/providers/alexa) by @alams154, whose auth and discovery this follows"
   ],
-  "requirements": ["alexapy==1.29.17"],
+  "requirements": [
+    "alexapy==1.30.0"
+  ],
   "documentation": "https://github.com/312-dev/ma-alexa-music-skill/blob/main/ma_provider/README.md",
   "multi_instance": true,
   "builtin": false
