@@ -84,12 +84,14 @@ git clone https://github.com/312-dev/ma-alexa-music-skill && cd ma-alexa-music-s
 # then restart Music Assistant.
 ```
 
-Then add the provider in Music Assistant's settings. Setup is eight
-numbered steps in that settings page, each one appearing as the previous
-completes: music server, public endpoint, Amazon account, invocation name,
-create the skill, create the catalogs, upload your library, enable the skill.
+Then add the provider in Music Assistant's settings. You answer four things,
+each unlocking the next: music server, public endpoint, Amazon account,
+invocation name. Then one **Set up Music Assistant** button does the rest,
+creating the skill, the catalogs, uploading your library and enabling the skill
+in a single action. After that the page becomes a **Sync now** button, with
+every individual step still there under Advanced for re-running or recovery.
 
-The endpoint step is worth reading rather than clicking through. It validates
+The endpoint answer is worth reading rather than clicking through. It validates
 that Amazon can actually reach you **before** the skill is created, and every
 check in it corresponds to a failure that produces no error message anywhere:
 a public base pointing at a tailnet address, a wildcard certificate declared as
