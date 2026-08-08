@@ -131,8 +131,9 @@ class MaAlexaWebServer:
 
         self.logger.info("Music Assistant endpoint listening on port %s", self.port)
 
-        # Optional, and a no-op unless MDNS is set.
-        await self._in_thread(core.advertise, self.port)
+        # mDNS advertising is not raised here: it registers on MA's shared
+        # zeroconf responder and is async, so the provider drives it from its
+        # own lifecycle where `mass` is in hand. See MaAlexaProvider.
         # Only now, and only if a music server has been named. This used to
         # fire at import, which made Music Assistant's startup issue Subsonic
         # requests before anything had told Music Assistant where Subsonic is.

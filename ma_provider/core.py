@@ -63,7 +63,6 @@ from html import escape
 from . import access
 from . import logring
 from . import mastream_cache
-from . import mdns
 from . import oauth
 from . import queue_api
 from . import queuestate
@@ -2337,16 +2336,6 @@ def terms() -> Page:
 # --------------------------------------------------------------------------
 # process startup
 # --------------------------------------------------------------------------
-
-
-def advertise(port: int) -> None:
-    """Announce the service on the local network, if MDNS is configured.
-
-    Takes the port rather than reading it, because the two adapters do not
-    listen on the same one: standalone owns its port outright, while inside
-    Music Assistant this is a second listener alongside MA's own.
-    """
-    mdns.advertise(port)
 
 
 def warm_up() -> None:

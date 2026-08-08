@@ -13,28 +13,32 @@ out, and the failure looks like the service is down rather than like a
 networking choice. So this refuses to advertise an address it can tell is
 unreachable, and says why.
 
-Requires `network_mode: host` (or a macvlan). Requires the `zeroconf` package,
-which is optional: absent, this is a no-op with one log line.
+Requires `network_mode: host` (or a macvlan).
+
+The responder is Music Assistant's own. MA already runs one shared
+`AsyncZeroconf` for every provider that announces or discovers a service, so
+this registers on `mass.discovery.aiozc` rather than standing up a second
+responder that would then fight MA's for port 5353. Registration and teardown
+are async, and the provider drives both from its own lifecycle: it holds `mass`
+and it is the thing whose load and unload the advertisement should follow.
 """
 
 from __future__ import annotations
 
-import atexit
 import ipaddress
 import logging
 import os
-import socket
+from typing import Any
+
+from zeroconf.asyncio import AsyncServiceInfo
 
 logger = logging.getLogger("ma-music-skill.mdns")
 
-try:
-    from zeroconf import ServiceInfo, Zeroconf
-
-    HAVE_ZEROCONF = True
-except ImportError:  # pragma: no cover, exercised by the absence test
-    ServiceInfo = Zeroconf = None
-    HAVE_ZEROCONF = False
-
+# A never-routed address (TEST-NET-1). Connecting a UDP socket toward it and
+# reading back the local end is the portable way to ask the routing table which
+# interface would be used, without sending anything or needing the destination
+# to exist. MA's `get_source_ip_for_target` does exactly this.
+_PROBE_TARGET = "192.0.2.1"
 
 # Docker's own default pools. An address in one of these means the container is
 # almost certainly on a bridge network, where advertising is pointless.
@@ -45,7 +49,11 @@ _DOCKER_POOLS = [
     ipaddress.ip_network("172.20.0.0/14"),
 ]
 
-_zc = None
+# The registered service and the responder it went on, kept so stop() can
+# withdraw it. At module scope because advertise and stop are wired to two
+# different points of the provider's lifecycle.
+_info: AsyncServiceInfo | None = None
+_aiozc: Any = None
 
 
 def enabled() -> bool:
@@ -58,21 +66,17 @@ def service_name() -> str:
     return "".join(c for c in raw if c.isalnum() or c == "-").strip("-") or "ma-alexa"
 
 
-def primary_address() -> str | None:
+async def primary_address() -> str | None:
     """The address other machines on this link would reach us on.
 
-    Opening a UDP socket toward a public address and reading back the local
-    end is the portable way to ask the routing table which interface would be
-    used, without sending anything or needing the destination to exist.
+    Delegates to Music Assistant's own routing-table probe rather than opening a
+    socket by hand, so the bridge asks the interface question the same way MA
+    asks it everywhere else. MA answers "" when no route can be determined;
+    normalise that to None.
     """
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        probe.connect(("192.0.2.1", 9))  # TEST-NET-1, never routed anywhere
-        return probe.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        probe.close()
+    from music_assistant.helpers.util import get_source_ip_for_target
+
+    return (await get_source_ip_for_target(_PROBE_TARGET)) or None
 
 
 def reachable(address: str) -> bool:
@@ -85,20 +89,30 @@ def reachable(address: str) -> bool:
     return not any(parsed in pool for pool in _DOCKER_POOLS)
 
 
-def advertise(port: int) -> bool:
-    """Register the service. Returns whether anything was published."""
-    global _zc
+async def _addresses(address: str) -> list[bytes]:
+    """The advertised address, packed the way zeroconf wants it.
+
+    Via MA's helper, which handles both address families where the previous
+    `socket.inet_aton` was IPv4 only.
+    """
+    from music_assistant.helpers.util import get_ip_pton
+
+    return [await get_ip_pton(address)]
+
+
+async def advertise(mass: Any, port: int) -> bool:
+    """Register the service on MA's shared responder. Returns whether it published.
+
+    Takes the port rather than reading it, because the two adapters do not
+    listen on the same one: standalone owns its port outright, while inside
+    Music Assistant this is a second listener alongside MA's own.
+    """
+    global _info, _aiozc
 
     if not enabled():
         return False
-    if not HAVE_ZEROCONF:
-        logger.warning(
-            "MDNS is set but the zeroconf package is not installed, so no name "
-            "is being advertised. Install it, or reach setup by address."
-        )
-        return False
 
-    address = primary_address()
+    address = await primary_address()
     if not address:
         logger.warning("MDNS is set but no outbound address could be determined")
         return False
@@ -117,33 +131,34 @@ def advertise(port: int) -> bool:
 
     name = service_name()
     try:
-        info = ServiceInfo(
+        info = AsyncServiceInfo(
             "_http._tcp.local.",
             f"{name}._http._tcp.local.",
-            addresses=[socket.inet_aton(address)],
+            addresses=await _addresses(address),
             port=port,
             properties={"path": "/setup"},
             server=f"{name}.local.",
         )
-        _zc = Zeroconf()
-        _zc.register_service(info)
+        await mass.discovery.aiozc.async_register_service(info)
     except Exception:
         # Port 5353 is often already held by an Avahi or Bonjour responder on
-        # the host. That is a reason to skip advertising, never a reason to
-        # stop the bridge from serving music.
+        # the host, and a name still registered from a prior load raises too.
+        # Either is a reason to skip advertising, never a reason to stop the
+        # bridge from serving music.
         logger.exception("mDNS registration failed, continuing without it")
-        _zc = None
+        _info = _aiozc = None
         return False
 
-    atexit.register(stop)
+    _info = info
+    _aiozc = mass.discovery.aiozc
     logger.info("advertising http://%s.local:%d/setup at %s", name, port, address)
     return True
 
 
-def stop() -> None:
-    global _zc
-    if _zc is not None:
+async def stop() -> None:
+    global _info, _aiozc
+    if _info is not None and _aiozc is not None:
         try:
-            _zc.close()
+            await _aiozc.async_unregister_service(_info)
         finally:
-            _zc = None
+            _info = _aiozc = None

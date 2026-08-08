@@ -55,7 +55,7 @@ from music_assistant_models.player import DeviceInfo, PlayerMedia
 from music_assistant.models.player import Player
 from music_assistant.models.player_provider import PlayerProvider
 
-from . import alexapy_compat, core
+from . import alexapy_compat, core, mdns
 from . import push, push_auth, push_events, push_router, push_signin, settings
 from . import setup_ops, subsonic_patch
 from .bridge import BridgeClient, BridgeError, LocalBridge
@@ -2108,6 +2108,13 @@ class MaAlexaProvider(PlayerProvider):
             port = int(self.config.get_value(CONF_ENDPOINT_PORT) or DEFAULT_PORT)
             self.webserver = MaAlexaWebServer(self.logger, port=port)
             serving = await self.webserver.start()
+            # Advertise the endpoint over MA's shared zeroconf responder, once
+            # the listener is actually up. Optional and a no-op unless MDNS is
+            # set; never allowed to fail the load, since a name is a convenience
+            # and the endpoint is reachable by address regardless.
+            if serving:
+                with contextlib.suppress(Exception):
+                    await mdns.advertise(self.mass, port)
 
         # Publish where the endpoint actually is, which is not the same as
         # where it was configured to be. A published queue is a file on disk,
@@ -2185,6 +2192,10 @@ class MaAlexaProvider(PlayerProvider):
                 unregister()
         with contextlib.suppress(Exception):
             subsonic_patch.restore(self.logger)
+        # Withdraw the mDNS name from MA's shared responder before the endpoint
+        # it points at goes away. A no-op unless advertise() published one.
+        with contextlib.suppress(Exception):
+            await mdns.stop()
         if self.webserver is not None:
             await self.webserver.stop()
             self.webserver = None
