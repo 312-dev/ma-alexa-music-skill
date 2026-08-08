@@ -2196,6 +2196,14 @@ class MaAlexaProvider(PlayerProvider):
         # it points at goes away. A no-op unless advertise() published one.
         with contextlib.suppress(Exception):
             await mdns.stop()
+        # Tear down the module-level thread pools so a reload does not leak the
+        # old worker threads and stack a second pool on top. Each rebuilds
+        # lazily on next use.
+        from . import mastream_cache, queue_api
+
+        for module in (core, queue_api, mastream_cache):
+            with contextlib.suppress(Exception):
+                module.shutdown_pool()
         if self.webserver is not None:
             await self.webserver.stop()
             self.webserver = None

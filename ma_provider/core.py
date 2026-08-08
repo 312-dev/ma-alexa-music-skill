@@ -49,6 +49,7 @@ import os
 import pathlib
 import random
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -1179,7 +1180,29 @@ CONTENT_TYPES = {
 
 _DESCRIBE_CACHE: OrderedDict[str, tuple[str | None, str | None]] = OrderedDict()
 _DESCRIBE_CACHE_MAX = 8192
-_WARM_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="describe-warm")
+# Created lazily and torn down with the provider (see shutdown_pool), so a
+# reload does not leak the old threads and stack a second pool on top.
+_WARM_POOL: ThreadPoolExecutor | None = None
+_WARM_POOL_LOCK = threading.Lock()
+
+
+def _warm_pool() -> ThreadPoolExecutor:
+    global _WARM_POOL
+    with _WARM_POOL_LOCK:
+        if _WARM_POOL is None:
+            _WARM_POOL = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="describe-warm"
+            )
+        return _WARM_POOL
+
+
+def shutdown_pool() -> None:
+    """Release the warm pool so a later use lazily builds a fresh one."""
+    global _WARM_POOL
+    with _WARM_POOL_LOCK:
+        pool, _WARM_POOL = _WARM_POOL, None
+    if pool is not None:
+        pool.shutdown(wait=False)
 
 
 def prewarm_artists() -> None:
@@ -1243,7 +1266,7 @@ def describe_content(prefix: str, native: str) -> tuple[str | None, str | None]:
     if key in _DESCRIBE_CACHE:
         _DESCRIBE_CACHE.move_to_end(key)
         return _DESCRIBE_CACHE[key]
-    _WARM_POOL.submit(_warm, key, prefix, native)
+    _warm_pool().submit(_warm, key, prefix, native)
     return None, None
 
 
@@ -1329,7 +1352,7 @@ def station_content(artist_id: str, spoken: str | None) -> dict:
     # artist, and Initiate follows about a second later. Warm it off the
     # request path so that second is spent usefully rather than on Amazon's
     # clock.
-    _WARM_POOL.submit(resolve_tracks, f"rad:{artist_id}")
+    _warm_pool().submit(resolve_tracks, f"rad:{artist_id}")
     return envelope(
         "Alexa.Media.Search",
         "GetPlayableContent.Response",
@@ -1643,7 +1666,7 @@ def handle_initiate(payload: dict) -> dict:
     # is the one moment with no slack at all. A directly requested rad: queue
     # already warms during GetPlayableContent; this gives a queue that will
     # continue into one the same treatment.
-    _WARM_POOL.submit(warm_continuation, content_id)
+    _warm_pool().submit(warm_continuation, content_id)
 
     return envelope(
         "Alexa.Media.Playback",
@@ -2352,4 +2375,4 @@ def warm_up() -> None:
     if not subsonic.configured():
         logger.debug("no music server configured yet, not warming the cache")
         return
-    _WARM_POOL.submit(prewarm_artists)
+    _warm_pool().submit(prewarm_artists)

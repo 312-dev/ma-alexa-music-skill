@@ -97,7 +97,29 @@ ENABLED = os.environ.get("MA_STREAM_CACHE", "1") != "0"
 # where nothing has asked yet.
 PREFETCH_AHEAD = int(os.environ.get("MA_CACHE_PREFETCH", "2"))
 
-_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="mastream-fetch")
+# Created lazily and torn down with the provider (see shutdown_pool), so a
+# reload does not leak the old threads and stack a second pool on top.
+_POOL: ThreadPoolExecutor | None = None
+_POOL_LOCK = threading.Lock()
+
+
+def _pool() -> ThreadPoolExecutor:
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is None:
+            _POOL = ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix="mastream-fetch"
+            )
+        return _POOL
+
+
+def shutdown_pool() -> None:
+    """Release the prefetch pool so a later use lazily builds a fresh one."""
+    global _POOL
+    with _POOL_LOCK:
+        pool, _POOL = _POOL, None
+    if pool is not None:
+        pool.shutdown(wait=False)
 
 # ref -> lock. One fetch per track, however many requests arrive for it: four
 # Echoes in a group starting together is the normal case, not the exception.
@@ -217,7 +239,7 @@ def prefetch(refs: list[str]) -> None:
             if ref in _INFLIGHT:
                 continue
             _INFLIGHT.add(ref)
-        _POOL.submit(_prefetch_one, ref)
+        _pool().submit(_prefetch_one, ref)
 
 
 def _prefetch_one(ref: str) -> None:

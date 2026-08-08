@@ -38,6 +38,7 @@ import logging
 import os
 import pathlib
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -83,7 +84,30 @@ TOKEN_BYTES = 12
 # on a LAN or a tailnet, and they are the only thing standing between pressing
 # play and hearing music, so the queue is fetched in as few round trips as the
 # server will take rather than in careful batches of eight.
-_FETCH_POOL = ThreadPoolExecutor(max_workers=32, thread_name_prefix="extq-fetch")
+#
+# Created lazily and torn down with the provider (see shutdown_pool), so a
+# reload does not leak the old threads and stack a second pool on top.
+_FETCH_POOL: ThreadPoolExecutor | None = None
+_FETCH_POOL_LOCK = threading.Lock()
+
+
+def _fetch_pool() -> ThreadPoolExecutor:
+    global _FETCH_POOL
+    with _FETCH_POOL_LOCK:
+        if _FETCH_POOL is None:
+            _FETCH_POOL = ThreadPoolExecutor(
+                max_workers=32, thread_name_prefix="extq-fetch"
+            )
+        return _FETCH_POOL
+
+
+def shutdown_pool() -> None:
+    """Release the fetch pool so a later use lazily builds a fresh one."""
+    global _FETCH_POOL
+    with _FETCH_POOL_LOCK:
+        pool, _FETCH_POOL = _FETCH_POOL, None
+    if pool is not None:
+        pool.shutdown(wait=False)
 
 
 # --------------------------------------------------------------------------
@@ -450,7 +474,7 @@ def _songs_from_tracks(tracks: list) -> tuple[list[str], list[dict]]:
 
     # Only the bare Subsonic ids need a round trip; an MA track and a
     # pre-resolved Subsonic track both arrived complete.
-    fetched = dict(zip(subsonic_ids, _FETCH_POOL.map(_fetch, subsonic_ids)))
+    fetched = dict(zip(subsonic_ids, _fetch_pool().map(_fetch, subsonic_ids)))
     songs = []
     for position, key in enumerate(keys):
         song = prepared.get(position) or fetched.get(key)
